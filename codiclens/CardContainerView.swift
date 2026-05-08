@@ -46,17 +46,23 @@ struct CardContainerView: View {
             guard !suppressSync else { return }
 
             if coordinator.phase == .searchingSubject
-                        && coordinator.subjectVM.isSearchCommitted {
+                        && coordinator.subjectVM.isSearchCommitted
+                        && !coordinator.isTextMode {
                 if newValue.count > oldValue.count {
                     let added = String(newValue.dropFirst(oldValue.count))
                     suppressSync = true
                     textProxy = added
                     coordinator.currentSearchText = added
                     DispatchQueue.main.async { self.suppressSync = false }
-                } else {
+                } else if newValue.isEmpty {
                     suppressSync = true
                     textProxy = ""
                     coordinator.currentSearchText = ""
+                    DispatchQueue.main.async { self.suppressSync = false }
+                } else {
+                    suppressSync = true
+                    textProxy = newValue
+                    coordinator.currentSearchText = newValue
                     DispatchQueue.main.async { self.suppressSync = false }
                 }
             } else {

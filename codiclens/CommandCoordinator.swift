@@ -41,6 +41,13 @@ class CommandCoordinator {
         phase == .browsingClipboard
     }
 
+    var isTextMode: Bool {
+        let vm = subjectVM
+        guard vm.selectedIndex < vm.results.count else { return false }
+        if case .text = vm.results[vm.selectedIndex].kind { return true }
+        return vm.searchText.contains(" ")
+    }
+
     var isEditingClipboardItem: Bool = false
     var clipboardEditText: String = ""
 
@@ -168,6 +175,10 @@ class CommandCoordinator {
         case .pickingTarget:
             retreatPhase()
             return true
+        case .searchingSubject where isTextMode:
+            subjectVM.reset()
+            focusTrigger.toggle()
+            return true
         case .showingResult, .pickingAction, .browsingClipboard, .searchingSubject:
             return false
         }
@@ -291,7 +302,18 @@ class CommandCoordinator {
             if action.isFinal {
                 if case .transform(let t) = action.handler, case .text(let rawText) = subject.kind {
                     let result = t.apply(rawText)
-                    phase = .showingResult(result)
+                    let textIcon = NSImage(systemSymbolName: "text.quote", accessibilityDescription: nil) ?? NSImage()
+                    textIcon.size = NSSize(width: 32, height: 32)
+                    let newSubject = Subject(
+                        displayName: result,
+                        path: nil,
+                        url: nil,
+                        icon: textIcon,
+                        kind: .text(rawText: result)
+                    )
+                    selectedSubject = newSubject
+                    subjectVM.searchText = result
+                    actionVM.loadActions(for: newSubject)
                     onPhaseChange?()
                 } else {
                     executeAction(action, on: subject)
