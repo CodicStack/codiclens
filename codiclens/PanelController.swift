@@ -13,6 +13,8 @@ class PanelController {
     private let quickLookHelper = QuickLookHelper()
     private(set) var quickLookActive = false
     private var showResultsWork: DispatchWorkItem?
+    private var animatingTargetWidth: CGFloat?
+    private var animatingTargetOriginX: CGFloat?
 
     private let cardWidth: CGFloat = 260
     private let cardHeight: CGFloat = 240
@@ -143,6 +145,9 @@ class PanelController {
         let deltaW = newWidth - currentFrame.width
         let newX = currentFrame.origin.x - deltaW / 2
 
+        animatingTargetWidth = newWidth
+        animatingTargetOriginX = newX
+
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.25
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -150,6 +155,9 @@ class PanelController {
                 NSRect(x: newX, y: currentFrame.origin.y, width: newWidth, height: self.cardHeight),
                 display: false
             )
+        } completionHandler: { [weak self] in
+            self?.animatingTargetWidth = nil
+            self?.animatingTargetOriginX = nil
         }
 
         positionResultsPanel(overrideWidth: newWidth, originX: newX)
@@ -302,9 +310,9 @@ class PanelController {
 
     private func positionResultsPanel(overrideWidth: CGFloat? = nil, originX: CGFloat? = nil) {
         let cardFrame = cardPanel.frame
-        let w = overrideWidth ?? cardFrame.width
+        let w = overrideWidth ?? animatingTargetWidth ?? cardFrame.width
         let h = resultsHeight()
-        let x = originX ?? cardFrame.origin.x
+        let x = originX ?? animatingTargetOriginX ?? cardFrame.origin.x
         let y = cardFrame.origin.y - h - 8
 
         resultsPanel.setFrame(NSRect(x: x, y: y, width: w, height: h), display: false)

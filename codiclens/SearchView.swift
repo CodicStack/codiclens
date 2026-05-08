@@ -78,7 +78,7 @@ struct ResultsListView: View {
 
     private var hints: [String] {
         if coordinator.isEditingClipboardItem {
-            return ["⌘E save", "⇥ save+actions", "esc cancel"]
+            return ["⌘E save", "⇥ save+actions"]
         }
         if coordinator.phase == .browsingClipboard {
             let item = coordinator.currentClipboardItem

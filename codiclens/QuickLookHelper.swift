@@ -29,8 +29,7 @@ struct QuickLookContext {
 
 class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
     private var context = QuickLookContext(items: [], selectedIndex: 0)
-    private var isDismissing = false
-    private var reloadGeneration = 0
+
     var onDismiss: (() -> Void)?
     var onMoveUp: (() -> QuickLookContext?)?
     var onMoveDown: (() -> QuickLookContext?)?
@@ -41,19 +40,20 @@ class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
         return panel.isVisible
     }
 
-    var isTransitioning: Bool {
-        isDismissing
-    }
+    var isTransitioning: Bool { false }
+
+    // MARK: - Public API
 
     @discardableResult
     func show(context: QuickLookContext) -> Bool {
         guard !context.isEmpty,
-              let panel = QLPreviewPanel.shared() else {
-            self.context = QuickLookContext(items: [], selectedIndex: 0)
-            return false
-        }
+              let panel = QLPreviewPanel.shared() else { return false }
 
-        showFresh(context: context, panel: panel)
+        self.context = context
+        panel.updateController()
+        panel.reloadData()
+        panel.currentPreviewItemIndex = context.clampedSelectedIndex
+        panel.makeKeyAndOrderFront(nil)
         return true
     }
 
@@ -62,24 +62,15 @@ class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
               let panel = QLPreviewPanel.shared(),
               panel.isVisible else { return }
 
-        let oldSelectedURL = selectedURL(in: self.context)
-        let newSelectedURL = selectedURL(in: context)
-
-        if oldSelectedURL != newSelectedURL {
-            showFresh(context: context, panel: panel)
-        } else {
-            self.context = context
-            panel.currentPreviewItemIndex = context.clampedSelectedIndex
-        }
+        self.context = context
+        panel.reloadData()
+        panel.currentPreviewItemIndex = context.clampedSelectedIndex
     }
 
     func dismiss() {
         guard QLPreviewPanel.sharedPreviewPanelExists(),
               let panel = QLPreviewPanel.shared() else { return }
-        isDismissing = true
-        clearPanel(panel)
         panel.close()
-        isDismissing = false
     }
 
     // MARK: - Data Source
@@ -121,58 +112,7 @@ class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
     }
 
     func windowWillClose(_ notification: Notification) {
-        guard !isDismissing else { return }
         context = QuickLookContext(items: [], selectedIndex: 0)
         onDismiss?()
-    }
-
-    func windowDidResignKey(_ notification: Notification) {
-        guard !isDismissing else { return }
-
-        DispatchQueue.main.async { [weak self] in
-            guard let self,
-                  !self.isDismissing,
-                  !self.isVisible else { return }
-            self.context = QuickLookContext(items: [], selectedIndex: 0)
-            self.onDismiss?()
-        }
-    }
-
-    private func selectedURL(in context: QuickLookContext) -> URL? {
-        guard context.items.indices.contains(context.clampedSelectedIndex) else { return nil }
-        return context.items[context.clampedSelectedIndex].url
-    }
-
-    private func showFresh(context: QuickLookContext, panel: QLPreviewPanel) {
-        reloadGeneration += 1
-        let generation = reloadGeneration
-
-        isDismissing = true
-        clearPanel(panel)
-        panel.close()
-
-        DispatchQueue.main.async { [weak self] in
-            guard let self,
-                  generation == self.reloadGeneration,
-                  let panel = QLPreviewPanel.shared() else {
-                self?.isDismissing = false
-                return
-            }
-
-            self.context = context
-            panel.updateController()
-            panel.displayState = nil
-            panel.reloadData()
-            panel.currentPreviewItemIndex = context.clampedSelectedIndex
-            panel.makeKeyAndOrderFront(nil)
-            self.isDismissing = false
-        }
-    }
-
-    private func clearPanel(_ panel: QLPreviewPanel) {
-        context = QuickLookContext(items: [], selectedIndex: 0)
-        panel.displayState = nil
-        panel.reloadData()
-        panel.currentPreviewItemIndex = NSNotFound
     }
 }
