@@ -384,6 +384,7 @@ class CommandCoordinator {
     // MARK: - Clipboard Actions
 
     private func pasteClipboardItem(_ item: ClipboardItem) {
+        ClipboardManager.shared.moveToTop(item)
         NSPasteboard.general.clearContents()
         if item.isImage, let imageData = ClipboardManager.shared.imageData(for: item) {
             NSPasteboard.general.setData(imageData, forType: .png)

@@ -119,6 +119,13 @@ class ClipboardManager {
         save()
     }
 
+    func moveToTop(_ item: ClipboardItem) {
+        guard let idx = items.firstIndex(where: { $0.id == item.id }), idx != 0 else { return }
+        items.remove(at: idx)
+        items.insert(item, at: 0)
+        save()
+    }
+
     func remove(at index: Int) {
         guard index < items.count else { return }
         let item = items[index]
