@@ -175,6 +175,7 @@ enum ActionHandler {
     case clipboardDelete
     case clipboardOpenPreview
     case clipboardCopyPath
+    case clipboardSaveImage
     case clipboardTransform(TextTransform)
     case clipboardCount(CountType)
 }
@@ -214,6 +215,7 @@ struct SubjectAction: Identifiable {
                 actions.append(.init(name: c.name, icon: .sfSymbol("number"), isFinal: true, handler: .clipboardCount(c)))
             }
         } else {
+            actions.append(.init(name: "Save Image…", icon: .sfSymbol("square.and.arrow.down"), isFinal: true, handler: .clipboardSaveImage))
             actions.append(.init(name: "Open in Preview", icon: .sfSymbol("eye"), isFinal: true, handler: .clipboardOpenPreview))
             actions.append(.init(name: "Copy Path", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .clipboardCopyPath))
         }

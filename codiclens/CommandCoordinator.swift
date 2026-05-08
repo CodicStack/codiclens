@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 @Observable
 class CommandCoordinator {
@@ -441,6 +442,17 @@ class CommandCoordinator {
                 let url = dir.appendingPathComponent("codiclens/images/\(fileName)")
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(url.path, forType: .string)
+            }
+            onHide?()
+
+        case .clipboardSaveImage:
+            guard let imageData = ClipboardManager.shared.imageData(for: item) else { onHide?(); return }
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.png]
+            panel.nameFieldStringValue = item.imageFileName ?? "image.png"
+            panel.canCreateDirectories = true
+            if panel.runModal() == .OK, let url = panel.url {
+                try? imageData.write(to: url, options: .atomic)
             }
             onHide?()
 
