@@ -91,11 +91,11 @@ struct CardContainerView: View {
                 coordinator.retreatPhase()
                 return .handled
             }
+            if press.key == .space && press.modifiers.contains(.shift) {
+                coordinator.triggerQuickLook()
+                return .handled
+            }
             if press.modifiers.contains(.control) {
-                if press.characters == " " {
-                    coordinator.triggerQuickLook()
-                    return .handled
-                }
                 if press.characters == "e" || press.characters == "\u{05}" {
                     coordinator.toggleClipboardEdit()
                     return .handled

@@ -50,7 +50,6 @@ class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
               let panel = QLPreviewPanel.shared() else { return false }
 
         self.context = context
-        panel.updateController()
         panel.reloadData()
         panel.currentPreviewItemIndex = context.clampedSelectedIndex
         panel.makeKeyAndOrderFront(nil)
@@ -89,20 +88,19 @@ class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
     func previewPanel(_ panel: QLPreviewPanel!, handle event: NSEvent!) -> Bool {
         guard event.type == .keyDown else { return false }
         if event.keyCode == 53 {
-            onDismiss?()
+            return false
+        }
+        if event.keyCode == 49 && event.modifierFlags.contains(.shift) {
+            panel.close()
             return true
         }
-        if event.keyCode == 49 && event.modifierFlags.contains(.control) {
-            onDismiss?()
-            return true
-        }
-        if event.keyCode == 126 || (event.modifierFlags.contains(.control) && event.charactersIgnoringModifiers == "k") {
+        if event.keyCode == 126 || event.charactersIgnoringModifiers == "k" {
             if let context = onMoveUp?() {
                 update(context: context)
             }
             return true
         }
-        if event.keyCode == 125 || (event.modifierFlags.contains(.control) && event.charactersIgnoringModifiers == "j") {
+        if event.keyCode == 125 || event.charactersIgnoringModifiers == "j" {
             if let context = onMoveDown?() {
                 update(context: context)
             }

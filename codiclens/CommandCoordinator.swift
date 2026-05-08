@@ -445,6 +445,18 @@ class CommandCoordinator {
             }
             onHide?()
 
+        case .clipboardCopyPath:
+            if let path = item.originalFilePath {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(path, forType: .string)
+            } else if let fileName = item.imageFileName {
+                let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+                let url = dir.appendingPathComponent("codiclens/images/\(fileName)")
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(url.path, forType: .string)
+            }
+            onHide?()
+
         case .clipboardTransform(let transform):
             guard !item.isImage else { onHide?(); return }
             let result = transform.apply(item.content)

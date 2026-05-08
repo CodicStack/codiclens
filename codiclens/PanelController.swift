@@ -9,6 +9,7 @@ class PanelController {
     let coordinator: CommandCoordinator
     private var clickMonitor: Any?
     private var deactivationObserver: Any?
+    private var appSwitchObserver: Any?
     private var resultsObservation: Any?
     private let quickLookHelper = QuickLookHelper()
     private(set) var quickLookActive = false
@@ -40,6 +41,7 @@ class PanelController {
         quickLookHelper.onDismiss = { [weak self] in
             self?.quickLookDidClose()
         }
+
 
         quickLookHelper.onMoveUp = { [weak self] in
             guard let self else { return nil }
@@ -194,6 +196,17 @@ class PanelController {
             guard let self, !self.quickLookActive else { return }
             self.hidePanel()
         }
+
+        appSwitchObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
+            self.hidePanel()
+        }
     }
 
     func configurePreviewPanel(_ panel: QLPreviewPanel) {
@@ -208,6 +221,7 @@ class PanelController {
 
     private func showQuickLook(context: QuickLookContext) {
         quickLookActive = true
+        NSApp.activate(ignoringOtherApps: true)
         if !quickLookHelper.show(context: context) {
             quickLookActive = false
         }
@@ -229,7 +243,8 @@ class PanelController {
     }
 
     private func restoreFocusAfterQuickLook() {
-        cardPanel.makeKey()
+        NSApp.activate(ignoringOtherApps: true)
+        cardPanel.makeKeyAndOrderFront(nil)
         coordinator.returningFromQuickLook = true
         coordinator.focusTrigger.toggle()
     }
@@ -249,6 +264,11 @@ class PanelController {
         if let observer = deactivationObserver {
             NotificationCenter.default.removeObserver(observer)
             deactivationObserver = nil
+        }
+
+        if let observer = appSwitchObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            appSwitchObserver = nil
         }
     }
 
