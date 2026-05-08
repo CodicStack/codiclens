@@ -13,11 +13,8 @@ struct codiclensApp: App {
     private let clipboardManager = ClipboardManager.shared
 
     var body: some Scene {
-        MenuBarExtra("Codiclens", systemImage: "magnifyingglass") {
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
-            }
-            .keyboardShortcut("q")
+        Settings {
+            EmptyView()
         }
     }
 }
