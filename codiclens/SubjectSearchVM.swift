@@ -27,13 +27,13 @@ class SubjectSearchVM {
         loadBuiltIns()
 
         visibilityCancellable = visibilitySubject
-            .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
+            .debounce(for: .milliseconds(600), scheduler: RunLoop.main)
             .sink { [weak self] in
                 self?.isResultsVisible = true
             }
 
         commitCancellable = commitSubject
-            .debounce(for: .milliseconds(1500), scheduler: RunLoop.main)
+            .debounce(for: .milliseconds(600), scheduler: RunLoop.main)
             .sink { [weak self] in
                 self?.isSearchCommitted = true
             }

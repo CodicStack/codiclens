@@ -218,6 +218,7 @@ struct SubjectAction: Identifiable {
             actions.append(.init(name: "Copy Path", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .clipboardCopyPath))
         }
 
+        actions.append(.init(name: "Quick Look", icon: .sfSymbol("eye"), isFinal: true, handler: .quickLook))
         actions.append(.init(name: "Delete from History", icon: .sfSymbol("trash"), isFinal: true, handler: .clipboardDelete))
 
         return actions

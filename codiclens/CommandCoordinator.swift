@@ -164,24 +164,10 @@ class CommandCoordinator {
         }
 
         switch phase {
-        case .showingResult:
-            retreatPhase()
-            return true
         case .pickingTarget:
             retreatPhase()
             return true
-        case .pickingAction:
-            retreatPhase()
-            return true
-        case .browsingClipboard:
-            retreatPhase()
-            return true
-        case .searchingSubject:
-            if !subjectVM.searchText.isEmpty {
-                subjectVM.searchText = ""
-                focusTrigger.toggle()
-                return true
-            }
+        case .showingResult, .pickingAction, .browsingClipboard, .searchingSubject:
             return false
         }
     }
@@ -339,7 +325,8 @@ class CommandCoordinator {
         selectedClipboardItem = nil
         isEditingClipboardItem = false
         clipboardEditText = ""
-        subjectVM.reset()
+        subjectVM.isResultsVisible = false
+        subjectVM.isSearchCommitted = false
         actionVM.reset()
         targetVM.reset()
         clipboardVM.reset()
@@ -499,6 +486,14 @@ class CommandCoordinator {
                 targetVM.selectedIndex = 0
                 phase = .pickingTarget
                 onPhaseChange?()
+            }
+
+        case .quickLook:
+            if let url = ClipboardManager.shared.previewURL(for: item) {
+                onQuickLook?(QuickLookContext(
+                    items: [QuickLookPreviewItem(url: url, title: item.displayName)],
+                    selectedIndex: 0
+                ))
             }
 
         default:
