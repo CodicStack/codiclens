@@ -326,8 +326,7 @@ class CommandCoordinator {
         selectedClipboardItem = nil
         isEditingClipboardItem = false
         clipboardEditText = ""
-        subjectVM.isResultsVisible = false
-        subjectVM.isSearchCommitted = false
+        subjectVM.isSearchCommitted = true
         actionVM.reset()
         targetVM.reset()
         clipboardVM.reset()

@@ -17,7 +17,9 @@ struct CardContainerView: View {
             if coordinator.returningFromQuickLook {
                 coordinator.returningFromQuickLook = false
             } else {
-                textProxy = ""
+                suppressSync = true
+                textProxy = coordinator.currentSearchText
+                DispatchQueue.main.async { suppressSync = false }
             }
         }
         .onChange(of: coordinator.cardCount) {
