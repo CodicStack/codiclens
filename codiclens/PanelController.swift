@@ -184,35 +184,7 @@ class PanelController {
         centerOnScreen()
         cardPanel.orderFront(nil)
         cardPanel.makeKey()
-
-        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            guard let self else { return }
-            if self.quickLookActive {
-                self.dismissQuickLook()
-            } else {
-                self.hidePanel()
-            }
-        }
-
-        deactivationObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didResignKeyNotification,
-            object: cardPanel,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self, !self.quickLookActive, !self.savePanelActive else { return }
-            self.hidePanel()
-        }
-
-        appSwitchObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self,
-                  let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-                  app.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
-            self.hidePanel()
-        }
+        setupObservers()
     }
 
     func configurePreviewPanel(_ panel: QLPreviewPanel) {
@@ -261,7 +233,41 @@ class PanelController {
         dismissQuickLook()
         resultsPanel.orderOut(nil)
         cardPanel.orderOut(nil)
+        removeObservers()
+    }
 
+    private func setupObservers() {
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            guard let self else { return }
+            if self.quickLookActive {
+                self.dismissQuickLook()
+            } else {
+                self.hidePanel()
+            }
+        }
+
+        deactivationObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: cardPanel,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, !self.quickLookActive, !self.savePanelActive else { return }
+            self.hidePanel()
+        }
+
+        appSwitchObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self, !self.savePanelActive,
+                  let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
+            self.hidePanel()
+        }
+    }
+
+    private func removeObservers() {
         if let monitor = clickMonitor {
             NSEvent.removeMonitor(monitor)
             clickMonitor = nil
@@ -317,6 +323,7 @@ class PanelController {
         savePanelActive = true
         cardPanel.orderOut(nil)
         resultsPanel.orderOut(nil)
+        removeObservers()
         NSApp.activate(ignoringOtherApps: true)
 
         let panel = NSSavePanel()
@@ -324,15 +331,16 @@ class PanelController {
         panel.nameFieldStringValue = fileName
         panel.canCreateDirectories = true
 
-        if panel.runModal() == .OK, let url = panel.url {
+        let response = panel.runModal()
+        savePanelActive = false
+
+        if response == .OK, let url = panel.url {
             try? data.write(to: url, options: .atomic)
-            savePanelActive = false
-            hidePanel()
         } else {
-            savePanelActive = false
-            cardPanel.orderFront(nil)
-            cardPanel.makeKey()
             NSApp.activate(ignoringOtherApps: true)
+            cardPanel.makeKeyAndOrderFront(nil)
+            coordinator.focusTrigger.toggle()
+            setupObservers()
         }
     }
 
