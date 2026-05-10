@@ -1,6 +1,7 @@
 import AppKit
 import Quartz
 import SwiftUI
+import UniformTypeIdentifiers
 
 class PanelController {
     private let cardPanel: FloatingPanel
@@ -13,6 +14,7 @@ class PanelController {
     private var resultsObservation: Any?
     private let quickLookHelper = QuickLookHelper()
     private(set) var quickLookActive = false
+    private var savePanelActive = false
     private var showResultsWork: DispatchWorkItem?
     private var animatingTargetWidth: CGFloat?
     private var animatingTargetOriginX: CGFloat?
@@ -36,6 +38,10 @@ class PanelController {
 
         coordinator.onShowSettings = { [weak self] in
             self?.showSettings()
+        }
+
+        coordinator.onSavePanel = { [weak self] (data: Data, name: String, type: UTType) in
+            self?.showSavePanel(data: data, fileName: name, contentType: type)
         }
 
         quickLookHelper.onDismiss = { [weak self] in
@@ -193,7 +199,7 @@ class PanelController {
             object: cardPanel,
             queue: .main
         ) { [weak self] _ in
-            guard let self, !self.quickLookActive else { return }
+            guard let self, !self.quickLookActive, !self.savePanelActive else { return }
             self.hidePanel()
         }
 
@@ -305,6 +311,29 @@ class PanelController {
 
         settingsWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func showSavePanel(data: Data, fileName: String, contentType: UTType) {
+        savePanelActive = true
+        cardPanel.orderOut(nil)
+        resultsPanel.orderOut(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [contentType]
+        panel.nameFieldStringValue = fileName
+        panel.canCreateDirectories = true
+
+        if panel.runModal() == .OK, let url = panel.url {
+            try? data.write(to: url, options: .atomic)
+            savePanelActive = false
+            hidePanel()
+        } else {
+            savePanelActive = false
+            cardPanel.orderFront(nil)
+            cardPanel.makeKey()
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     private let rowHeight: CGFloat = 46

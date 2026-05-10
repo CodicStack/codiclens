@@ -176,6 +176,7 @@ enum ActionHandler {
     case clipboardOpenPreview
     case clipboardCopyPath
     case clipboardSaveImage
+    case clipboardSaveFile
     case clipboardTransform(TextTransform)
     case clipboardCount(CountType)
 }
@@ -204,6 +205,7 @@ struct SubjectAction: Identifiable {
             actions.append(.init(name: "Type Text", icon: .sfSymbol("keyboard"), isFinal: true, handler: .clipboardTypeText))
             actions.append(.init(name: "Run as AppleScript", icon: .sfSymbol("applescript"), isFinal: true, handler: .clipboardRunScript))
             actions.append(.init(name: "Open Email", icon: .sfSymbol("envelope"), isFinal: true, handler: .clipboardOpenEmail))
+            actions.append(.init(name: "Save as File…", icon: .sfSymbol("square.and.arrow.down"), isFinal: true, handler: .clipboardSaveFile))
             actions.append(.init(name: "Search Web", icon: .sfSymbol("magnifyingglass"), isFinal: true, handler: .searchWeb))
             actions.append(.init(name: "Share…", icon: .sfSymbol("square.and.arrow.up"), isFinal: false, handler: .share))
 

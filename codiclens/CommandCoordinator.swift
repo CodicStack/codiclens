@@ -28,6 +28,7 @@ class CommandCoordinator {
     var onPhaseChange: (() -> Void)?
     var onQuickLook: ((QuickLookContext) -> Void)?
     var onShowSettings: (() -> Void)?
+    var onSavePanel: ((Data, String, UTType) -> Void)?
 
     var cardCount: Int {
         switch phase {
@@ -469,14 +470,11 @@ class CommandCoordinator {
 
         case .clipboardSaveImage:
             guard let imageData = ClipboardManager.shared.imageData(for: item) else { onHide?(); return }
-            let panel = NSSavePanel()
-            panel.allowedContentTypes = [.png]
-            panel.nameFieldStringValue = item.imageFileName ?? "image.png"
-            panel.canCreateDirectories = true
-            if panel.runModal() == .OK, let url = panel.url {
-                try? imageData.write(to: url, options: .atomic)
-            }
-            onHide?()
+            onSavePanel?(imageData, item.imageFileName ?? "image.png", .png)
+
+        case .clipboardSaveFile:
+            guard !item.isImage, let textData = item.content.data(using: .utf8) else { onHide?(); return }
+            onSavePanel?(textData, "untitled.txt", .plainText)
 
         case .clipboardTransform(let transform):
             guard !item.isImage else { onHide?(); return }
