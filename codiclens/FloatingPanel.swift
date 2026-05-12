@@ -35,13 +35,15 @@ class FloatingPanel: NSPanel {
         if withBackground {
             hostingView = NSHostingView(
                 rootView: AnyView(
-                    view
-                        .background(.ultraThinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 28))
+                    ThemeWrapper {
+                        view
+                            .modifier(ThemedGlass(cornerRadius: 28))
+                            .clipShape(RoundedRectangle(cornerRadius: 28))
+                    }
                 )
             )
         } else {
-            hostingView = NSHostingView(rootView: AnyView(view))
+            hostingView = NSHostingView(rootView: AnyView(ThemeWrapper { view }))
         }
         hostingView.sizingOptions = []
         hostingView.translatesAutoresizingMaskIntoConstraints = true

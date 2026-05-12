@@ -25,6 +25,7 @@ class CommandCoordinator {
     let clipboardVM = ClipboardSearchVM()
 
     var onHide: (() -> Void)?
+    var onPasteAndHide: ((@escaping () -> Void) -> Void)?
     var onPhaseChange: (() -> Void)?
     var onQuickLook: ((QuickLookContext) -> Void)?
     var onShowSettings: (() -> Void)?
@@ -288,7 +289,6 @@ class CommandCoordinator {
             guard clipboardVM.selectedIndex < clipboardVM.filteredItems.count else { return }
             let item = clipboardVM.filteredItems[clipboardVM.selectedIndex]
             pasteClipboardItem(item)
-            onHide?()
 
         case .pickingAction:
             guard actionVM.selectedIndex < actionVM.filteredActions.count else { return }
@@ -392,16 +392,13 @@ class CommandCoordinator {
         } else {
             NSPasteboard.general.setString(item.content, forType: .string)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            Self.simulatePaste()
-        }
+        onPasteAndHide?({ Self.simulatePaste() })
     }
 
     private func executeClipboardAction(_ action: SubjectAction, on item: ClipboardItem) {
         switch action.handler {
         case .clipboardPaste:
             pasteClipboardItem(item)
-            onHide?()
 
         case .clipboardCopy:
             NSPasteboard.general.clearContents()
@@ -415,17 +412,11 @@ class CommandCoordinator {
         case .clipboardPastePlain:
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(item.content, forType: .string)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                Self.simulatePaste()
-            }
-            onHide?()
+            onPasteAndHide?({ Self.simulatePaste() })
 
         case .clipboardTypeText:
-            onHide?()
             let text = item.content
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                Self.simulateTyping(text)
-            }
+            onPasteAndHide?({ Self.simulateTyping(text) })
 
         case .clipboardRunScript:
             let script = NSAppleScript(source: item.content)
@@ -599,6 +590,14 @@ class CommandCoordinator {
                 ))
             }
 
+        case .pasteText:
+            if case .text(let rawText) = subject.kind {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(rawText, forType: .string)
+                onPasteAndHide?({ Self.simulatePaste() })
+                return
+            }
+
         case .copyText:
             if case .text(let rawText) = subject.kind {
                 NSPasteboard.general.clearContents()
@@ -653,8 +652,8 @@ class CommandCoordinator {
         let source = CGEventSource(stateID: .combinedSessionState)
         let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true)
         let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
-        keyDown?.flags = CGEventFlags.maskCommand
-        keyUp?.flags = CGEventFlags.maskCommand
+        keyDown?.flags = .maskCommand
+        keyUp?.flags = .maskCommand
         keyDown?.post(tap: .cgSessionEventTap)
         keyUp?.post(tap: .cgSessionEventTap)
     }

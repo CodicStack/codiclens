@@ -7,9 +7,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyRef: EventHotKeyRef?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        requestAccessibilityIfNeeded()
         panelController = PanelController()
         registerHotKey()
         print("[codiclens] launched, hotkey registered")
+    }
+
+    private func requestAccessibilityIfNeeded() {
+        if !AXIsProcessTrusted() {
+            print("[codiclens] accessibility not granted — paste simulation requires it")
+        }
     }
 
     // MARK: - QuickLook Responder Chain

@@ -26,7 +26,7 @@ struct ActionTarget: Identifiable {
             return ActionTarget(name: name, icon: icon, url: appURL, sharingService: nil)
         }
     }
-
+    
     static func shareTargets(for subject: Subject) -> [ActionTarget] {
         let items: [Any]
         switch subject.kind {
@@ -44,3 +44,5 @@ struct ActionTarget: Identifiable {
         }
     }
 }
+
+

@@ -161,7 +161,7 @@ enum CountType: CaseIterable {
 enum ActionHandler {
     case openApp, quitApp, hideApp, showInFinder, copyPath
     case openFile, openWith, revealInFinder, moveToTrash, quickLook
-    case copyText, transform(TextTransform), searchWeb, openURL
+    case copyText, pasteText, transform(TextTransform), searchWeb, openURL
     case share
     case service(String)
     case openSettings
@@ -265,6 +265,7 @@ struct SubjectAction: Identifiable {
             return []
         case .text(let rawText):
             var actions: [SubjectAction] = [
+                .init(name: "Paste", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .pasteText),
                 .init(name: "Copy", icon: .sfSymbol("doc.on.doc"), isFinal: true, handler: .copyText),
             ]
             for t in TextTransform.allCases {
