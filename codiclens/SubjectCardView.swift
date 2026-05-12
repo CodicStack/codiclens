@@ -3,6 +3,7 @@ import SwiftUI
 struct SubjectCardView: View {
     @Bindable var coordinator: CommandCoordinator
     @FocusState private var isEditorFocused: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     private var isFocused: Bool {
         switch coordinator.phase {
@@ -63,10 +64,14 @@ struct SubjectCardView: View {
             ZStack {
                 if isClipboardText || isTextMode {
                     RoundedRectangle(cornerRadius: 32)
-                        .fill(Color.white)
+                        .fill(colorScheme == .dark ? Color(white: 0.15) : Color.white)
                 } else {
                     RoundedRectangle(cornerRadius: 32)
                         .fill(.ultraThinMaterial)
+                    RoundedRectangle(cornerRadius: 32)
+                        .fill(colorScheme == .dark
+                            ? Color.black.opacity(0.92)
+                            : Color.white.opacity(0.7))
                 }
             }
             .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
@@ -121,7 +126,9 @@ struct SubjectCardView: View {
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(.ultraThinMaterial)
+                        .background(colorScheme == .dark
+                            ? Color.black.opacity(0.92)
+                            : Color.white.opacity(0.92))
                         .clipShape(Capsule())
                         .padding(12)
                 }

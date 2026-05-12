@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ResultsListView: View {
     @Bindable var coordinator: CommandCoordinator
+    @Environment(\.colorScheme) private var colorScheme
 
     private var hasQuery: Bool {
         !coordinator.currentQuery.isEmpty
@@ -68,7 +69,9 @@ struct ResultsListView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
-                    .background(.ultraThinMaterial)
+                    .background(colorScheme == .dark
+                        ? Color.black.opacity(0.92)
+                        : Color.white.opacity(0.92))
                     .clipShape(Capsule())
             }
         }

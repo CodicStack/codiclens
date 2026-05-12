@@ -82,6 +82,10 @@ struct CardContainerView: View {
             coordinator.handleEscape() ? .handled : .ignored
         }
         .onKeyPress { press in
+            if press.key == .return {
+                coordinator.submit()
+                return .handled
+            }
             if press.key == .tab && press.modifiers.isEmpty {
                 coordinator.advancePhase()
                 return .handled
@@ -157,7 +161,7 @@ struct CardContainerView: View {
                     )
             }
         }
-        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: coordinator.cardCount)
+        .animation(.spring(response: 0.15, dampingFraction: 0.8), value: coordinator.cardCount)
         .padding(6)
     }
 }

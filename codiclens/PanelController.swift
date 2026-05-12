@@ -32,6 +32,10 @@ class PanelController {
             self?.hidePanel()
         }
 
+        coordinator.onPasteAndHide = { [weak self] simulateAction in
+            self?.pasteAndHide(simulateAction: simulateAction)
+        }
+
         coordinator.onPhaseChange = { [weak self] in
             self?.animateCardCount()
         }
@@ -83,7 +87,21 @@ class PanelController {
 
         resultsPanel.level = .floating
 
+        updatePanelAppearance()
         observeResults()
+    }
+
+    private func updatePanelAppearance() {
+        let theme = AppTheme(rawValue: UserDefaults.standard.string(forKey: "appTheme") ?? "system") ?? .system
+        let appearance: NSAppearance?
+        switch theme {
+        case .light: appearance = NSAppearance(named: .aqua)
+        case .dark: appearance = NSAppearance(named: .darkAqua)
+        case .system: appearance = nil
+        }
+        cardPanel.appearance = appearance
+        resultsPanel.appearance = appearance
+        settingsWindow?.appearance = appearance
     }
 
     private func widthForCardCount(_ count: Int) -> CGFloat {
@@ -157,7 +175,7 @@ class PanelController {
         animatingTargetOriginX = newX
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.25
+            context.duration = 0.12
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             self.cardPanel.animator().setFrame(
                 NSRect(x: newX, y: currentFrame.origin.y, width: newWidth, height: self.cardHeight),
@@ -181,6 +199,7 @@ class PanelController {
 
     func showPanel() {
         coordinator.reset()
+        updatePanelAppearance()
         centerOnScreen()
         cardPanel.orderFront(nil)
         cardPanel.makeKey()
@@ -234,6 +253,16 @@ class PanelController {
         resultsPanel.orderOut(nil)
         cardPanel.orderOut(nil)
         removeObservers()
+    }
+
+    private func pasteAndHide(simulateAction: @escaping () -> Void) {
+        showResultsWork?.cancel()
+        showResultsWork = nil
+        dismissQuickLook()
+        removeObservers()
+        resultsPanel.orderOut(nil)
+        cardPanel.orderOut(nil)
+        simulateAction()
     }
 
     private func setupObservers() {
@@ -309,8 +338,9 @@ class PanelController {
                 backing: .buffered,
                 defer: false
             )
+            window.isReleasedWhenClosed = false
             window.title = "Codiclens Settings"
-            window.contentView = NSHostingView(rootView: SettingsView())
+            window.contentView = NSHostingView(rootView: ThemeWrapper { SettingsView() })
             window.center()
             settingsWindow = window
         }
@@ -336,11 +366,23 @@ class PanelController {
 
         if response == .OK, let url = panel.url {
             try? data.write(to: url, options: .atomic)
+            hidePanel()
         } else {
             NSApp.activate(ignoringOtherApps: true)
             cardPanel.makeKeyAndOrderFront(nil)
             coordinator.focusTrigger.toggle()
-            setupObservers()
+
+            var keyObserver: Any?
+            keyObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didBecomeKeyNotification,
+                object: cardPanel,
+                queue: .main
+            ) { [weak self] _ in
+                if let obs = keyObserver {
+                    NotificationCenter.default.removeObserver(obs)
+                }
+                self?.setupObservers()
+            }
         }
     }
 
