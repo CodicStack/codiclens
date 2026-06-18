@@ -20,7 +20,6 @@ struct SubjectCardView: View {
 
     private var isTextMode: Bool {
         if let subject, case .text = subject.kind { return true }
-        if coordinator.subjectVM.searchText.contains(" ") { return true }
         return false
     }
 
