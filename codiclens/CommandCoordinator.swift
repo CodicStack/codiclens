@@ -47,7 +47,7 @@ class CommandCoordinator {
         let vm = subjectVM
         guard vm.selectedIndex < vm.results.count else { return false }
         if case .text = vm.results[vm.selectedIndex].kind { return true }
-        return vm.searchText.contains(" ")
+        return false
     }
 
     var isEditingClipboardItem: Bool = false
@@ -281,8 +281,8 @@ class CommandCoordinator {
                 phase = .browsingClipboard
                 onPhaseChange?()
             } else {
-                executeDefaultAction(for: subject)
                 onHide?()
+                executeDefaultAction(for: subject)
             }
 
         case .browsingClipboard:
@@ -317,8 +317,8 @@ class CommandCoordinator {
                     actionVM.loadActions(for: newSubject)
                     onPhaseChange?()
                 } else {
-                    executeAction(action, on: subject)
                     onHide?()
+                    executeAction(action, on: subject)
                 }
             } else {
                 selectedAction = action
@@ -332,8 +332,8 @@ class CommandCoordinator {
                   let action = selectedAction,
                   targetVM.selectedIndex < targetVM.filteredTargets.count else { return }
             let target = targetVM.filteredTargets[targetVM.selectedIndex]
-            executeAction(action, on: subject, with: target)
             onHide?()
+            executeAction(action, on: subject, with: target)
 
         case .showingResult(let result):
             NSPasteboard.general.clearContents()
@@ -427,7 +427,7 @@ class CommandCoordinator {
         case .clipboardOpenEmail:
             let encoded = item.content.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? item.content
             if let url = URL(string: "mailto:?body=\(encoded)") {
-                NSWorkspace.shared.open(url)
+                openAsync(url)
             }
             onHide?()
 
@@ -443,7 +443,7 @@ class CommandCoordinator {
             if let fileName = item.imageFileName {
                 let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
                 let url = dir.appendingPathComponent("codiclens/images/\(fileName)")
-                NSWorkspace.shared.open(url)
+                openAsync(url)
             }
             onHide?()
 
@@ -488,7 +488,7 @@ class CommandCoordinator {
         case .searchWeb:
             let encoded = item.content.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? item.content
             if let url = URL(string: "https://www.google.com/search?q=\(encoded)") {
-                NSWorkspace.shared.open(url)
+                openAsync(url)
             }
             onHide?()
 
@@ -526,11 +526,18 @@ class CommandCoordinator {
 
     // MARK: - Standard Execution
 
+    private func openAsync(_ url: URL) {
+        Task {
+            let config = NSWorkspace.OpenConfiguration()
+            try? await NSWorkspace.shared.open(url, configuration: config)
+        }
+    }
+
     private func executeDefaultAction(for subject: Subject) {
         switch subject.kind {
         case .app, .file, .folder:
             if let url = subject.url {
-                NSWorkspace.shared.open(url)
+                openAsync(url)
             }
         case .text(let rawText):
             NSPasteboard.general.clearContents()
@@ -545,10 +552,10 @@ class CommandCoordinator {
     private func executeAction(_ action: SubjectAction, on subject: Subject, with target: ActionTarget? = nil) {
         switch action.handler {
         case .openApp:
-            if let url = subject.url { NSWorkspace.shared.open(url) }
+            if let url = subject.url { openAsync(url) }
 
         case .openFile:
-            if let url = target?.url ?? subject.url { NSWorkspace.shared.open(url) }
+            if let url = target?.url ?? subject.url { openAsync(url) }
 
         case .quitApp:
             if case .app(let bundleId, _) = subject.kind, let bundleId {
@@ -616,13 +623,13 @@ class CommandCoordinator {
             if case .text(let rawText) = subject.kind {
                 let encoded = rawText.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? rawText
                 if let url = URL(string: "https://www.google.com/search?q=\(encoded)") {
-                    NSWorkspace.shared.open(url)
+                    openAsync(url)
                 }
             }
 
         case .openURL:
             if case .text(let rawText) = subject.kind, let url = URL(string: rawText) {
-                NSWorkspace.shared.open(url)
+                openAsync(url)
             }
 
         case .share:

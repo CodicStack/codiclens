@@ -15,6 +15,8 @@ class PanelController {
     private let quickLookHelper = QuickLookHelper()
     private(set) var quickLookActive = false
     private var savePanelActive = false
+    private var previousApp: NSRunningApplication?
+    private var pasteActivationObserver: Any?
     private var showResultsWork: DispatchWorkItem?
     private var animatingTargetWidth: CGFloat?
     private var animatingTargetOriginX: CGFloat?
@@ -200,6 +202,7 @@ class PanelController {
     func showPanel() {
         coordinator.reset()
         updatePanelAppearance()
+        previousApp = NSWorkspace.shared.frontmostApplication
         centerOnScreen()
         cardPanel.orderFront(nil)
         cardPanel.makeKey()
@@ -253,6 +256,11 @@ class PanelController {
         resultsPanel.orderOut(nil)
         cardPanel.orderOut(nil)
         removeObservers()
+        previousApp = nil
+        if let obs = pasteActivationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(obs)
+            pasteActivationObserver = nil
+        }
     }
 
     private func pasteAndHide(simulateAction: @escaping () -> Void) {
@@ -262,7 +270,28 @@ class PanelController {
         removeObservers()
         resultsPanel.orderOut(nil)
         cardPanel.orderOut(nil)
-        simulateAction()
+
+        if let app = previousApp,
+           app.bundleIdentifier != Bundle.main.bundleIdentifier,
+           NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Bundle.main.bundleIdentifier {
+            app.activate()
+            pasteActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didActivateApplicationNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let activated = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                      activated.processIdentifier == app.processIdentifier else { return }
+                if let obs = self?.pasteActivationObserver {
+                    NSWorkspace.shared.notificationCenter.removeObserver(obs)
+                    self?.pasteActivationObserver = nil
+                }
+                simulateAction()
+            }
+        } else {
+            simulateAction()
+        }
+        previousApp = nil
     }
 
     private func setupObservers() {

@@ -50,11 +50,18 @@ class SubjectSearchVM {
 
         let fm = FileManager.default
         for dir in appDirs {
-            guard let contents = try? fm.contentsOfDirectory(atPath: dir) else { continue }
-            for item in contents where item.hasSuffix(".app") {
-                let path = "\(dir)/\(item)"
-                let name = (item as NSString).deletingPathExtension
-                let url = URL(fileURLWithPath: path)
+            guard let enumerator = fm.enumerator(
+                at: URL(fileURLWithPath: dir),
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else { continue }
+
+            for case let url as URL in enumerator {
+                guard url.pathExtension == "app" else { continue }
+                enumerator.skipDescendants()
+
+                let path = url.path
+                let name = url.deletingPathExtension().lastPathComponent
                 let icon = NSWorkspace.shared.icon(forFile: path)
                 icon.size = NSSize(width: 32, height: 32)
                 let bundleId = Bundle(path: path)?.bundleIdentifier
