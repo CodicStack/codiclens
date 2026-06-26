@@ -656,13 +656,35 @@ class CommandCoordinator {
     // MARK: - Input Simulation
 
     static func simulatePaste() {
+        if !AXIsProcessTrusted() {
+            print("[codiclens] accessibility not trusted (may differ between Xcode and installed builds)")
+        }
+
         let source = CGEventSource(stateID: .combinedSessionState)
-        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true)
-        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
-        keyDown?.flags = .maskCommand
-        keyUp?.flags = .maskCommand
-        keyDown?.post(tap: .cgSessionEventTap)
-        keyUp?.post(tap: .cgSessionEventTap)
+        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) else {
+            print("[codiclens] CGEvent creation failed, using AppleScript fallback")
+            simulatePasteFallback()
+            return
+        }
+
+        keyDown.flags = .maskCommand
+        keyUp.flags = .maskCommand
+        keyDown.post(tap: .cgSessionEventTap)
+        keyUp.post(tap: .cgSessionEventTap)
+    }
+
+    private static func simulatePasteFallback() {
+        let script = NSAppleScript(source: """
+            tell application "System Events"
+                keystroke "v" using command down
+            end tell
+        """)
+        var error: NSDictionary?
+        script?.executeAndReturnError(&error)
+        if let error {
+            print("[codiclens] AppleScript paste fallback failed: \(error)")
+        }
     }
 
     private static func simulateTyping(_ text: String) {

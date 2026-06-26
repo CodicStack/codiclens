@@ -202,7 +202,10 @@ class PanelController {
     func showPanel() {
         coordinator.reset()
         updatePanelAppearance()
-        previousApp = NSWorkspace.shared.frontmostApplication
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        if frontmost?.bundleIdentifier != Bundle.main.bundleIdentifier {
+            previousApp = frontmost
+        }
         centerOnScreen()
         cardPanel.orderFront(nil)
         cardPanel.makeKey()
@@ -256,6 +259,9 @@ class PanelController {
         resultsPanel.orderOut(nil)
         cardPanel.orderOut(nil)
         removeObservers()
+        if NSApp.isActive, let app = previousApp, !app.isTerminated {
+            app.activate()
+        }
         previousApp = nil
         if let obs = pasteActivationObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(obs)
@@ -273,13 +279,22 @@ class PanelController {
 
         if let app = previousApp,
            app.bundleIdentifier != Bundle.main.bundleIdentifier,
-           NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Bundle.main.bundleIdentifier {
+           !app.isTerminated,
+           NSApp.isActive {
             app.activate()
+            let timeoutWork = DispatchWorkItem { [weak self] in
+                if let obs = self?.pasteActivationObserver {
+                    NSWorkspace.shared.notificationCenter.removeObserver(obs)
+                    self?.pasteActivationObserver = nil
+                }
+                simulateAction()
+            }
             pasteActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
                 forName: NSWorkspace.didActivateApplicationNotification,
                 object: nil,
                 queue: .main
             ) { [weak self] notification in
+                timeoutWork.cancel()
                 guard let activated = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
                       activated.processIdentifier == app.processIdentifier else { return }
                 if let obs = self?.pasteActivationObserver {
@@ -288,6 +303,7 @@ class PanelController {
                 }
                 simulateAction()
             }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: timeoutWork)
         } else {
             simulateAction()
         }
@@ -335,7 +351,7 @@ class PanelController {
             NotificationCenter.default.removeObserver(observer)
             deactivationObserver = nil
         }
-
+        
         if let observer = appSwitchObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
             appSwitchObserver = nil
