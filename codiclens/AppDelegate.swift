@@ -14,7 +14,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func requestAccessibilityIfNeeded() {
-        if !AXIsProcessTrusted() {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
+        if !AXIsProcessTrustedWithOptions(options) {
             print("[codiclens] accessibility not granted — paste simulation requires it")
         }
     }

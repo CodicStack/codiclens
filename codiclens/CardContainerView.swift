@@ -6,12 +6,20 @@ struct CardContainerView: View {
     @State private var textProxy: String = ""
     @State private var suppressSync: Bool = false
 
+    private let becameKeyPublisher = NotificationCenter.default.publisher(
+        for: NSWindow.didBecomeKeyNotification
+    )
+
     var body: some View {
         ZStack {
             hiddenSearchField
             cardRow
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onReceive(becameKeyPublisher) { notification in
+            guard notification.object is FloatingPanel else { return }
+            isSearchFocused = true
+        }
         .onChange(of: coordinator.focusTrigger) {
             refocus()
             if coordinator.returningFromQuickLook {
@@ -31,9 +39,7 @@ struct CardContainerView: View {
     }
 
     private func refocus() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            isSearchFocused = true
-        }
+        isSearchFocused = true
     }
 
     private var hiddenSearchField: some View {
