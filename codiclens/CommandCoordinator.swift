@@ -22,15 +22,18 @@ class CommandCoordinator {
     let subjectVM = SubjectSearchVM()
     let actionVM = ActionSearchVM()
     let targetVM = TargetSearchVM()
-    let clipboardVM = ClipboardSearchVM()
+    let clipboardVM: ClipboardSearchVM
 
     /// Layout only — the card panel resizes when the phase changes.
     var onPhaseChange: (() -> Void)?
 
     private let runner: EffectRunner
+    private let history: ClipboardHistory
 
-    init(runner: EffectRunner) {
+    init(runner: EffectRunner, history: ClipboardHistory) {
         self.runner = runner
+        self.history = history
+        self.clipboardVM = ClipboardSearchVM(history: history)
     }
 
     var cardCount: Int {
@@ -71,9 +74,8 @@ class CommandCoordinator {
 
     func saveClipboardEdit() {
         guard isEditingClipboardItem else { return }
-        if let item = selectedClipboardItem ?? currentClipboardItem,
-           let idx = ClipboardManager.shared.items.firstIndex(where: { $0.id == item.id }) {
-            ClipboardManager.shared.updateText(at: idx, text: clipboardEditText)
+        if let item = selectedClipboardItem ?? currentClipboardItem {
+            history.updateText(for: item, text: clipboardEditText)
         }
         isEditingClipboardItem = false
         selectedClipboardItem = ClipboardItem(content: clipboardEditText)
@@ -343,7 +345,7 @@ class CommandCoordinator {
         case .browsingClipboard:
             let items = clipboardVM.filteredItems
             guard clipboardVM.selectedIndex < items.count,
-                  let url = ClipboardManager.shared.previewURL(for: items[clipboardVM.selectedIndex]) else { return nil }
+                  let url = history.previewURL(for: items[clipboardVM.selectedIndex]) else { return nil }
             let item = QuickLookPreviewItem(url: url, title: items[clipboardVM.selectedIndex].displayName)
             return QuickLookContext(items: [item], selectedIndex: 0)
 
@@ -355,14 +357,14 @@ class CommandCoordinator {
     // MARK: - Clipboard execution
 
     private func payload(for item: ClipboardItem) -> Payload {
-        if item.isImage, let imageData = ClipboardManager.shared.imageData(for: item) {
+        if item.isImage, let imageData = history.imageData(for: item) {
             return .image(imageData)
         }
         return .text(item.content)
     }
 
     private func pasteEffects(for item: ClipboardItem) -> [Effect] {
-        ClipboardManager.shared.moveToTop(item)
+        history.moveToTop(item)
         return [.paste(payload(for: item))]
     }
 
@@ -388,26 +390,24 @@ class CommandCoordinator {
             return [.open(url), .hide]
 
         case .clipboardDelete:
-            if let idx = ClipboardManager.shared.items.firstIndex(where: { $0.id == item.id }) {
-                ClipboardManager.shared.remove(at: idx)
-            }
+            history.remove(item)
             clipboardVM.load()
             phase = .browsingClipboard
             onPhaseChange?()
             return []
 
         case .clipboardOpenPreview:
-            guard let url = ClipboardManager.shared.imageURL(for: item) else { return [.hide] }
+            guard let url = history.imageURL(for: item) else { return [.hide] }
             return [.open(url), .hide]
 
         case .clipboardCopyPath:
-            guard let path = item.originalFilePath ?? ClipboardManager.shared.imageURL(for: item)?.path else {
+            guard let path = item.originalFilePath ?? history.imageURL(for: item)?.path else {
                 return [.hide]
             }
             return [.copy(.text(path)), .hide]
 
         case .clipboardSaveImage:
-            guard let imageData = ClipboardManager.shared.imageData(for: item) else { return [.hide] }
+            guard let imageData = history.imageData(for: item) else { return [.hide] }
             return [.savePanel(
                 data: imageData,
                 fileName: item.imageFileName ?? "image.png",
@@ -442,7 +442,7 @@ class CommandCoordinator {
             return []
 
         case .quickLook:
-            guard let url = ClipboardManager.shared.previewURL(for: item) else { return [] }
+            guard let url = history.previewURL(for: item) else { return [] }
             return [.quickLook(QuickLookContext(
                 items: [QuickLookPreviewItem(url: url, title: item.displayName)],
                 selectedIndex: 0
@@ -457,10 +457,10 @@ class CommandCoordinator {
     /// with the rewritten item selected.
     private func applyToHistory(_ transform: TextTransform, on item: ClipboardItem) {
         let result = transform.apply(item.content)
-        if let idx = ClipboardManager.shared.items.firstIndex(where: { $0.id == item.id }) {
-            ClipboardManager.shared.updateText(at: idx, text: result)
+        if let index = history.index(of: item) {
+            history.updateText(at: index, text: result)
             clipboardVM.load()
-            clipboardVM.selectedIndex = min(idx, clipboardVM.filteredItems.count - 1)
+            clipboardVM.selectedIndex = min(index, clipboardVM.filteredItems.count - 1)
         }
         selectedClipboardItem = ClipboardItem(content: result)
         phase = .browsingClipboard
