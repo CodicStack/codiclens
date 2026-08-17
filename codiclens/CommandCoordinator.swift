@@ -93,74 +93,33 @@ class CommandCoordinator {
         return vm.filteredItems[vm.selectedIndex]
     }
 
+    /// The scope the current phase searches in. `.showingResult` searches
+    /// nothing, so it has no scope.
+    var currentScope: SearchScope? {
+        switch phase {
+        case .searchingSubject: subjectVM
+        case .browsingClipboard: clipboardVM
+        case .pickingAction: actionVM
+        case .pickingTarget: targetVM
+        case .showingResult: nil
+        }
+    }
+
     var currentSearchText: String {
-        get {
-            switch phase {
-            case .searchingSubject: subjectVM.searchText
-            case .browsingClipboard: clipboardVM.searchText
-            case .pickingAction: actionVM.searchText
-            case .pickingTarget: targetVM.searchText
-            case .showingResult: ""
-            }
-        }
-        set {
-            switch phase {
-            case .searchingSubject: subjectVM.searchText = newValue
-            case .browsingClipboard: clipboardVM.searchText = newValue
-            case .pickingAction: actionVM.searchText = newValue
-            case .pickingTarget: targetVM.searchText = newValue
-            case .showingResult: break
-            }
-        }
+        get { currentScope?.searchText ?? "" }
+        set { currentScope?.searchText = newValue }
     }
 
     var currentResults: [ResultDisplayItem] {
-        switch phase {
-        case .searchingSubject:
-            subjectVM.isResultsVisible
-                ? subjectVM.results.map { ResultDisplayItem(from: $0) }
-                : []
-        case .browsingClipboard:
-            clipboardVM.filteredItems.map { ResultDisplayItem(from: $0) }
-        case .pickingAction:
-            actionVM.filteredActions.map { ResultDisplayItem(from: $0) }
-        case .pickingTarget:
-            targetVM.filteredTargets.map { ResultDisplayItem(from: $0) }
-        case .showingResult:
-            []
-        }
+        currentScope?.displayResults ?? []
     }
 
     var currentSelectedIndex: Int {
-        get {
-            switch phase {
-            case .searchingSubject: subjectVM.selectedIndex
-            case .browsingClipboard: clipboardVM.selectedIndex
-            case .pickingAction: actionVM.selectedIndex
-            case .pickingTarget: targetVM.selectedIndex
-            case .showingResult: 0
-            }
-        }
-        set {
-            switch phase {
-            case .searchingSubject: subjectVM.selectedIndex = newValue
-            case .browsingClipboard: clipboardVM.selectedIndex = newValue
-            case .pickingAction: actionVM.selectedIndex = newValue
-            case .pickingTarget: targetVM.selectedIndex = newValue
-            case .showingResult: break
-            }
-        }
+        get { currentScope?.selectedIndex ?? 0 }
+        set { currentScope?.selectedIndex = newValue }
     }
 
-    var currentQuery: String {
-        switch phase {
-        case .searchingSubject: subjectVM.searchText
-        case .browsingClipboard: clipboardVM.searchText
-        case .pickingAction: actionVM.searchText
-        case .pickingTarget: targetVM.searchText
-        case .showingResult: ""
-        }
-    }
+    var currentQuery: String { currentSearchText }
 
     // MARK: - Navigation
 
