@@ -253,7 +253,6 @@ class PanelController {
     private func restoreFocusAfterQuickLook() {
         NSApp.activate(ignoringOtherApps: true)
         cardPanel.makeKeyAndOrderFront(nil)
-        coordinator.returningFromQuickLook = true
         coordinator.focusTrigger.toggle()
     }
 

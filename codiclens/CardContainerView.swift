@@ -3,8 +3,6 @@ import SwiftUI
 struct CardContainerView: View {
     @Bindable var coordinator: CommandCoordinator
     @FocusState private var isSearchFocused: Bool
-    @State private var textProxy: String = ""
-    @State private var suppressSync: Bool = false
 
     private let becameKeyPublisher = NotificationCenter.default.publisher(
         for: NSWindow.didBecomeKeyNotification
@@ -20,61 +18,30 @@ struct CardContainerView: View {
             guard notification.object is FloatingPanel else { return }
             isSearchFocused = true
         }
-        .onChange(of: coordinator.focusTrigger) {
-            refocus()
-            if coordinator.returningFromQuickLook {
-                coordinator.returningFromQuickLook = false
-            } else {
-                suppressSync = true
-                textProxy = coordinator.currentSearchText
-                DispatchQueue.main.async { suppressSync = false }
-            }
-        }
-        .onChange(of: coordinator.cardCount) {
-            refocus()
-        }
-        .onChange(of: coordinator.phase) { _, _ in
-            textProxy = coordinator.currentSearchText
-        }
+        .onChange(of: coordinator.focusTrigger) { refocus() }
+        .onChange(of: coordinator.cardCount) { refocus() }
     }
 
     private func refocus() {
         isSearchFocused = true
     }
 
+    /// The field reads the current query straight from the coordinator and
+    /// hands keystrokes back to it. There is no second copy of the text here to
+    /// keep in sync.
+    private var query: Binding<String> {
+        Binding(
+            get: { coordinator.currentSearchText },
+            set: { coordinator.acceptTypedText($0) }
+        )
+    }
+
     private var hiddenSearchField: some View {
-        TextField("", text: $textProxy)
+        TextField("", text: query)
         .textFieldStyle(.plain)
         .focused($isSearchFocused)
         .frame(width: 0, height: 0)
         .opacity(0)
-        .onChange(of: textProxy) { oldValue, newValue in
-            guard !suppressSync else { return }
-
-            if coordinator.phase == .searchingSubject
-                        && coordinator.subjectVM.isSearchCommitted
-                        && !coordinator.isTextMode {
-                if newValue.count > oldValue.count {
-                    let added = String(newValue.dropFirst(oldValue.count))
-                    suppressSync = true
-                    textProxy = added
-                    coordinator.currentSearchText = added
-                    DispatchQueue.main.async { self.suppressSync = false }
-                } else if newValue.isEmpty {
-                    suppressSync = true
-                    textProxy = ""
-                    coordinator.currentSearchText = ""
-                    DispatchQueue.main.async { self.suppressSync = false }
-                } else {
-                    suppressSync = true
-                    textProxy = newValue
-                    coordinator.currentSearchText = newValue
-                    DispatchQueue.main.async { self.suppressSync = false }
-                }
-            } else {
-                coordinator.currentSearchText = newValue
-            }
-        }
         .onSubmit { coordinator.submit() }
         .onKeyPress(.upArrow) {
             coordinator.moveUp()
