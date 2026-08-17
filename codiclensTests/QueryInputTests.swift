@@ -45,6 +45,13 @@ struct QueryInputTests {
             }
         }
 
+        mutating func backspace(into coordinator: CommandCoordinator) {
+            guard !text.isEmpty else { return }
+            text.removeLast()
+            guard text != coordinator.displayedQuery else { return }
+            text = coordinator.acceptTypedText(text)
+        }
+
         mutating func showCurrentQuery(_ coordinator: CommandCoordinator) {
             coordinator.syncQueryDisplay()
             text = coordinator.displayedQuery
@@ -67,6 +74,46 @@ struct QueryInputTests {
 
         #expect(field.text == "gamer", "the field shows only the new search")
         #expect(coordinator.currentSearchText == "gamer")
+    }
+
+    /// A backspace against a settled search ends it just like a letter does —
+    /// the whole query goes, not one character.
+    @Test func backspaceAfterTheResultsSettleClearsTheWholeQuery() {
+        let coordinator = makeCoordinator()
+        var field = Field()
+
+        field.type("settings", into: coordinator)
+        settle(coordinator)
+        field.backspace(into: coordinator)
+
+        #expect(field.text.isEmpty)
+        #expect(coordinator.currentSearchText.isEmpty)
+    }
+
+    /// Mid-typing a backspace still just deletes a character.
+    @Test func backspaceWhileStillTypingDeletesOneCharacter() {
+        let coordinator = makeCoordinator()
+        var field = Field()
+
+        field.type("settings", into: coordinator)
+        field.backspace(into: coordinator)
+
+        #expect(field.text == "setting")
+        #expect(coordinator.currentSearchText == "setting")
+    }
+
+    /// After the wipe the field is free again, with nothing left over.
+    @Test func typingAfterABackspaceWipeStartsClean() {
+        let coordinator = makeCoordinator()
+        var field = Field()
+
+        field.type("settings", into: coordinator)
+        settle(coordinator)
+        field.backspace(into: coordinator)
+        field.type("mail", into: coordinator)
+
+        #expect(field.text == "mail")
+        #expect(coordinator.currentSearchText == "mail")
     }
 
     /// Without the pause, the two runs are one query.
@@ -180,13 +227,27 @@ struct QueryInputTests {
         #expect(coordinator.currentSearchText == "notes app")
     }
 
-    @Test func deletingAfterASettledSearchIsTakenLiterally() {
+    @Test func deletingAfterASettledSearchClearsIt() {
         let coordinator = makeCoordinator()
         settledAppSearch(coordinator, query: "saf")
 
         coordinator.acceptTypedText("sa")
 
-        #expect(coordinator.currentSearchText == "sa", "a backspace shortens, it doesn't replace")
+        #expect(
+            coordinator.currentSearchText.isEmpty,
+            "the search was finished with — a deletion ends it outright"
+        )
+    }
+
+    @Test func deletingWhileTheSearchIsStillRunningShortensIt() {
+        let coordinator = makeCoordinator()
+        coordinator.subjectVM.searchText = "saf"
+        coordinator.subjectVM.isSearchCommitted = false
+        coordinator.syncQueryDisplay()
+
+        coordinator.acceptTypedText("sa")
+
+        #expect(coordinator.currentSearchText == "sa")
     }
 
     @Test func clearingTheFieldClearsTheQuery() {
