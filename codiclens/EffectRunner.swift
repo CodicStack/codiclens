@@ -36,7 +36,7 @@ final class SystemEffectRunner: EffectRunner {
         case .openWith(let file, let application):
             Task {
                 let config = NSWorkspace.OpenConfiguration()
-                try? await NSWorkspace.shared.open([file], withApplicationAt: application, configuration: config)
+                _ = try? await NSWorkspace.shared.open([file], withApplicationAt: application, configuration: config)
             }
 
         case .revealInFinder(let url):
@@ -115,7 +115,7 @@ final class SystemEffectRunner: EffectRunner {
     private func open(_ url: URL) {
         Task {
             let config = NSWorkspace.OpenConfiguration()
-            try? await NSWorkspace.shared.open(url, configuration: config)
+            _ = try? await NSWorkspace.shared.open(url, configuration: config)
         }
     }
 
