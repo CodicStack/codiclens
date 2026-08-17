@@ -138,12 +138,16 @@ class CommandCoordinator {
     /// then "n", and the search is "n" — not "safn". Text mode is exempt,
     /// because there the query is the content being edited rather than a way
     /// of finding something.
-    func acceptTypedText(_ typed: String) {
+    /// - Returns: the text the field should now show, which differs from what
+    ///   was typed whenever a settled query has just been replaced.
+    @discardableResult
+    func acceptTypedText(_ typed: String) -> String {
         let startsNewQuery = phase == .searchingSubject
             && subjectVM.isSearchCommitted
             && !isTextMode
 
         currentSearchText = queryBuffer.accept(typed, startsNewQuery: startsNewQuery)
+        return queryBuffer.display
     }
 
     /// Points the field at the current phase's query. Called when the phase

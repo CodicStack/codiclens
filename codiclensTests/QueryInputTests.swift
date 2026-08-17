@@ -32,6 +32,79 @@ struct QueryInputTests {
         coordinator.syncQueryDisplay()
     }
 
+    /// Stands in for the text field: holds what is on screen and runs the same
+    /// loop `CardContainerView.onChange(of: fieldText)` runs.
+    private struct Field {
+        var text = ""
+
+        mutating func type(_ characters: String, into coordinator: CommandCoordinator) {
+            for character in characters {
+                text.append(character)
+                guard text != coordinator.displayedQuery else { continue }
+                text = coordinator.acceptTypedText(text)
+            }
+        }
+
+        mutating func showCurrentQuery(_ coordinator: CommandCoordinator) {
+            coordinator.syncQueryDisplay()
+            text = coordinator.displayedQuery
+        }
+    }
+
+    // MARK: - The whole interaction
+
+    /// Type "settings", wait for the results, then type "gamer": the field must
+    /// end up holding "gamer" alone.
+    @Test func typingAfterTheResultsSettleReplacesTheWholeQuery() {
+        let coordinator = makeCoordinator()
+        var field = Field()
+
+        field.type("settings", into: coordinator)
+        #expect(coordinator.currentSearchText == "settings")
+
+        settle(coordinator)
+        field.type("gamer", into: coordinator)
+
+        #expect(field.text == "gamer", "the field shows only the new search")
+        #expect(coordinator.currentSearchText == "gamer")
+    }
+
+    /// Without the pause, the two runs are one query.
+    @Test func typingStraightThroughKeepsExtending() {
+        let coordinator = makeCoordinator()
+        var field = Field()
+
+        field.type("settings", into: coordinator)
+        field.type("gamer", into: coordinator)
+
+        #expect(field.text == "settingsgamer")
+    }
+
+    @Test func aSettledQueryCanBeReplacedRepeatedly() {
+        let coordinator = makeCoordinator()
+        var field = Field()
+
+        field.type("settings", into: coordinator)
+        settle(coordinator)
+        field.type("gamer", into: coordinator)
+
+        settle(coordinator)
+        field.type("mail", into: coordinator)
+
+        #expect(field.text == "mail")
+        #expect(coordinator.currentSearchText == "mail")
+    }
+
+    /// Marks the search as settled, the way the debounce does once results are up.
+    private func settle(_ coordinator: CommandCoordinator) {
+        coordinator.subjectVM.results = [Subject(
+            displayName: "Settings",
+            path: nil, url: nil, icon: NSImage(), kind: .builtIn(.settings)
+        )]
+        coordinator.subjectVM.selectedIndex = 0
+        coordinator.subjectVM.isSearchCommitted = true
+    }
+
     // MARK: - While typing
 
     @Test func charactersExtendTheQueryWhileTheSearchIsStillRunning() {

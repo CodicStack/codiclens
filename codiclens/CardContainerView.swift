@@ -4,6 +4,11 @@ struct CardContainerView: View {
     @Bindable var coordinator: CommandCoordinator
     @FocusState private var isSearchFocused: Bool
 
+    /// What the text field holds. Assigning this is what actually forces the
+    /// field's contents — a binding that merely returns a different value does
+    /// not, which is why the query has to live here as state.
+    @State private var fieldText: String = ""
+
     private let becameKeyPublisher = NotificationCenter.default.publisher(
         for: NSWindow.didBecomeKeyNotification
     )
@@ -20,32 +25,34 @@ struct CardContainerView: View {
         }
         .onChange(of: coordinator.focusTrigger) {
             refocus()
-            coordinator.syncQueryDisplay()
+            showCurrentQuery()
         }
         .onChange(of: coordinator.cardCount) { refocus() }
-        .onChange(of: coordinator.phase) { coordinator.syncQueryDisplay() }
+        .onChange(of: coordinator.phase) { showCurrentQuery() }
     }
 
     private func refocus() {
         isSearchFocused = true
     }
 
-    /// The field shows what the coordinator's query buffer says it shows, and
-    /// hands every keystroke back. The buffer decides whether typing extends
-    /// the query or starts a new one, and forces the field to match.
-    private var query: Binding<String> {
-        Binding(
-            get: { coordinator.displayedQuery },
-            set: { coordinator.acceptTypedText($0) }
-        )
+    /// Points the field at whatever the current phase is searching.
+    private func showCurrentQuery() {
+        coordinator.syncQueryDisplay()
+        fieldText = coordinator.displayedQuery
     }
 
     private var hiddenSearchField: some View {
-        TextField("", text: query)
+        TextField("", text: $fieldText)
         .textFieldStyle(.plain)
         .focused($isSearchFocused)
         .frame(width: 0, height: 0)
         .opacity(0)
+        .onChange(of: fieldText) { _, typed in
+            // Ignore the echo of our own write: the coordinator already knows
+            // it put this text in the field. Anything else is the user typing.
+            guard typed != coordinator.displayedQuery else { return }
+            fieldText = coordinator.acceptTypedText(typed)
+        }
         .onSubmit { coordinator.submit() }
         .onKeyPress(.upArrow) {
             coordinator.moveUp()
