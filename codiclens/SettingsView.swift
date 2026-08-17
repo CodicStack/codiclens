@@ -19,6 +19,16 @@ struct SettingsView: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 240)
+
+            Spacer()
+
+            // Codiclens is an accessory app with no menu bar of its own, so
+            // this is the only way out.
+            Button("Quit Codiclens") {
+                NSApp.terminate(nil)
+            }
+            .keyboardShortcut("q")
+            .controlSize(.large)
         }
         .frame(width: 400, height: 300)
         .padding()
