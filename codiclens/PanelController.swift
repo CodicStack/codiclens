@@ -8,6 +8,7 @@ class PanelController {
     private let resultsPanel: FloatingPanel
     private var settingsWindow: NSWindow?
     let coordinator: CommandCoordinator
+    private let effectRunner: SystemEffectRunner
     private var clickMonitor: Any?
     private var deactivationObserver: Any?
     private var appSwitchObserver: Any?
@@ -26,28 +27,32 @@ class PanelController {
 
     init() {
         let initialWidth: CGFloat = 280
-        coordinator = CommandCoordinator()
+        let runner = SystemEffectRunner()
+        effectRunner = runner
+        coordinator = CommandCoordinator(runner: runner)
         cardPanel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: initialWidth, height: 240))
         resultsPanel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: initialWidth, height: 300))
 
-        coordinator.onHide = { [weak self] in
+        // The runner performs the OS side of every effect; these closures give
+        // it the panel-owned steps it deliberately doesn't own.
+        runner.onHide = { [weak self] in
             self?.hidePanel()
         }
 
-        coordinator.onPasteAndHide = { [weak self] simulateAction in
+        runner.onPasteAndHide = { [weak self] simulateAction in
             self?.pasteAndHide(simulateAction: simulateAction)
+        }
+
+        runner.onShowSettings = { [weak self] in
+            self?.showSettings()
+        }
+
+        runner.onSavePanel = { [weak self] (data: Data, name: String, type: UTType) in
+            self?.showSavePanel(data: data, fileName: name, contentType: type)
         }
 
         coordinator.onPhaseChange = { [weak self] in
             self?.animateCardCount()
-        }
-
-        coordinator.onShowSettings = { [weak self] in
-            self?.showSettings()
-        }
-
-        coordinator.onSavePanel = { [weak self] (data: Data, name: String, type: UTType) in
-            self?.showSavePanel(data: data, fileName: name, contentType: type)
         }
 
         quickLookHelper.onDismiss = { [weak self] in
@@ -67,7 +72,7 @@ class PanelController {
             return self.coordinator.quickLookContext()
         }
 
-        coordinator.onQuickLook = { [weak self] context in
+        runner.onQuickLook = { [weak self] context in
             guard let self else { return }
             if self.quickLookActive && self.quickLookHelper.isVisible {
                 self.dismissQuickLook()

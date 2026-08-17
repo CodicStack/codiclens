@@ -137,9 +137,15 @@ class ClipboardManager {
         save()
     }
 
-    func imageData(for item: ClipboardItem) -> Data? {
+    /// Where this item's image lives on disk. Callers must not rebuild this
+    /// path themselves — the layout belongs to this module.
+    func imageURL(for item: ClipboardItem) -> URL? {
         guard let fileName = item.imageFileName else { return nil }
-        let fileURL = imagesDirectory.appendingPathComponent(fileName)
+        return imagesDirectory.appendingPathComponent(fileName)
+    }
+
+    func imageData(for item: ClipboardItem) -> Data? {
+        guard let fileURL = imageURL(for: item) else { return nil }
         return try? Data(contentsOf: fileURL)
     }
 
