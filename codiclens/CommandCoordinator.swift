@@ -13,7 +13,6 @@ class CommandCoordinator {
 
     var phase: Phase = .searchingSubject
     var focusTrigger: Bool = false
-    var returningFromQuickLook: Bool = false
 
     private(set) var selectedSubject: Subject?
     private(set) var selectedAction: SubjectAction?
@@ -126,6 +125,25 @@ class CommandCoordinator {
     }
 
     var currentQuery: String { currentSearchText }
+
+    /// Accepts what the search field now contains and decides what the query
+    /// becomes.
+    ///
+    /// Once a subject search has settled, the next characters start a *new*
+    /// query instead of extending the old one: type "saf" to land on Safari,
+    /// then "n", and the search is "n" — not "safn". Text mode is exempt,
+    /// because there the query is the content being edited rather than a way
+    /// of finding something.
+    func acceptTypedText(_ typed: String) {
+        let previous = currentSearchText
+        let startsNewQuery = phase == .searchingSubject
+            && subjectVM.isSearchCommitted
+            && !isTextMode
+
+        currentSearchText = startsNewQuery && typed.count > previous.count
+            ? String(typed.dropFirst(previous.count))
+            : typed
+    }
 
     // MARK: - Navigation
 
