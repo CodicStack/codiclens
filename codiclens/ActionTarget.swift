@@ -28,12 +28,25 @@ struct ActionTarget: Identifiable {
     }
     
     static func shareTargets(for subject: Subject) -> [ActionTarget] {
-        let items: [Any]
         switch subject.kind {
         case .text(let rawText):
-            items = [rawText as NSString]
+            return shareTargets(for: .text(rawText))
         default:
             guard let url = subject.url else { return [] }
+            return shareTargets(for: .fileURL(url))
+        }
+    }
+
+    /// Share targets the system offers for a payload. Clipboard items and
+    /// subjects both arrive here, so the two paths can't drift apart.
+    static func shareTargets(for payload: Payload) -> [ActionTarget] {
+        let items: [Any]
+        switch payload {
+        case .text(let text):
+            items = [text as NSString]
+        case .image(let data):
+            items = NSImage(data: data).map { [$0 as Any] } ?? []
+        case .fileURL(let url):
             items = [url]
         }
 

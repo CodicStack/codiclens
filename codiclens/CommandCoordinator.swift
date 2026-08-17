@@ -24,12 +24,14 @@ class CommandCoordinator {
     let targetVM = TargetSearchVM()
     let clipboardVM = ClipboardSearchVM()
 
-    var onHide: (() -> Void)?
-    var onPasteAndHide: ((@escaping () -> Void) -> Void)?
+    /// Layout only — the card panel resizes when the phase changes.
     var onPhaseChange: (() -> Void)?
-    var onQuickLook: ((QuickLookContext) -> Void)?
-    var onShowSettings: (() -> Void)?
-    var onSavePanel: ((Data, String, UTType) -> Void)?
+
+    private let runner: EffectRunner
+
+    init(runner: EffectRunner) {
+        self.runner = runner
+    }
 
     var cardCount: Int {
         switch phase {
@@ -229,76 +231,85 @@ class CommandCoordinator {
         }
     }
 
-    func submit() {
+    /// Advances the machine and hands the resulting effects to the runner.
+    /// The effects are returned too, so tests can assert on them directly.
+    @discardableResult
+    func submit() -> [Effect] {
+        let effects = submitEffects()
+        runner.run(effects)
+        return effects
+    }
+
+    private func submitEffects() -> [Effect] {
         switch phase {
         case .searchingSubject:
-            guard subjectVM.selectedIndex < subjectVM.results.count else { return }
+            guard subjectVM.selectedIndex < subjectVM.results.count else { return [] }
             let subject = subjectVM.results[subjectVM.selectedIndex]
             if case .builtIn(.clipboard) = subject.kind {
                 selectedSubject = subject
                 clipboardVM.load()
                 phase = .browsingClipboard
                 onPhaseChange?()
-            } else {
-                onHide?()
-                executeDefaultAction(for: subject)
+                return []
             }
+            return [.hide] + defaultEffects(for: subject)
 
         case .browsingClipboard:
-            guard clipboardVM.selectedIndex < clipboardVM.filteredItems.count else { return }
-            let item = clipboardVM.filteredItems[clipboardVM.selectedIndex]
-            pasteClipboardItem(item)
+            guard clipboardVM.selectedIndex < clipboardVM.filteredItems.count else { return [] }
+            return pasteEffects(for: clipboardVM.filteredItems[clipboardVM.selectedIndex])
 
         case .pickingAction:
-            guard actionVM.selectedIndex < actionVM.filteredActions.count else { return }
+            guard actionVM.selectedIndex < actionVM.filteredActions.count else { return [] }
             let action = actionVM.filteredActions[actionVM.selectedIndex]
 
             if let clipItem = selectedClipboardItem {
-                executeClipboardAction(action, on: clipItem)
-                return
+                return effects(for: action, on: clipItem)
             }
 
-            guard let subject = selectedSubject else { return }
-            if action.isFinal {
-                if case .transform(let t) = action.handler, case .text(let rawText) = subject.kind {
-                    let result = t.apply(rawText)
-                    let textIcon = NSImage(systemSymbolName: "text.quote", accessibilityDescription: nil) ?? NSImage()
-                    textIcon.size = NSSize(width: 32, height: 32)
-                    let newSubject = Subject(
-                        displayName: result,
-                        path: nil,
-                        url: nil,
-                        icon: textIcon,
-                        kind: .text(rawText: result)
-                    )
-                    selectedSubject = newSubject
-                    subjectVM.searchText = result
-                    actionVM.loadActions(for: newSubject)
-                    onPhaseChange?()
-                } else {
-                    onHide?()
-                    executeAction(action, on: subject)
-                }
-            } else {
+            guard let subject = selectedSubject else { return [] }
+            guard action.isFinal else {
                 selectedAction = action
                 targetVM.loadTargets(for: subject, action: action)
                 phase = .pickingTarget
                 onPhaseChange?()
+                return []
             }
+
+            // Transforming text feeds the result back in as the new subject,
+            // so transforms can be chained without leaving the panel.
+            if case .transform(let t) = action.handler, case .text(let rawText) = subject.kind {
+                retarget(at: t.apply(rawText))
+                return []
+            }
+            return [.hide] + effects(for: action, on: subject)
 
         case .pickingTarget:
             guard let subject = selectedSubject,
                   let action = selectedAction,
-                  targetVM.selectedIndex < targetVM.filteredTargets.count else { return }
+                  targetVM.selectedIndex < targetVM.filteredTargets.count else { return [] }
             let target = targetVM.filteredTargets[targetVM.selectedIndex]
-            onHide?()
-            executeAction(action, on: subject, with: target)
+            return [.hide] + effects(for: action, on: subject, with: target)
 
         case .showingResult(let result):
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(result, forType: .string)
-            onHide?()
+            return [.copy(.text(result)), .hide]
         }
+    }
+
+    /// Replaces the subject with transformed text and reloads its actions.
+    private func retarget(at result: String) {
+        let textIcon = NSImage(systemSymbolName: "text.quote", accessibilityDescription: nil) ?? NSImage()
+        textIcon.size = NSSize(width: 32, height: 32)
+        let newSubject = Subject(
+            displayName: result,
+            path: nil,
+            url: nil,
+            icon: textIcon,
+            kind: .text(rawText: result)
+        )
+        selectedSubject = newSubject
+        subjectVM.searchText = result
+        actionVM.loadActions(for: newSubject)
+        onPhaseChange?()
     }
 
     func reset() {
@@ -317,7 +328,7 @@ class CommandCoordinator {
 
     func triggerQuickLook() {
         guard let context = quickLookContext() else { return }
-        onQuickLook?(context)
+        runner.run([.quickLook(context)])
     }
 
     func quickLookContext() -> QuickLookContext? {
@@ -341,54 +352,40 @@ class CommandCoordinator {
         }
     }
 
-    // MARK: - Clipboard Actions
+    // MARK: - Clipboard execution
 
-    private func pasteClipboardItem(_ item: ClipboardItem) {
-        ClipboardManager.shared.moveToTop(item)
-        NSPasteboard.general.clearContents()
+    private func payload(for item: ClipboardItem) -> Payload {
         if item.isImage, let imageData = ClipboardManager.shared.imageData(for: item) {
-            NSPasteboard.general.setData(imageData, forType: .png)
-        } else {
-            NSPasteboard.general.setString(item.content, forType: .string)
+            return .image(imageData)
         }
-        onPasteAndHide?({ Self.simulatePaste() })
+        return .text(item.content)
     }
 
-    private func executeClipboardAction(_ action: SubjectAction, on item: ClipboardItem) {
+    private func pasteEffects(for item: ClipboardItem) -> [Effect] {
+        ClipboardManager.shared.moveToTop(item)
+        return [.paste(payload(for: item))]
+    }
+
+    private func effects(for action: SubjectAction, on item: ClipboardItem) -> [Effect] {
         switch action.handler {
         case .clipboardPaste:
-            pasteClipboardItem(item)
+            return pasteEffects(for: item)
 
         case .clipboardCopy:
-            NSPasteboard.general.clearContents()
-            if item.isImage, let imageData = ClipboardManager.shared.imageData(for: item) {
-                NSPasteboard.general.setData(imageData, forType: .png)
-            } else {
-                NSPasteboard.general.setString(item.content, forType: .string)
-            }
-            onHide?()
+            return [.copy(payload(for: item)), .hide]
 
         case .clipboardPastePlain:
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(item.content, forType: .string)
-            onPasteAndHide?({ Self.simulatePaste() })
+            return [.paste(.text(item.content))]
 
         case .clipboardTypeText:
-            let text = item.content
-            onPasteAndHide?({ Self.simulateTyping(text) })
+            return [.typeText(item.content)]
 
         case .clipboardRunScript:
-            let script = NSAppleScript(source: item.content)
-            var error: NSDictionary?
-            script?.executeAndReturnError(&error)
-            onHide?()
+            return [.runAppleScript(item.content), .hide]
 
         case .clipboardOpenEmail:
-            let encoded = item.content.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? item.content
-            if let url = URL(string: "mailto:?body=\(encoded)") {
-                openAsync(url)
-            }
-            onHide?()
+            guard let url = Self.mailtoURL(body: item.content) else { return [.hide] }
+            return [.open(url), .hide]
 
         case .clipboardDelete:
             if let idx = ClipboardManager.shared.items.firstIndex(where: { $0.id == item.id }) {
@@ -397,267 +394,192 @@ class CommandCoordinator {
             clipboardVM.load()
             phase = .browsingClipboard
             onPhaseChange?()
+            return []
 
         case .clipboardOpenPreview:
-            if let fileName = item.imageFileName {
-                let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-                let url = dir.appendingPathComponent("codiclens/images/\(fileName)")
-                openAsync(url)
-            }
-            onHide?()
+            guard let url = ClipboardManager.shared.imageURL(for: item) else { return [.hide] }
+            return [.open(url), .hide]
 
         case .clipboardCopyPath:
-            if let path = item.originalFilePath {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(path, forType: .string)
-            } else if let fileName = item.imageFileName {
-                let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-                let url = dir.appendingPathComponent("codiclens/images/\(fileName)")
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(url.path, forType: .string)
+            guard let path = item.originalFilePath ?? ClipboardManager.shared.imageURL(for: item)?.path else {
+                return [.hide]
             }
-            onHide?()
+            return [.copy(.text(path)), .hide]
 
         case .clipboardSaveImage:
-            guard let imageData = ClipboardManager.shared.imageData(for: item) else { onHide?(); return }
-            onSavePanel?(imageData, item.imageFileName ?? "image.png", .png)
+            guard let imageData = ClipboardManager.shared.imageData(for: item) else { return [.hide] }
+            return [.savePanel(
+                data: imageData,
+                fileName: item.imageFileName ?? "image.png",
+                contentType: .png
+            )]
 
         case .clipboardSaveFile:
-            guard !item.isImage, let textData = item.content.data(using: .utf8) else { onHide?(); return }
-            onSavePanel?(textData, "untitled.txt", .plainText)
+            guard !item.isImage, let textData = item.content.data(using: .utf8) else { return [.hide] }
+            return [.savePanel(data: textData, fileName: "untitled.txt", contentType: .plainText)]
 
         case .clipboardTransform(let transform):
-            guard !item.isImage else { onHide?(); return }
-            let result = transform.apply(item.content)
-            if let idx = ClipboardManager.shared.items.firstIndex(where: { $0.id == item.id }) {
-                ClipboardManager.shared.updateText(at: idx, text: result)
-                clipboardVM.load()
-                clipboardVM.selectedIndex = min(idx, clipboardVM.filteredItems.count - 1)
-            }
-            selectedClipboardItem = ClipboardItem(content: result)
-            phase = .browsingClipboard
-            onPhaseChange?()
+            guard !item.isImage else { return [.hide] }
+            applyToHistory(transform, on: item)
+            return []
 
         case .clipboardCount(let countType):
-            guard !item.isImage else { onHide?(); return }
-            let result = countType.count(item.content)
-            phase = .showingResult(result)
+            guard !item.isImage else { return [.hide] }
+            phase = .showingResult(countType.count(item.content))
             onPhaseChange?()
+            return []
 
         case .searchWeb:
-            let encoded = item.content.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? item.content
-            if let url = URL(string: "https://www.google.com/search?q=\(encoded)") {
-                openAsync(url)
-            }
-            onHide?()
+            guard let url = Self.webSearchURL(for: item.content) else { return [.hide] }
+            return [.open(url), .hide]
 
         case .share:
-            if !action.isFinal {
-                selectedAction = action
-                // Create share targets
-                let items: [Any] = item.isImage
-                    ? (ClipboardManager.shared.imageData(for: item).map { [NSImage(data: $0) as Any] } ?? [])
-                    : [item.content as NSString]
-                let targets = NSSharingService.sharingServices(forItems: items).map { service in
-                    let icon = service.image ?? NSImage()
-                    icon.size = NSSize(width: 32, height: 32)
-                    return ActionTarget(name: service.title, icon: icon, url: nil, sharingService: service)
-                }
-                targetVM.allTargets = targets
-                targetVM.filteredTargets = targets
-                targetVM.selectedIndex = 0
-                phase = .pickingTarget
-                onPhaseChange?()
-            }
+            guard !action.isFinal else { return [] }
+            selectedAction = action
+            targetVM.loadShareTargets(for: payload(for: item))
+            phase = .pickingTarget
+            onPhaseChange?()
+            return []
 
         case .quickLook:
-            if let url = ClipboardManager.shared.previewURL(for: item) {
-                onQuickLook?(QuickLookContext(
-                    items: [QuickLookPreviewItem(url: url, title: item.displayName)],
-                    selectedIndex: 0
-                ))
-            }
+            guard let url = ClipboardManager.shared.previewURL(for: item) else { return [] }
+            return [.quickLook(QuickLookContext(
+                items: [QuickLookPreviewItem(url: url, title: item.displayName)],
+                selectedIndex: 0
+            ))]
 
         default:
-            onHide?()
+            return [.hide]
         }
     }
 
-    // MARK: - Standard Execution
-
-    private func openAsync(_ url: URL) {
-        Task {
-            let config = NSWorkspace.OpenConfiguration()
-            try? await NSWorkspace.shared.open(url, configuration: config)
+    /// Rewrites the item in history, then stays in the clipboard browser
+    /// with the rewritten item selected.
+    private func applyToHistory(_ transform: TextTransform, on item: ClipboardItem) {
+        let result = transform.apply(item.content)
+        if let idx = ClipboardManager.shared.items.firstIndex(where: { $0.id == item.id }) {
+            ClipboardManager.shared.updateText(at: idx, text: result)
+            clipboardVM.load()
+            clipboardVM.selectedIndex = min(idx, clipboardVM.filteredItems.count - 1)
         }
+        selectedClipboardItem = ClipboardItem(content: result)
+        phase = .browsingClipboard
+        onPhaseChange?()
     }
 
-    private func executeDefaultAction(for subject: Subject) {
+    // MARK: - Subject execution
+
+    private func defaultEffects(for subject: Subject) -> [Effect] {
         switch subject.kind {
         case .app, .file, .folder:
-            if let url = subject.url {
-                openAsync(url)
-            }
+            guard let url = subject.url else { return [] }
+            return [.open(url)]
         case .text(let rawText):
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(rawText, forType: .string)
+            return [.copy(.text(rawText))]
         case .builtIn(.settings):
-            onShowSettings?()
+            return [.showSettings]
         case .builtIn(.clipboard):
-            break
+            return []
         }
     }
 
-    private func executeAction(_ action: SubjectAction, on subject: Subject, with target: ActionTarget? = nil) {
+    private func effects(
+        for action: SubjectAction,
+        on subject: Subject,
+        with target: ActionTarget? = nil
+    ) -> [Effect] {
         switch action.handler {
         case .openApp:
-            if let url = subject.url { openAsync(url) }
+            guard let url = subject.url else { return [] }
+            return [.open(url)]
 
         case .openFile:
-            if let url = target?.url ?? subject.url { openAsync(url) }
+            guard let url = target?.url ?? subject.url else { return [] }
+            return [.open(url)]
 
         case .quitApp:
-            if case .app(let bundleId, _) = subject.kind, let bundleId {
-                NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first?.terminate()
-            }
+            guard case .app(let bundleId, _) = subject.kind, let bundleId else { return [] }
+            return [.terminate(bundleIdentifier: bundleId)]
 
         case .hideApp:
-            if case .app(let bundleId, _) = subject.kind, let bundleId {
-                NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first?.hide()
-            }
+            guard case .app(let bundleId, _) = subject.kind, let bundleId else { return [] }
+            return [.hideApplication(bundleIdentifier: bundleId)]
 
         case .showInFinder, .revealInFinder:
-            if let url = target?.url ?? subject.url {
-                NSWorkspace.shared.activateFileViewerSelecting([url])
-            }
+            guard let url = target?.url ?? subject.url else { return [] }
+            return [.revealInFinder(url)]
 
         case .copyPath:
-            if let path = target?.url?.path ?? subject.path {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(path, forType: .string)
-            }
+            guard let path = target?.url?.path ?? subject.path else { return [] }
+            return [.copy(.text(path))]
 
         case .openWith:
-            if let target, let appURL = target.url, let fileURL = subject.url {
-                let config = NSWorkspace.OpenConfiguration()
-                Task { try? await NSWorkspace.shared.open([fileURL], withApplicationAt: appURL, configuration: config) }
-            }
+            guard let appURL = target?.url, let fileURL = subject.url else { return [] }
+            return [.openWith(file: fileURL, application: appURL)]
 
         case .moveToTrash:
-            if let url = target?.url ?? subject.url {
-                try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
-            }
+            guard let url = target?.url ?? subject.url else { return [] }
+            return [.moveToTrash(url)]
 
         case .quickLook:
-            if let url = target?.url ?? subject.url {
-                onQuickLook?(QuickLookContext(
-                    items: [QuickLookPreviewItem(url: url, title: url.lastPathComponent)],
-                    selectedIndex: 0
-                ))
-            }
+            guard let url = target?.url ?? subject.url else { return [] }
+            return [.quickLook(QuickLookContext(
+                items: [QuickLookPreviewItem(url: url, title: url.lastPathComponent)],
+                selectedIndex: 0
+            ))]
 
         case .pasteText:
-            if case .text(let rawText) = subject.kind {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(rawText, forType: .string)
-                onPasteAndHide?({ Self.simulatePaste() })
-                return
-            }
+            guard case .text(let rawText) = subject.kind else { return [] }
+            return [.paste(.text(rawText))]
 
         case .copyText:
-            if case .text(let rawText) = subject.kind {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(rawText, forType: .string)
-            }
+            guard case .text(let rawText) = subject.kind else { return [] }
+            return [.copy(.text(rawText))]
 
         case .transform(let t):
-            if case .text(let rawText) = subject.kind {
-                let result = t.apply(rawText)
-                phase = .showingResult(result)
-                onPhaseChange?()
-                return
-            }
+            guard case .text(let rawText) = subject.kind else { return [] }
+            phase = .showingResult(t.apply(rawText))
+            onPhaseChange?()
+            return []
 
         case .searchWeb:
-            if case .text(let rawText) = subject.kind {
-                let encoded = rawText.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? rawText
-                if let url = URL(string: "https://www.google.com/search?q=\(encoded)") {
-                    openAsync(url)
-                }
-            }
+            guard case .text(let rawText) = subject.kind,
+                  let url = Self.webSearchURL(for: rawText) else { return [] }
+            return [.open(url)]
 
         case .openURL:
-            if case .text(let rawText) = subject.kind, let url = URL(string: rawText) {
-                openAsync(url)
-            }
+            guard case .text(let rawText) = subject.kind,
+                  let url = URL(string: rawText) else { return [] }
+            return [.open(url)]
 
         case .share:
-            if let target, let service = target.sharingService {
-                switch subject.kind {
-                case .text(let rawText):
-                    service.perform(withItems: [rawText as NSString])
-                default:
-                    if let url = subject.url { service.perform(withItems: [url]) }
-                }
+            guard let service = target?.sharingService else { return [] }
+            if case .text(let rawText) = subject.kind {
+                return [.share(.text(rawText), via: service)]
             }
-
-        case .service:
-            break
+            guard let url = subject.url else { return [] }
+            return [.share(.fileURL(url), via: service)]
 
         case .openSettings:
-            onShowSettings?()
+            return [.showSettings]
+
+        case .service:
+            return []
 
         default:
-            break
+            return []
         }
     }
 
-    // MARK: - Input Simulation
+    // MARK: - URLs
 
-    static func simulatePaste() {
-        if !AXIsProcessTrusted() {
-            print("[codiclens] accessibility not trusted (may differ between Xcode and installed builds)")
-        }
-
-        let source = CGEventSource(stateID: .combinedSessionState)
-        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true),
-              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) else {
-            print("[codiclens] CGEvent creation failed, using AppleScript fallback")
-            simulatePasteFallback()
-            return
-        }
-
-        keyDown.flags = .maskCommand
-        keyUp.flags = .maskCommand
-        keyDown.post(tap: .cgSessionEventTap)
-        keyUp.post(tap: .cgSessionEventTap)
+    static func webSearchURL(for text: String) -> URL? {
+        let encoded = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text
+        return URL(string: "https://www.google.com/search?q=\(encoded)")
     }
 
-    private static func simulatePasteFallback() {
-        let script = NSAppleScript(source: """
-            tell application "System Events"
-                keystroke "v" using command down
-            end tell
-        """)
-        var error: NSDictionary?
-        script?.executeAndReturnError(&error)
-        if let error {
-            print("[codiclens] AppleScript paste fallback failed: \(error)")
-        }
-    }
-
-    private static func simulateTyping(_ text: String) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            let source = CGEventSource(stateID: .combinedSessionState)
-            for char in text {
-                var utf16 = Array(String(char).utf16)
-                guard let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true) else { continue }
-                event.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
-                event.post(tap: .cgSessionEventTap)
-                let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
-                up?.post(tap: .cgSessionEventTap)
-                usleep(10_000)
-            }
-        }
+    static func mailtoURL(body: String) -> URL? {
+        let encoded = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? body
+        return URL(string: "mailto:?body=\(encoded)")
     }
 }

@@ -72,6 +72,15 @@ class TargetSearchVM {
         selectedIndex = 0
     }
 
+    /// Share targets for a clipboard item, which has no `Subject` to derive them from.
+    func loadShareTargets(for payload: Payload) {
+        searchText = ""
+        isFileSearchMode = false
+        allTargets = ActionTarget.shareTargets(for: payload)
+        filteredTargets = allTargets
+        selectedIndex = 0
+    }
+
     private func performFileSearch(_ text: String) {
         searchProcess?.terminate()
         searchProcess = nil
