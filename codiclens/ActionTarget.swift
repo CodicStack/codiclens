@@ -51,7 +51,7 @@ struct ActionTarget: Identifiable {
         }
 
         return NSSharingService.sharingServices(forItems: items).map { service in
-            let icon = service.image ?? NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: nil) ?? NSImage()
+            let icon = service.image
             icon.size = NSSize(width: 32, height: 32)
             return ActionTarget(name: service.title, icon: icon, url: nil, sharingService: service)
         }

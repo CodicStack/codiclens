@@ -87,13 +87,16 @@ struct CommandCoordinatorTests {
 
     // MARK: - Actions on a subject
 
-    @Test func pasteActionOnTextEmitsAPaste() throws {
+    /// No `.hide` before a `.paste`: hiding clears the app to hand activation
+    /// back to, so the keystroke would land in the wrong place. Text and
+    /// clipboard pastes behave the same way now.
+    @Test func pasteActionOnTextEmitsAPasteWithoutHidingFirst() throws {
         let (coordinator, _) = makeCoordinator()
         seed(coordinator, with: textSubject("hello"))
         coordinator.advancePhase()
         try selectAction("Paste", in: coordinator)
 
-        #expect(coordinator.submit() == [.hide, .paste(.text("hello"))])
+        #expect(coordinator.submit() == [.paste(.text("hello"))])
     }
 
     @Test func copyActionOnTextEmitsACopy() throws {

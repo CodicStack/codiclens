@@ -17,7 +17,9 @@ class CommandCoordinator {
 
     private(set) var selectedSubject: Subject?
     private(set) var selectedAction: SubjectAction?
-    private(set) var selectedClipboardItem: ClipboardItem?
+
+    /// The clipboard entry being acted on, when the selected subject is one.
+    var selectedClipboardItem: ClipboardItem? { selectedSubject?.clipboardItem }
 
     let subjectVM = SubjectSearchVM()
     let actionVM = ActionSearchVM()
@@ -66,7 +68,7 @@ class CommandCoordinator {
         } else {
             let item = currentClipboardItem
             guard let item, !item.isImage else { return }
-            selectedClipboardItem = item
+            selectedSubject = Subject(clipboardItem: item)
             clipboardEditText = item.content
             isEditingClipboardItem = true
         }
@@ -78,14 +80,14 @@ class CommandCoordinator {
             history.updateText(for: item, text: clipboardEditText)
         }
         isEditingClipboardItem = false
-        selectedClipboardItem = ClipboardItem(content: clipboardEditText)
+        selectedSubject = Subject(clipboardItem: ClipboardItem(content: clipboardEditText))
         clipboardVM.load()
     }
 
     func saveClipboardEditAndAdvance() {
         saveClipboardEdit()
-        guard let item = selectedClipboardItem else { return }
-        actionVM.loadClipboardActions(for: item)
+        guard let subject = selectedSubject else { return }
+        actionVM.loadActions(for: subject)
         phase = .pickingAction
         onPhaseChange?()
     }
@@ -152,7 +154,7 @@ class CommandCoordinator {
     func moveUp() {
         if currentSelectedIndex > 0 {
             currentSelectedIndex -= 1
-            if phase == .browsingClipboard { selectedClipboardItem = nil }
+            if phase == .browsingClipboard { selectedSubject = nil }
         }
     }
 
@@ -160,7 +162,7 @@ class CommandCoordinator {
         let count = currentResults.count
         if currentSelectedIndex < count - 1 {
             currentSelectedIndex += 1
-            if phase == .browsingClipboard { selectedClipboardItem = nil }
+            if phase == .browsingClipboard { selectedSubject = nil }
         }
     }
 
@@ -184,9 +186,9 @@ class CommandCoordinator {
 
         case .browsingClipboard:
             guard clipboardVM.selectedIndex < clipboardVM.filteredItems.count else { return }
-            let item = clipboardVM.filteredItems[clipboardVM.selectedIndex]
-            selectedClipboardItem = item
-            actionVM.loadClipboardActions(for: item)
+            let subject = Subject(clipboardItem: clipboardVM.filteredItems[clipboardVM.selectedIndex])
+            selectedSubject = subject
+            actionVM.loadActions(for: subject)
             phase = .pickingAction
             onPhaseChange?()
 
@@ -254,20 +256,17 @@ class CommandCoordinator {
                 onPhaseChange?()
                 return []
             }
-            return [.hide] + defaultEffects(for: subject)
+            return defaultEffects(for: subject)
 
         case .browsingClipboard:
             guard clipboardVM.selectedIndex < clipboardVM.filteredItems.count else { return [] }
-            return pasteEffects(for: clipboardVM.filteredItems[clipboardVM.selectedIndex])
+            let subject = Subject(clipboardItem: clipboardVM.filteredItems[clipboardVM.selectedIndex])
+            selectedSubject = subject
+            return defaultEffects(for: subject)
 
         case .pickingAction:
             guard actionVM.selectedIndex < actionVM.filteredActions.count else { return [] }
             let action = actionVM.filteredActions[actionVM.selectedIndex]
-
-            if let clipItem = selectedClipboardItem {
-                return effects(for: action, on: clipItem)
-            }
-
             guard let subject = selectedSubject else { return [] }
             guard action.isFinal else {
                 selectedAction = action
@@ -276,21 +275,14 @@ class CommandCoordinator {
                 onPhaseChange?()
                 return []
             }
-
-            // Transforming text feeds the result back in as the new subject,
-            // so transforms can be chained without leaving the panel.
-            if case .transform(let t) = action.handler, case .text(let rawText) = subject.kind {
-                retarget(at: t.apply(rawText))
-                return []
-            }
-            return [.hide] + effects(for: action, on: subject)
+            return effects(for: action, on: subject)
 
         case .pickingTarget:
             guard let subject = selectedSubject,
                   let action = selectedAction,
                   targetVM.selectedIndex < targetVM.filteredTargets.count else { return [] }
             let target = targetVM.filteredTargets[targetVM.selectedIndex]
-            return [.hide] + effects(for: action, on: subject, with: target)
+            return effects(for: action, on: subject, with: target)
 
         case .showingResult(let result):
             return [.copy(.text(result)), .hide]
@@ -299,15 +291,7 @@ class CommandCoordinator {
 
     /// Replaces the subject with transformed text and reloads its actions.
     private func retarget(at result: String) {
-        let textIcon = NSImage(systemSymbolName: "text.quote", accessibilityDescription: nil) ?? NSImage()
-        textIcon.size = NSSize(width: 32, height: 32)
-        let newSubject = Subject(
-            displayName: result,
-            path: nil,
-            url: nil,
-            icon: textIcon,
-            kind: .text(rawText: result)
-        )
+        let newSubject = Subject(text: result)
         selectedSubject = newSubject
         subjectVM.searchText = result
         actionVM.loadActions(for: newSubject)
@@ -318,7 +302,6 @@ class CommandCoordinator {
         phase = .searchingSubject
         selectedSubject = nil
         selectedAction = nil
-        selectedClipboardItem = nil
         isEditingClipboardItem = false
         clipboardEditText = ""
         subjectVM.isSearchCommitted = true
@@ -354,221 +337,246 @@ class CommandCoordinator {
         }
     }
 
-    // MARK: - Clipboard execution
+    // MARK: - Execution
 
-    private func payload(for item: ClipboardItem) -> Payload {
-        if item.isImage, let imageData = history.imageData(for: item) {
-            return .image(imageData)
-        }
-        return .text(item.content)
-    }
-
-    private func pasteEffects(for item: ClipboardItem) -> [Effect] {
-        history.moveToTop(item)
-        return [.paste(payload(for: item))]
-    }
-
-    private func effects(for action: SubjectAction, on item: ClipboardItem) -> [Effect] {
-        switch action.handler {
-        case .clipboardPaste:
-            return pasteEffects(for: item)
-
-        case .clipboardCopy:
-            return [.copy(payload(for: item)), .hide]
-
-        case .clipboardPastePlain:
-            return [.paste(.text(item.content))]
-
-        case .clipboardTypeText:
-            return [.typeText(item.content)]
-
-        case .clipboardRunScript:
-            return [.runAppleScript(item.content), .hide]
-
-        case .clipboardOpenEmail:
-            guard let url = Self.mailtoURL(body: item.content) else { return [.hide] }
-            return [.open(url), .hide]
-
-        case .clipboardDelete:
-            history.remove(item)
-            clipboardVM.load()
-            phase = .browsingClipboard
-            onPhaseChange?()
-            return []
-
-        case .clipboardOpenPreview:
-            guard let url = history.imageURL(for: item) else { return [.hide] }
-            return [.open(url), .hide]
-
-        case .clipboardCopyPath:
-            guard let path = item.originalFilePath ?? history.imageURL(for: item)?.path else {
-                return [.hide]
+    /// What this subject puts on the pasteboard or hands to a share service.
+    private func payload(for subject: Subject) -> Payload? {
+        switch subject.kind {
+        case .clipboard(let item):
+            if item.isImage, let imageData = history.imageData(for: item) {
+                return .image(imageData)
             }
-            return [.copy(.text(path)), .hide]
-
-        case .clipboardSaveImage:
-            guard let imageData = history.imageData(for: item) else { return [.hide] }
-            return [.savePanel(
-                data: imageData,
-                fileName: item.imageFileName ?? "image.png",
-                contentType: .png
-            )]
-
-        case .clipboardSaveFile:
-            guard !item.isImage, let textData = item.content.data(using: .utf8) else { return [.hide] }
-            return [.savePanel(data: textData, fileName: "untitled.txt", contentType: .plainText)]
-
-        case .clipboardTransform(let transform):
-            guard !item.isImage else { return [.hide] }
-            applyToHistory(transform, on: item)
-            return []
-
-        case .clipboardCount(let countType):
-            guard !item.isImage else { return [.hide] }
-            phase = .showingResult(countType.count(item.content))
-            onPhaseChange?()
-            return []
-
-        case .searchWeb:
-            guard let url = Self.webSearchURL(for: item.content) else { return [.hide] }
-            return [.open(url), .hide]
-
-        case .share:
-            guard !action.isFinal else { return [] }
-            selectedAction = action
-            targetVM.loadShareTargets(for: payload(for: item))
-            phase = .pickingTarget
-            onPhaseChange?()
-            return []
-
-        case .quickLook:
-            guard let url = history.previewURL(for: item) else { return [] }
-            return [.quickLook(QuickLookContext(
-                items: [QuickLookPreviewItem(url: url, title: item.displayName)],
-                selectedIndex: 0
-            ))]
-
+            return .text(item.content)
+        case .text(let rawText):
+            return .text(rawText)
         default:
-            return [.hide]
+            return subject.url.map { .fileURL($0) }
         }
     }
 
-    /// Rewrites the item in history, then stays in the clipboard browser
-    /// with the rewritten item selected.
-    private func applyToHistory(_ transform: TextTransform, on item: ClipboardItem) {
-        let result = transform.apply(item.content)
-        if let index = history.index(of: item) {
-            history.updateText(at: index, text: result)
-            clipboardVM.load()
-            clipboardVM.selectedIndex = min(index, clipboardVM.filteredItems.count - 1)
+    /// The plain text behind a subject, where it has any.
+    private func plainText(for subject: Subject) -> String? {
+        switch subject.kind {
+        case .clipboard(let item): item.isImage ? nil : item.content
+        case .text(let rawText): rawText
+        default: nil
         }
-        selectedClipboardItem = ClipboardItem(content: result)
-        phase = .browsingClipboard
-        onPhaseChange?()
     }
 
-    // MARK: - Subject execution
+    /// The file a subject points at: its own URL, or the stored image for a
+    /// clipboard entry.
+    private func fileURL(for subject: Subject, target: ActionTarget? = nil) -> URL? {
+        if let targetURL = target?.url { return targetURL }
+        if case .clipboard(let item) = subject.kind {
+            return history.imageURL(for: item) ?? item.originalFileURL
+        }
+        return subject.url
+    }
 
     private func defaultEffects(for subject: Subject) -> [Effect] {
         switch subject.kind {
         case .app, .file, .folder:
-            guard let url = subject.url else { return [] }
-            return [.open(url)]
+            guard let url = subject.url else { return [.hide] }
+            return [.hide, .open(url)]
         case .text(let rawText):
-            return [.copy(.text(rawText))]
+            return [.hide, .copy(.text(rawText))]
+        case .clipboard:
+            return effects(for: .init(
+                name: "Paste", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .paste
+            ), on: subject)
         case .builtIn(.settings):
-            return [.showSettings]
+            return [.hide, .showSettings]
         case .builtIn(.clipboard):
             return []
         }
     }
 
+    /// The one execution table. Every subject kind and every action goes
+    /// through here; each case returns the complete list of effects, including
+    /// whether the panel dismisses.
     private func effects(
         for action: SubjectAction,
         on subject: Subject,
         with target: ActionTarget? = nil
     ) -> [Effect] {
         switch action.handler {
-        case .openApp:
-            guard let url = subject.url else { return [] }
-            return [.open(url)]
 
-        case .openFile:
-            guard let url = target?.url ?? subject.url else { return [] }
-            return [.open(url)]
+        // MARK: Applications
+
+        case .openApp:
+            guard let url = subject.url else { return [.hide] }
+            return [.hide, .open(url)]
 
         case .quitApp:
-            guard case .app(let bundleId, _) = subject.kind, let bundleId else { return [] }
-            return [.terminate(bundleIdentifier: bundleId)]
+            guard case .app(let bundleId, _) = subject.kind, let bundleId else { return [.hide] }
+            return [.hide, .terminate(bundleIdentifier: bundleId)]
 
         case .hideApp:
-            guard case .app(let bundleId, _) = subject.kind, let bundleId else { return [] }
-            return [.hideApplication(bundleIdentifier: bundleId)]
+            guard case .app(let bundleId, _) = subject.kind, let bundleId else { return [.hide] }
+            return [.hide, .hideApplication(bundleIdentifier: bundleId)]
 
-        case .showInFinder, .revealInFinder:
-            guard let url = target?.url ?? subject.url else { return [] }
-            return [.revealInFinder(url)]
+        // MARK: Files
 
-        case .copyPath:
-            guard let path = target?.url?.path ?? subject.path else { return [] }
-            return [.copy(.text(path))]
+        case .openFile:
+            guard let url = fileURL(for: subject, target: target) else { return [.hide] }
+            return [.hide, .open(url)]
 
         case .openWith:
-            guard let appURL = target?.url, let fileURL = subject.url else { return [] }
-            return [.openWith(file: fileURL, application: appURL)]
+            guard let appURL = target?.url, let url = subject.url else { return [.hide] }
+            return [.hide, .openWith(file: url, application: appURL)]
+
+        case .showInFinder, .revealInFinder:
+            guard let url = fileURL(for: subject, target: target) else { return [.hide] }
+            return [.hide, .revealInFinder(url)]
 
         case .moveToTrash:
-            guard let url = target?.url ?? subject.url else { return [] }
-            return [.moveToTrash(url)]
+            guard let url = fileURL(for: subject, target: target) else { return [.hide] }
+            return [.hide, .moveToTrash(url)]
+
+        case .copyPath:
+            guard let path = target?.url?.path ?? fileURL(for: subject)?.path ?? subject.path else {
+                return [.hide]
+            }
+            return [.hide, .copy(.text(path))]
 
         case .quickLook:
-            guard let url = target?.url ?? subject.url else { return [] }
+            guard let url = quickLookURL(for: subject, target: target) else { return [] }
             return [.quickLook(QuickLookContext(
-                items: [QuickLookPreviewItem(url: url, title: url.lastPathComponent)],
+                items: [QuickLookPreviewItem(url: url, title: subject.displayName)],
                 selectedIndex: 0
             ))]
 
-        case .pasteText:
-            guard case .text(let rawText) = subject.kind else { return [] }
-            return [.paste(.text(rawText))]
+        // MARK: Payloads
 
-        case .copyText:
-            guard case .text(let rawText) = subject.kind else { return [] }
-            return [.copy(.text(rawText))]
+        case .copy:
+            guard let payload = payload(for: subject) else { return [.hide] }
+            return [.hide, .copy(payload)]
 
-        case .transform(let t):
-            guard case .text(let rawText) = subject.kind else { return [] }
-            phase = .showingResult(t.apply(rawText))
+        case .paste:
+            guard let payload = payload(for: subject) else { return [.hide] }
+            // A pasted entry becomes the most recent one.
+            if case .clipboard(let item) = subject.kind {
+                history.moveToTop(item)
+            }
+            return [.paste(payload)]
+
+        case .pastePlain:
+            guard let text = plainText(for: subject) else { return [.hide] }
+            return [.paste(.text(text))]
+
+        case .typeText:
+            guard let text = plainText(for: subject) else { return [.hide] }
+            return [.typeText(text)]
+
+        case .runScript:
+            guard let text = plainText(for: subject) else { return [.hide] }
+            return [.runAppleScript(text), .hide]
+
+        case .saveAs:
+            return saveEffects(for: subject)
+
+        case .share:
+            guard let service = target?.sharingService, let payload = payload(for: subject) else {
+                return [.hide]
+            }
+            return [.hide, .share(payload, via: service)]
+
+        // MARK: Text results
+
+        case .transform(let transform):
+            guard let text = plainText(for: subject) else { return [.hide] }
+            return transformEffects(transform, on: subject, text: text)
+
+        case .count(let countType):
+            guard let text = plainText(for: subject) else { return [.hide] }
+            phase = .showingResult(countType.count(text))
             onPhaseChange?()
             return []
 
         case .searchWeb:
-            guard case .text(let rawText) = subject.kind,
-                  let url = Self.webSearchURL(for: rawText) else { return [] }
-            return [.open(url)]
+            guard let text = plainText(for: subject),
+                  let url = Self.webSearchURL(for: text) else { return [.hide] }
+            return [.hide, .open(url)]
 
         case .openURL:
-            guard case .text(let rawText) = subject.kind,
-                  let url = URL(string: rawText) else { return [] }
-            return [.open(url)]
+            guard let text = plainText(for: subject),
+                  let url = URL(string: text) else { return [.hide] }
+            return [.hide, .open(url)]
 
-        case .share:
-            guard let service = target?.sharingService else { return [] }
-            if case .text(let rawText) = subject.kind {
-                return [.share(.text(rawText), via: service)]
-            }
-            guard let url = subject.url else { return [] }
-            return [.share(.fileURL(url), via: service)]
+        case .openEmail:
+            guard let text = plainText(for: subject),
+                  let url = Self.mailtoURL(body: text) else { return [.hide] }
+            return [.hide, .open(url)]
+
+        // MARK: Clipboard history
+
+        case .deleteFromHistory:
+            guard let item = subject.clipboardItem else { return [.hide] }
+            history.remove(item)
+            clipboardVM.load()
+            selectedSubject = nil
+            phase = .browsingClipboard
+            onPhaseChange?()
+            return []
+
+        // MARK: Codiclens
 
         case .openSettings:
-            return [.showSettings]
+            return [.hide, .showSettings]
 
         case .service:
             return []
+        }
+    }
 
-        default:
+    private func quickLookURL(for subject: Subject, target: ActionTarget?) -> URL? {
+        if let targetURL = target?.url { return targetURL }
+        if case .clipboard(let item) = subject.kind {
+            return history.previewURL(for: item)
+        }
+        return subject.url
+    }
+
+    private func saveEffects(for subject: Subject) -> [Effect] {
+        if case .clipboard(let item) = subject.kind, item.isImage {
+            guard let imageData = history.imageData(for: item) else { return [.hide] }
+            return [.savePanel(
+                data: imageData,
+                fileName: item.imageFileName ?? "image.png",
+                contentType: .png
+            )]
+        }
+        guard let text = plainText(for: subject),
+              let textData = text.data(using: .utf8) else { return [.hide] }
+        return [.savePanel(data: textData, fileName: "untitled.txt", contentType: .plainText)]
+    }
+
+    /// Transforming a clipboard entry rewrites it in history and stays in the
+    /// browser; transforming a text subject feeds the result back in so
+    /// transforms can be chained.
+    private func transformEffects(
+        _ transform: TextTransform,
+        on subject: Subject,
+        text: String
+    ) -> [Effect] {
+        let result = transform.apply(text)
+
+        guard let item = subject.clipboardItem else {
+            retarget(at: result)
             return []
         }
+
+        if let index = history.index(of: item) {
+            history.updateText(at: index, text: result)
+            clipboardVM.load()
+            clipboardVM.selectedIndex = min(index, clipboardVM.filteredItems.count - 1)
+            if let updated = history.items.indices.contains(index) ? history.items[index] : nil {
+                selectedSubject = Subject(clipboardItem: updated)
+            }
+        }
+        phase = .browsingClipboard
+        onPhaseChange?()
+        return []
     }
 
     // MARK: - URLs
