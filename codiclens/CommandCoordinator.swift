@@ -24,6 +24,7 @@ class CommandCoordinator {
     let actionVM = ActionSearchVM()
     let targetVM = TargetSearchVM()
     let clipboardVM: ClipboardSearchVM
+    let queryBuffer = QueryBuffer()
 
     /// Layout only — the card panel resizes when the phase changes.
     var onPhaseChange: (() -> Void)?
@@ -126,6 +127,9 @@ class CommandCoordinator {
 
     var currentQuery: String { currentSearchText }
 
+    /// What the search field shows. Not always the query — see `QueryBuffer`.
+    var displayedQuery: String { queryBuffer.display }
+
     /// Accepts what the search field now contains and decides what the query
     /// becomes.
     ///
@@ -135,14 +139,17 @@ class CommandCoordinator {
     /// because there the query is the content being edited rather than a way
     /// of finding something.
     func acceptTypedText(_ typed: String) {
-        let previous = currentSearchText
         let startsNewQuery = phase == .searchingSubject
             && subjectVM.isSearchCommitted
             && !isTextMode
 
-        currentSearchText = startsNewQuery && typed.count > previous.count
-            ? String(typed.dropFirst(previous.count))
-            : typed
+        currentSearchText = queryBuffer.accept(typed, startsNewQuery: startsNewQuery)
+    }
+
+    /// Points the field at the current phase's query. Called when the phase
+    /// changes or focus returns, so the field shows what it is now editing.
+    func syncQueryDisplay() {
+        queryBuffer.set(currentSearchText)
     }
 
     // MARK: - Navigation
@@ -313,6 +320,7 @@ class CommandCoordinator {
         selectedSubject = newSubject
         subjectVM.searchText = result
         actionVM.loadActions(for: newSubject)
+        syncQueryDisplay()
         onPhaseChange?()
     }
 
@@ -326,6 +334,7 @@ class CommandCoordinator {
         actionVM.reset()
         targetVM.reset()
         clipboardVM.reset()
+        syncQueryDisplay()
         focusTrigger.toggle()
     }
 
@@ -599,13 +608,24 @@ class CommandCoordinator {
 
     // MARK: - URLs
 
+    /// `.urlQueryAllowed` permits the characters that *separate* query
+    /// parameters — `&`, `+`, `=`, `#` — so encoding a value with it silently
+    /// truncates anything after an ampersand. A value needs a stricter set.
+    private static let queryValueAllowed: CharacterSet = {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&+=?#")
+        return allowed
+    }()
+
+    private static func encodeQueryValue(_ text: String) -> String {
+        text.addingPercentEncoding(withAllowedCharacters: queryValueAllowed) ?? text
+    }
+
     static func webSearchURL(for text: String) -> URL? {
-        let encoded = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text
-        return URL(string: "https://www.google.com/search?q=\(encoded)")
+        URL(string: "https://www.google.com/search?q=\(encodeQueryValue(text))")
     }
 
     static func mailtoURL(body: String) -> URL? {
-        let encoded = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? body
-        return URL(string: "mailto:?body=\(encoded)")
+        URL(string: "mailto:?body=\(encodeQueryValue(body))")
     }
 }
