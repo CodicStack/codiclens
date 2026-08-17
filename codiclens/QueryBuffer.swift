@@ -14,12 +14,22 @@ final class QueryBuffer {
 
     /// Accepts what the field now contains and returns the query to search for.
     ///
+    /// Against a settled search, any edit ends it: typing keeps only the new
+    /// characters, and a backspace clears the lot rather than nibbling a
+    /// character off a search the user has already finished with.
+    ///
     /// - Parameter startsNewQuery: whether a settled search should be replaced
     ///   rather than extended.
     func accept(_ typed: String, startsNewQuery: Bool) -> String {
-        let query = startsNewQuery && typed.count > display.count
-            ? String(typed.dropFirst(display.count))
-            : typed
+        let query: String
+        switch (startsNewQuery, typed.count > display.count) {
+        case (true, true):
+            query = String(typed.dropFirst(display.count))   // just the new characters
+        case (true, false):
+            query = ""                                       // a deletion wipes it
+        case (false, _):
+            query = typed
+        }
         display = query
         return query
     }
