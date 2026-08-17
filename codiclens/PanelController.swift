@@ -16,8 +16,7 @@ class PanelController {
     private let quickLookHelper = QuickLookHelper()
     private(set) var quickLookActive = false
     private var savePanelActive = false
-    private var previousApp: NSRunningApplication?
-    private var pasteActivationObserver: Any?
+    private let focus = FocusHandoff()
     private var showResultsWork: DispatchWorkItem?
     private var animatingTargetWidth: CGFloat?
     private var animatingTargetOriginX: CGFloat?
@@ -207,10 +206,7 @@ class PanelController {
     func showPanel() {
         coordinator.reset()
         updatePanelAppearance()
-        let frontmost = NSWorkspace.shared.frontmostApplication
-        if frontmost?.bundleIdentifier != Bundle.main.bundleIdentifier {
-            previousApp = frontmost
-        }
+        focus.capture(frontmost: NSWorkspace.shared.frontmostApplication)
         centerOnScreen()
         cardPanel.orderFront(nil)
         cardPanel.makeKey()
@@ -263,16 +259,11 @@ class PanelController {
         resultsPanel.orderOut(nil)
         cardPanel.orderOut(nil)
         removeObservers()
-        if NSApp.isActive, let app = previousApp, !app.isTerminated {
-            app.activate()
-        }
-        previousApp = nil
-        if let obs = pasteActivationObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(obs)
-            pasteActivationObserver = nil
-        }
+        focus.restore()
     }
 
+    /// Dismisses, hands activation back to whatever was frontmost, and only
+    /// then fires the paste — otherwise the keystroke lands on codiclens.
     private func pasteAndHide(simulateAction: @escaping () -> Void) {
         showResultsWork?.cancel()
         showResultsWork = nil
@@ -281,37 +272,7 @@ class PanelController {
         resultsPanel.orderOut(nil)
         cardPanel.orderOut(nil)
 
-        if let app = previousApp,
-           app.bundleIdentifier != Bundle.main.bundleIdentifier,
-           !app.isTerminated,
-           NSApp.isActive {
-            app.activate()
-            let timeoutWork = DispatchWorkItem { [weak self] in
-                if let obs = self?.pasteActivationObserver {
-                    NSWorkspace.shared.notificationCenter.removeObserver(obs)
-                    self?.pasteActivationObserver = nil
-                }
-                simulateAction()
-            }
-            pasteActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
-                forName: NSWorkspace.didActivateApplicationNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] notification in
-                timeoutWork.cancel()
-                guard let activated = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-                      activated.processIdentifier == app.processIdentifier else { return }
-                if let obs = self?.pasteActivationObserver {
-                    NSWorkspace.shared.notificationCenter.removeObserver(obs)
-                    self?.pasteActivationObserver = nil
-                }
-                simulateAction()
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: timeoutWork)
-        } else {
-            simulateAction()
-        }
-        previousApp = nil
+        focus.yield(then: simulateAction)
     }
 
     private func setupObservers() {
