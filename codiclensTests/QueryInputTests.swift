@@ -28,6 +28,8 @@ struct QueryInputTests {
         )]
         coordinator.subjectVM.selectedIndex = 0
         coordinator.subjectVM.isSearchCommitted = true
+        // The field is showing that query, which is what typing is measured against.
+        coordinator.syncQueryDisplay()
     }
 
     // MARK: - While typing
@@ -51,6 +53,49 @@ struct QueryInputTests {
         coordinator.acceptTypedText("safn")
 
         #expect(coordinator.currentSearchText == "n", "the new character starts a fresh search")
+    }
+
+    /// The field is forced back to the new query, not left showing what was
+    /// typed. Every later keystroke is measured against this value, so if it
+    /// stays "safn" the next character slices the wrong prefix off.
+    @Test func replacingTheQueryAlsoRewritesWhatTheFieldShows() {
+        let coordinator = makeCoordinator()
+        settledAppSearch(coordinator, query: "saf")
+
+        coordinator.acceptTypedText("safn")
+
+        #expect(coordinator.displayedQuery == "n")
+    }
+
+    /// The regression that broke type-to-search-again: after a replace the
+    /// search is no longer settled, so the following keystrokes must simply
+    /// extend the new query.
+    @Test func keystrokesAfterAReplaceExtendTheNewQuery() {
+        let coordinator = makeCoordinator()
+        settledAppSearch(coordinator, query: "saf")
+
+        coordinator.acceptTypedText("safn")          // replaces: query is "n"
+        coordinator.subjectVM.isSearchCommitted = false
+        coordinator.acceptTypedText("no")            // the field now holds "n" + "o"
+        coordinator.acceptTypedText("not")
+
+        #expect(coordinator.currentSearchText == "not")
+        #expect(coordinator.displayedQuery == "not")
+    }
+
+    /// Typing twice in a row without the search settling in between must not
+    /// replace twice.
+    @Test func aSecondReplaceNeedsTheSearchToSettleAgain() {
+        let coordinator = makeCoordinator()
+        settledAppSearch(coordinator, query: "saf")
+
+        coordinator.acceptTypedText("safn")
+        coordinator.acceptTypedText("nx")
+
+        #expect(
+            coordinator.currentSearchText == "nx",
+            "still committed, but the field already shows the new query"
+        )
     }
 
     @Test func pastingAfterASettledSearchStartsANewQuery() {

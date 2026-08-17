@@ -127,21 +127,39 @@ struct CommandCoordinatorTests {
         #expect(coordinator.submit() == [.hide, .open(expected)])
     }
 
-    /// Documents a defect this refactor deliberately preserved: `.urlQueryAllowed`
-    /// permits `&`, so everything after one is parsed as a separate URL parameter
-    /// and never reaches the search. Kept as-is so the refactor stays
-    /// behaviour-preserving; fixing it is a separate change.
-    @Test func searchWebDropsTextAfterAnAmpersand() throws {
+    /// Query separators must survive as part of the search text rather than
+    /// splitting the URL into extra parameters.
+    @Test(arguments: [
+        ("a&c", "a&c"),
+        ("swift + kotlin", "swift + kotlin"),
+        ("what is a #hashtag", "what is a #hashtag"),
+        ("x=1&y=2", "x=1&y=2"),
+    ])
+    func searchWebKeepsTheWholeQuery(input: String, expected: String) throws {
         let (coordinator, _) = makeCoordinator()
-        seed(coordinator, with: textSubject("a&c"))
+        seed(coordinator, with: textSubject(input))
         coordinator.advancePhase()
         try selectAction("Search Web", in: coordinator)
 
+        let effects = coordinator.submit()
+        guard case .open(let url) = try #require(effects.last) else {
+            Issue.record("expected the search to open a URL")
+            return
+        }
         let query = try #require(
-            URLComponents(string: "https://www.google.com/search?q=a&c")?
+            URLComponents(url: url, resolvingAgainstBaseURL: false)?
                 .queryItems?.first(where: { $0.name == "q" })?.value
         )
-        #expect(query == "a", "the 'c' is lost — see the doc comment")
+        #expect(query == expected)
+    }
+
+    @Test func emailBodyKeepsTheWholeText() throws {
+        let url = try #require(CommandCoordinator.mailtoURL(body: "a & b"))
+        let body = try #require(
+            URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "body" })?.value
+        )
+        #expect(body == "a & b")
     }
 
     // MARK: - Phase machine

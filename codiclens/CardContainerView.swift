@@ -18,20 +18,24 @@ struct CardContainerView: View {
             guard notification.object is FloatingPanel else { return }
             isSearchFocused = true
         }
-        .onChange(of: coordinator.focusTrigger) { refocus() }
+        .onChange(of: coordinator.focusTrigger) {
+            refocus()
+            coordinator.syncQueryDisplay()
+        }
         .onChange(of: coordinator.cardCount) { refocus() }
+        .onChange(of: coordinator.phase) { coordinator.syncQueryDisplay() }
     }
 
     private func refocus() {
         isSearchFocused = true
     }
 
-    /// The field reads the current query straight from the coordinator and
-    /// hands keystrokes back to it. There is no second copy of the text here to
-    /// keep in sync.
+    /// The field shows what the coordinator's query buffer says it shows, and
+    /// hands every keystroke back. The buffer decides whether typing extends
+    /// the query or starts a new one, and forces the field to match.
     private var query: Binding<String> {
         Binding(
-            get: { coordinator.currentSearchText },
+            get: { coordinator.displayedQuery },
             set: { coordinator.acceptTypedText($0) }
         )
     }
