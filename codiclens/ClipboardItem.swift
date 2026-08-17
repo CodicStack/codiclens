@@ -12,12 +12,12 @@ struct ClipboardItem: Identifiable, Codable {
         originalFilePath.map { URL(fileURLWithPath: $0) }
     }
 
-    init(content: String) {
+    init(content: String, timestamp: Date = Date()) {
         self.id = UUID()
         self.content = content
         self.imageFileName = nil
         self.originalFilePath = nil
-        self.timestamp = Date()
+        self.timestamp = timestamp
     }
 
     init(imageFileName: String, originalFilePath: String? = nil, timestamp: Date = Date()) {

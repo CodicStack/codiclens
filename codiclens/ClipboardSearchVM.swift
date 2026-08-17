@@ -12,17 +12,23 @@ class ClipboardSearchVM {
 
     private(set) var filteredItems: [ClipboardItem] = []
 
+    private let history: ClipboardHistory
+
+    init(history: ClipboardHistory) {
+        self.history = history
+    }
+
     func load() {
         searchText = ""
-        filteredItems = ClipboardManager.shared.items
+        filteredItems = history.items
         selectedIndex = 0
     }
 
     private func filterItems() {
         if searchText.isEmpty {
-            filteredItems = ClipboardManager.shared.items
+            filteredItems = history.items
         } else {
-            filteredItems = ClipboardManager.shared.items
+            filteredItems = history.items
                 .compactMap { item -> (ClipboardItem, Int)? in
                     guard let score = fuzzyScore(item.displayName, searchText) else { return nil }
                     return (item, score)

@@ -29,7 +29,7 @@ class PanelController {
         let initialWidth: CGFloat = 280
         let runner = SystemEffectRunner()
         effectRunner = runner
-        coordinator = CommandCoordinator(runner: runner)
+        coordinator = CommandCoordinator(runner: runner, history: .shared)
         cardPanel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: initialWidth, height: 240))
         resultsPanel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: initialWidth, height: 300))
 
