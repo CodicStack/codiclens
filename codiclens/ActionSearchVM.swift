@@ -20,13 +20,6 @@ class ActionSearchVM {
         selectedIndex = 0
     }
 
-    func loadClipboardActions(for item: ClipboardItem) {
-        searchText = ""
-        allActions = SubjectAction.clipboardActions(for: item)
-        filteredActions = allActions
-        selectedIndex = 0
-    }
-
     private func filterActions() {
         if searchText.isEmpty {
             filteredActions = allActions

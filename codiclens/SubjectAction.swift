@@ -158,27 +158,25 @@ enum CountType: CaseIterable {
     }
 }
 
+/// What an action does. One set of handlers covers every subject kind —
+/// clipboard entries included — so a change to Copy or Share lands once.
 enum ActionHandler {
-    case openApp, quitApp, hideApp, showInFinder, copyPath
-    case openFile, openWith, revealInFinder, moveToTrash, quickLook
-    case copyText, pasteText, transform(TextTransform), searchWeb, openURL
-    case share
+    // Applications and files
+    case openApp, quitApp, hideApp, showInFinder
+    case openFile, openWith, revealInFinder, moveToTrash
+    case copyPath, quickLook
+
+    // Payloads: text subjects and clipboard entries alike
+    case copy, paste, pastePlain, typeText
+    case transform(TextTransform)
+    case count(CountType)
+    case searchWeb, openURL, openEmail, runScript, saveAs, share
+
+    // Clipboard history
+    case deleteFromHistory
+
     case service(String)
     case openSettings
-    // Clipboard actions
-    case clipboardPaste
-    case clipboardCopy
-    case clipboardPastePlain
-    case clipboardTypeText
-    case clipboardRunScript
-    case clipboardOpenEmail
-    case clipboardDelete
-    case clipboardOpenPreview
-    case clipboardCopyPath
-    case clipboardSaveImage
-    case clipboardSaveFile
-    case clipboardTransform(TextTransform)
-    case clipboardCount(CountType)
 }
 
 struct SubjectAction: Identifiable {
@@ -192,40 +190,6 @@ struct SubjectAction: Identifiable {
         var result = builtIn(for: subject)
         result.append(contentsOf: services(for: subject))
         return result
-    }
-
-    static func clipboardActions(for item: ClipboardItem) -> [SubjectAction] {
-        var actions: [SubjectAction] = []
-
-        actions.append(.init(name: "Paste", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .clipboardPaste))
-        actions.append(.init(name: "Copy", icon: .sfSymbol("doc.on.doc"), isFinal: true, handler: .clipboardCopy))
-        actions.append(.init(name: "Paste as Plain Text", icon: .sfSymbol("text.alignleft"), isFinal: true, handler: .clipboardPastePlain))
-
-        if !item.isImage {
-            actions.append(.init(name: "Type Text", icon: .sfSymbol("keyboard"), isFinal: true, handler: .clipboardTypeText))
-            actions.append(.init(name: "Run as AppleScript", icon: .sfSymbol("applescript"), isFinal: true, handler: .clipboardRunScript))
-            actions.append(.init(name: "Open Email", icon: .sfSymbol("envelope"), isFinal: true, handler: .clipboardOpenEmail))
-            actions.append(.init(name: "Save as File…", icon: .sfSymbol("square.and.arrow.down"), isFinal: true, handler: .clipboardSaveFile))
-            actions.append(.init(name: "Search Web", icon: .sfSymbol("magnifyingglass"), isFinal: true, handler: .searchWeb))
-            actions.append(.init(name: "Share…", icon: .sfSymbol("square.and.arrow.up"), isFinal: false, handler: .share))
-
-            for t in TextTransform.allCases {
-                actions.append(.init(name: t.name, icon: .sfSymbol(t.iconName), isFinal: true, handler: .clipboardTransform(t)))
-            }
-
-            for c in CountType.allCases {
-                actions.append(.init(name: c.name, icon: .sfSymbol("number"), isFinal: true, handler: .clipboardCount(c)))
-            }
-        } else {
-            actions.append(.init(name: "Save Image…", icon: .sfSymbol("square.and.arrow.down"), isFinal: true, handler: .clipboardSaveImage))
-            actions.append(.init(name: "Open in Preview", icon: .sfSymbol("eye"), isFinal: true, handler: .clipboardOpenPreview))
-            actions.append(.init(name: "Copy Path", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .clipboardCopyPath))
-        }
-
-        actions.append(.init(name: "Quick Look", icon: .sfSymbol("eye"), isFinal: true, handler: .quickLook))
-        actions.append(.init(name: "Delete from History", icon: .sfSymbol("trash"), isFinal: true, handler: .clipboardDelete))
-
-        return actions
     }
 
     private static func builtIn(for subject: Subject) -> [SubjectAction] {
@@ -248,6 +212,7 @@ struct SubjectAction: Identifiable {
                 .init(name: "Show in Finder", icon: .sfSymbol("folder"), isFinal: true, handler: .showInFinder),
                 .init(name: "Copy Path", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .copyPath),
             ]
+
         case .file, .folder:
             return [
                 .init(name: "Open", icon: .sfSymbol("doc"), isFinal: true, handler: .openFile),
@@ -257,26 +222,66 @@ struct SubjectAction: Identifiable {
                 .init(name: "Move to Trash", icon: .sfSymbol("trash"), isFinal: true, handler: .moveToTrash),
                 .init(name: "Quick Look", icon: .sfSymbol("eye"), isFinal: true, handler: .quickLook),
             ]
+
         case .builtIn(.settings):
             return [
                 .init(name: "Open", icon: .sfSymbol("gear"), isFinal: true, handler: .openSettings),
             ]
+
         case .builtIn(.clipboard):
             return []
+
         case .text(let rawText):
             var actions: [SubjectAction] = [
-                .init(name: "Paste", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .pasteText),
-                .init(name: "Copy", icon: .sfSymbol("doc.on.doc"), isFinal: true, handler: .copyText),
+                .init(name: "Paste", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .paste),
+                .init(name: "Copy", icon: .sfSymbol("doc.on.doc"), isFinal: true, handler: .copy),
             ]
-            for t in TextTransform.allCases {
-                actions.append(.init(name: t.name, icon: .sfSymbol(t.iconName), isFinal: true, handler: .transform(t)))
-            }
+            actions.append(contentsOf: transforms())
             actions.append(.init(name: "Search Web", icon: .sfSymbol("magnifyingglass"), isFinal: true, handler: .searchWeb))
             if URL(string: rawText) != nil && rawText.hasPrefix("http") {
                 actions.append(.init(name: "Open URL", icon: .sfSymbol("link"), isFinal: true, handler: .openURL))
             }
             actions.append(.init(name: "Share…", icon: .sfSymbol("square.and.arrow.up"), isFinal: false, handler: .share))
             return actions
+
+        case .clipboard(let item):
+            return clipboardActions(for: item)
+        }
+    }
+
+    private static func clipboardActions(for item: ClipboardItem) -> [SubjectAction] {
+        var actions: [SubjectAction] = [
+            .init(name: "Paste", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .paste),
+            .init(name: "Copy", icon: .sfSymbol("doc.on.doc"), isFinal: true, handler: .copy),
+            .init(name: "Paste as Plain Text", icon: .sfSymbol("text.alignleft"), isFinal: true, handler: .pastePlain),
+        ]
+
+        if item.isImage {
+            actions.append(.init(name: "Save Image…", icon: .sfSymbol("square.and.arrow.down"), isFinal: true, handler: .saveAs))
+            actions.append(.init(name: "Open in Preview", icon: .sfSymbol("eye"), isFinal: true, handler: .openFile))
+            actions.append(.init(name: "Copy Path", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .copyPath))
+        } else {
+            actions.append(.init(name: "Type Text", icon: .sfSymbol("keyboard"), isFinal: true, handler: .typeText))
+            actions.append(.init(name: "Run as AppleScript", icon: .sfSymbol("applescript"), isFinal: true, handler: .runScript))
+            actions.append(.init(name: "Open Email", icon: .sfSymbol("envelope"), isFinal: true, handler: .openEmail))
+            actions.append(.init(name: "Save as File…", icon: .sfSymbol("square.and.arrow.down"), isFinal: true, handler: .saveAs))
+            actions.append(.init(name: "Search Web", icon: .sfSymbol("magnifyingglass"), isFinal: true, handler: .searchWeb))
+            actions.append(.init(name: "Share…", icon: .sfSymbol("square.and.arrow.up"), isFinal: false, handler: .share))
+            actions.append(contentsOf: transforms())
+            for c in CountType.allCases {
+                actions.append(.init(name: c.name, icon: .sfSymbol("number"), isFinal: true, handler: .count(c)))
+            }
+        }
+
+        actions.append(.init(name: "Quick Look", icon: .sfSymbol("eye"), isFinal: true, handler: .quickLook))
+        actions.append(.init(name: "Delete from History", icon: .sfSymbol("trash"), isFinal: true, handler: .deleteFromHistory))
+
+        return actions
+    }
+
+    private static func transforms() -> [SubjectAction] {
+        TextTransform.allCases.map {
+            .init(name: $0.name, icon: .sfSymbol($0.iconName), isFinal: true, handler: .transform($0))
         }
     }
 
