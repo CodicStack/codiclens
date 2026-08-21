@@ -117,7 +117,7 @@ struct ResultsListView: View {
             .frame(maxHeight: 260)
             .onChange(of: coordinator.currentSelectedIndex) { _, newIndex in
                 if newIndex < coordinator.currentResults.count {
-                    withAnimation(.easeOut(duration: 0.1)) {
+                    withAnimation(Motion.snappy) {
                         proxy.scrollTo(coordinator.currentResults[newIndex].id, anchor: .center)
                     }
                 }

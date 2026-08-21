@@ -2,17 +2,26 @@ import SwiftUI
 
 struct SettingsView: View {
     @AppStorage("appTheme") private var selectedTheme: String = AppTheme.system.rawValue
+    @AppStorage(Motion.animationsEnabledKey) private var animationsEnabled: Bool = true
     @State private var isShowingAcknowledgements = false
 
     var body: some View {
         Form {
-            Section("Appearance") {
+            Section {
                 Picker("Theme", selection: $selectedTheme) {
                     ForEach(AppTheme.allCases, id: \.rawValue) { theme in
                         Text(theme.label).tag(theme.rawValue)
                     }
                 }
                 .pickerStyle(.segmented)
+
+                Toggle("Animations", isOn: $animationsEnabled)
+            } header: {
+                Text("Appearance")
+            } footer: {
+                Text("Codiclens animates only the panel appearing, the panel dismissing, and a panel changing size. Turning this off replaces all three with a cross-fade. macOS's own Reduce Motion setting does the same thing on its own.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section {

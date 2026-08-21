@@ -18,9 +18,16 @@ import SwiftUI
 ///   `resultSurface(selected:)`.
 ///
 /// Slabs and Cards both use `.glassEffect`, because both are top-level surfaces
-/// floating over the desktop — there is no Card Slab behind the Cards. Results
-/// are the one flat tier: they sit *inside* the Results Slab, and glass stacked
-/// on glass loses the backdrop it exists to reveal.
+/// floating over the desktop. Results are the one flat tier: they sit *inside*
+/// the Results Slab, and glass stacked on glass loses the backdrop it exists to
+/// reveal.
+///
+/// **No shadows, and no rim on a Slab.** Both were removed after they produced
+/// visible artefacts, and neither can come back until the Panels are sized
+/// larger than their content: a `.shadow()` on a view that fills its window is
+/// clipped by the window bounds and renders as a hard band down two edges
+/// rather than a falloff. `docs/DESIGN-HANDOFF.md` has the detail. A Card keeps
+/// a faint rim, stroked *after* the clip so the hairline is not half cut away.
 enum Style {
 
     // MARK: - Geometry
@@ -42,9 +49,6 @@ enum Style {
 
     /// One device pixel's worth of rim at 1x, which is what a hairline means.
     static let hairline: CGFloat = 1
-
-    static let shadowRadius: CGFloat = 20
-    static let shadowOffsetY: CGFloat = 6
 
     /// The gap between two Cards.
     static let cardInset: CGFloat = 6
@@ -95,8 +99,6 @@ private struct Palette {
 
     /// Tint mixed into the glass of a Slab or an unfocused Card.
     let glassTint: Color
-    let slabRim: Color
-    let shadow: Color
 
     /// An unfocused Card: present, but plainly not where the keyboard is.
     let cardRim: Color
@@ -119,8 +121,6 @@ private struct Palette {
 
     static let dark = Palette(
         glassTint: .black.opacity(0.28),
-        slabRim: .white.opacity(0.12),
-        shadow: .black.opacity(0.32),
         cardRim: .white.opacity(0.10),
         recessedFill: .white.opacity(0.05),
         raisedFill: .white.opacity(0.13),
@@ -133,8 +133,6 @@ private struct Palette {
 
     static let light = Palette(
         glassTint: .white.opacity(0.58),
-        slabRim: .black.opacity(0.10),
-        shadow: .black.opacity(0.16),
         cardRim: .black.opacity(0.08),
         recessedFill: .white.opacity(0.34),
         raisedFill: .white.opacity(0.82),
@@ -159,11 +157,7 @@ private struct SlabSurface: ViewModifier {
         let palette = Palette.of(scheme)
         return content
             .glassEffect(.regular.tint(palette.glassTint), in: Style.slabShape)
-            .overlay {
-                Style.slabShape.strokeBorder(palette.slabRim, lineWidth: Style.hairline)
-            }
             .clipShape(Style.slabShape)
-            .shadow(color: palette.shadow, radius: Style.shadowRadius, y: Style.shadowOffsetY)
     }
 }
 
@@ -185,11 +179,10 @@ private struct CardSurface: ViewModifier {
         let rim = focused ? palette.raisedRim : palette.cardRim
         return content
             .glassEffect(.regular.tint(fill), in: Style.cardShape)
+            .clipShape(Style.cardShape)
             .overlay {
                 Style.cardShape.strokeBorder(rim, lineWidth: Style.hairline)
             }
-            .clipShape(Style.cardShape)
-            .shadow(color: palette.shadow, radius: Style.shadowRadius, y: Style.shadowOffsetY)
     }
 }
 
