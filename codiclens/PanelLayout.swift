@@ -29,6 +29,81 @@ enum PanelLayout {
     /// picker when that is open.
     static let maxResultsHeight: CGFloat = 360
 
+    // MARK: - Inside the Results Slab
+
+    /// The Query field's height, and it never changes.
+    ///
+    /// The field is a bar along the bottom edge of the Slab, not a row in the
+    /// flow above it. The Results area takes every point the Slab has spare;
+    /// the bar is the same height whether the Query is empty, matches nothing
+    /// or matches everything, so it never moves relative to the Slab's bottom
+    /// edge. The number is a 13pt line with `Style.rowPaddingV` above and below
+    /// it, which is what the field measured before it was pinned.
+    ///
+    /// It lives here rather than in `Style.swift` because it is geometry —
+    /// where a surface's edges are — and `Style` owns radii, materials, tints
+    /// and rims.
+    static let queryFieldHeight: CGFloat = 30
+
+    /// A one-line message standing in for the Results: "No results", or
+    /// "Searching…".
+    ///
+    /// Neither of them repeats the Query. The field below spells it out, and
+    /// interpolating it into the message put the same string on screen twice —
+    /// the second time wrapped over three lines, which is most of what made an
+    /// empty Slab look like it was holding something.
+    static let messageRowHeight: CGFloat = 40
+
+    /// A Result's icon in list Mode.
+    static let resultIconSize: CGFloat = 32
+
+    /// One Result row: the icon with `Style.rowPaddingV` above and below it.
+    /// The icon is the tallest thing in a row, so it is what sets the height.
+    static var resultRowHeight: CGFloat { resultIconSize + Style.rowPaddingV * 2 }
+
+    /// The header over a list of Results — a count, and a chip or two.
+    ///
+    /// Rounded up rather than measured, and that is safe in one direction only:
+    /// it is subtracted from the Results area's ceiling, so being a point or
+    /// two generous leaves the Slab a point or two short of `maxResultsHeight`,
+    /// while being a point or two mean would let the Slab outgrow it.
+    static let resultsHeaderHeight: CGFloat = 34
+
+    /// The shortest the Slab ever gets: one message row and the Query field.
+    /// Nothing matched, so there is nothing else in it to be tall.
+    static var minResultsHeight: CGFloat { messageRowHeight + queryFieldHeight }
+
+    /// The tallest the scrolling Results area gets, before whatever fixed
+    /// furniture sits above it is taken off. The Query field is always under
+    /// it, so the ceiling is what is left of `maxResultsHeight` once the bar
+    /// has had its share.
+    static var maxResultsAreaHeight: CGFloat { maxResultsHeight - queryFieldHeight }
+
+    /// The scrolling Results area's height for content that wants
+    /// `contentHeight`, with `chromeHeight` of fixed furniture above it — a
+    /// header and its divider, or an open Skin Tone picker.
+    ///
+    /// This is the Slab's whole variable extent. Everything else in the Slab is
+    /// fixed for a given state, so this is what makes the Slab two grid rows
+    /// tall when ten Emoji match and full when a thousand do.
+    ///
+    /// The area is given the result as a **definite** height rather than as a
+    /// maximum. A maximum is what the Slab used to carry, and a flexible
+    /// maximum inside a window sized to the worst case simply takes the worst
+    /// case — a mostly-empty pane with a bar along the bottom of it. A definite
+    /// height also keeps the proposal definite all the way down to the
+    /// `LazyVStack`: hugging by proposing an *unspecified* height to a lazy
+    /// container is how you make it build all 1,914 cells to answer.
+    static func resultsAreaHeight(contentHeight: CGFloat, chromeHeight: CGFloat = 0) -> CGFloat {
+        min(max(contentHeight, 0), max(maxResultsAreaHeight - chromeHeight, 0))
+    }
+
+    /// The height a list of `rows` Results wants, inset above the first row and
+    /// below the last.
+    static func listContentHeight(rows: Int) -> CGFloat {
+        rows > 0 ? CGFloat(rows) * resultRowHeight + Style.resultInset * 2 : 0
+    }
+
     /// The Card row's width for a Card count, including the row's own padding.
     static func cardRowWidth(_ count: Int) -> CGFloat {
         CGFloat(max(count, 1)) * cardWidth + 20

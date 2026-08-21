@@ -48,26 +48,17 @@ struct TargetCardView: View {
         }
     }
 
+    /// Nothing matched, said without repeating the Query — which the Query field
+    /// along the bottom of the Results Slab is already showing.
     private var placeholder: some View {
         VStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 48, weight: .light))
                 .foregroundStyle(.quaternary)
 
-            if coordinator.targetVM.searchText.isEmpty {
-                Text("Type to search…")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.quaternary)
-            } else {
-                Text(coordinator.targetVM.searchText)
-                    .font(.system(size: 15, weight: .semibold))
-                    .lineLimit(1)
-                    .foregroundStyle(.primary)
-
-                Text("No results")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
+            Text(coordinator.targetVM.searchText.isEmpty ? "Type to search…" : "No results")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.quaternary)
         }
     }
 }
