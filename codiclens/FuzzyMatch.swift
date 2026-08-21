@@ -1,6 +1,11 @@
 import Foundation
 import SwiftUI
 
+/// Emphasises the characters of `name` that `query` matched.
+///
+/// Weight, not underline. Underlining every matched character scattered broken
+/// rules through the middle of a word — with a subsequence match on a long app
+/// name it looked like a spellchecker had given up.
 func highlightedName(_ name: String, query: String) -> AttributedString {
     var attributed = AttributedString(name)
     guard !query.isEmpty else { return attributed }
@@ -14,7 +19,7 @@ func highlightedName(_ name: String, query: String) -> AttributedString {
 
         let attrStart = attributed.index(attributed.startIndex, offsetByCharacters: start)
         let attrEnd = attributed.index(attrStart, offsetByCharacters: length)
-        attributed[attrStart..<attrEnd].underlineStyle = .single
+        attributed[attrStart..<attrEnd].inlinePresentationIntent = .stronglyEmphasized
         return attributed
     }
 
@@ -24,7 +29,7 @@ func highlightedName(_ name: String, query: String) -> AttributedString {
         if char == queryLower[qi] {
             let attrIdx = attributed.index(attributed.startIndex, offsetByCharacters: i)
             let attrNext = attributed.index(attrIdx, offsetByCharacters: 1)
-            attributed[attrIdx..<attrNext].underlineStyle = .single
+            attributed[attrIdx..<attrNext].inlinePresentationIntent = .stronglyEmphasized
             qi = queryLower.index(after: qi)
         }
     }

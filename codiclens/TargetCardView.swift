@@ -33,7 +33,7 @@ struct TargetCardView: View {
                 .resizable()
                 .interpolation(.high)
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 96, height: 96)
+                .frame(width: Style.cardIcon, height: Style.cardIcon)
 
             Text(target.name)
                 .font(.system(size: 15, weight: .semibold))

@@ -74,17 +74,16 @@ struct SubjectCardView: View {
     /// name where an app name would be, so the Card reads the same either way.
     ///
     /// The glyph goes through `EmojiRenderer` rather than a large `Text`.
-    /// Apple Color Emoji is a bitmap font whose largest strike here is 48pt, so
-    /// the renderer draws at 48 and centres it in the 96pt icon slot the other
-    /// Cards use. Asking for a glyph that *fills* 96pt would upscale that
-    /// bitmap 2x and read visibly soft; a sharp glyph in a slightly roomy slot
-    /// is the better trade, and it keeps the Card's metrics identical.
+    /// Apple Color Emoji is a bitmap font, so an off-strike point size resamples
+    /// and reads soft. The renderer picks the nearest strike for the icon slot
+    /// the other Cards use, which keeps the Card's metrics identical whether it
+    /// holds an app icon or a glyph.
     @ViewBuilder
     private var emojiContent: some View {
         if let emoji = coordinator.currentEmoji {
             VStack(spacing: 10) {
-                Image(nsImage: EmojiRenderer.image(for: emoji.string, box: 96))
-                    .frame(width: 96, height: 96)
+                Image(nsImage: EmojiRenderer.image(for: emoji.string, box: Style.cardIcon))
+                    .frame(width: Style.cardIcon, height: Style.cardIcon)
 
                 Text(emoji.name)
                     .font(.system(size: 15, weight: .semibold))
@@ -204,7 +203,7 @@ struct SubjectCardView: View {
                 .resizable()
                 .interpolation(.high)
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 96, height: 96)
+                .frame(width: Style.cardIcon, height: Style.cardIcon)
 
             Text(highlightedName(subject.displayName, query: coordinator.subjectVM.searchText))
                 .font(.system(size: 15, weight: .semibold))

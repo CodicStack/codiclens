@@ -30,7 +30,7 @@ struct ActionCardView: View {
     private func actionContent(_ action: SubjectAction) -> some View {
         VStack(spacing: 10) {
             actionIconView(action.icon)
-                .frame(width: 96, height: 96)
+                .frame(width: Style.cardIcon, height: Style.cardIcon)
 
             Text(action.name)
                 .font(.system(size: 15, weight: .semibold))
