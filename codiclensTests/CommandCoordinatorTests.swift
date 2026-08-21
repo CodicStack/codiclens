@@ -13,10 +13,9 @@ struct CommandCoordinatorTests {
     private static let notesURL = URL(fileURLWithPath: "/System/Applications/Notes.app")
 
     private func makeCoordinator() -> (CommandCoordinator, RecordingEffectRunner) {
-        useInertAppIndex()
         let runner = RecordingEffectRunner()
         let history = ClipboardHistory(store: InMemoryClipboardStore())
-        return (CommandCoordinator(runner: runner, history: history), runner)
+        return (CommandCoordinator(runner: runner, history: history, index: inertAppIndex), runner)
     }
 
     /// Seeds the subject list directly, so tests don't depend on which apps

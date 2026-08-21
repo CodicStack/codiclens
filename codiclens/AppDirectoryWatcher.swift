@@ -25,10 +25,7 @@ nonisolated final class AppDirectoryWatcher {
     }
 
     deinit {
-        guard let stream else { return }
-        FSEventStreamStop(stream)
-        FSEventStreamInvalidate(stream)
-        FSEventStreamRelease(stream)
+        stop()
     }
 
     /// Starts watching. A second call does nothing.
@@ -40,6 +37,19 @@ nonisolated final class AppDirectoryWatcher {
         self.stream = stream
         FSEventStreamSetDispatchQueue(stream, queue)
         FSEventStreamStart(stream)
+    }
+
+    /// Stops watching and releases the stream. A second call does nothing.
+    ///
+    /// `deinit` is not enough on its own: the watcher is reached through
+    /// `AppIndex.shared`, a singleton that never deinitialises, so an app that
+    /// is quitting has to say so.
+    func stop() {
+        guard let stream else { return }
+        self.stream = nil
+        FSEventStreamStop(stream)
+        FSEventStreamInvalidate(stream)
+        FSEventStreamRelease(stream)
     }
 
     private func makeStream(for paths: [String]) -> FSEventStreamRef? {

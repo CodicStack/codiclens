@@ -20,6 +20,7 @@ class PanelController {
     private var showResultsWork: DispatchWorkItem?
     private var animatingTargetWidth: CGFloat?
     private var animatingTargetOriginX: CGFloat?
+    private var isTornDown = false
 
     private let cardWidth: CGFloat = 260
     private let cardHeight: CGFloat = 240
@@ -123,9 +124,10 @@ class PanelController {
             return ()
         } onChange: { [weak self] in
             DispatchQueue.main.async { [weak self] in
-                self?.updateResultsVisibility()
-                self?.updateQuickLookSelection()
-                self?.observeResults()
+                guard let self, !self.isTornDown else { return }
+                self.updateResultsVisibility()
+                self.updateQuickLookSelection()
+                self.observeResults()
             }
         }
     }
@@ -211,6 +213,22 @@ class PanelController {
         cardPanel.orderFront(nil)
         cardPanel.makeKey()
         setupObservers()
+    }
+
+    /// Releases everything the controller holds outside its own memory:
+    /// observers, the observation tracking loop, and the windows themselves.
+    /// Called from `applicationWillTerminate`.
+    func tearDown() {
+        showResultsWork?.cancel()
+        showResultsWork = nil
+        isTornDown = true
+        resultsObservation = nil
+        removeObservers()
+        quickLookHelper.dismiss()
+        resultsPanel.orderOut(nil)
+        cardPanel.orderOut(nil)
+        settingsWindow?.close()
+        settingsWindow = nil
     }
 
     func configurePreviewPanel(_ panel: QLPreviewPanel) {

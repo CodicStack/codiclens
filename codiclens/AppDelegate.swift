@@ -2,7 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import Quartz
 
-/// Carbon hotkey identifiers. One event handler serves both hotkeys, so it has
+/// Carbon hotkey identifiers. One event handler serves every hotkey, so it has
 /// to be able to tell them apart.
 private enum HotKeyID {
     static let signature = fourCharCode("CLNS")
@@ -10,29 +10,49 @@ private enum HotKeyID {
     static let emoji: UInt32 = 2
 }
 
+/// The keystrokes that summon Codiclens.
+///
+/// Ctrl+Cmd+Space is macOS's own Emoji & Symbols shortcut out of the box. We
+/// register ours plainly and let the user decide: while the system shortcut is
+/// on, WindowServer eats the keystroke before it reaches us, and turning it off
+/// (System Settings → Keyboard → Keyboard Shortcuts) hands it over. We do not
+/// reach into the system's shortcut table to take it — see
+/// `docs/adr/0006-private-symbolic-hotkey-api.md`.
+private enum HotKey {
+    static let panel = (key: UInt32(kVK_Space), modifiers: UInt32(cmdKey))
+    static let emoji = (key: UInt32(kVK_Space), modifiers: UInt32(controlKey | cmdKey))
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     var panelController: PanelController?
 
-    /// Ctrl+Cmd+Space and everything it has to negotiate with macOS.
-    /// `SettingsView` drives this.
-    let emojiHotKey = EmojiHotKeyController.shared
+    /// Clipboard History's recorder. Owned here rather than by the `App` value
+    /// so that starting it and stopping it sit on the same object.
+    private let pasteboardWatcher = PasteboardWatcher(history: .shared)
 
-    private var hotKeyRef: EventHotKeyRef?
+    private var hotKeyRefs: [EventHotKeyRef] = []
+    private var hotKeyHandlerRef: EventHandlerRef?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        requestAccessibilityIfNeeded()
         panelController = PanelController()
+        pasteboardWatcher.start()
         installHotKeyHandler()
-        registerPanelHotKey()
-        emojiHotKey.applyAtLaunch()
-        print("[codiclens] launched, hotkeys registered (emoji: \(emojiHotKey.status))")
+        register(HotKey.panel, as: HotKeyID.panel)
+        register(HotKey.emoji, as: HotKeyID.emoji)
     }
 
-    private func requestAccessibilityIfNeeded() {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
-        if !AXIsProcessTrustedWithOptions(options) {
-            print("[codiclens] accessibility not granted — paste simulation requires it")
-        }
+    /// Everything the app holds outside its own memory, released in one place.
+    ///
+    /// A background accessory app has no window to close and no document to
+    /// save, so nothing else prompts this teardown: without it the Carbon
+    /// handler, the hotkeys, the FSEvents stream and the pasteboard timer all
+    /// outlive the decision to quit.
+    func applicationWillTerminate(_ notification: Notification) {
+        unregisterHotKeys()
+        pasteboardWatcher.stop()
+        panelController?.tearDown()
+        panelController = nil
+        AppIndex.shared.stop()
     }
 
     // MARK: - QuickLook Responder Chain
@@ -64,22 +84,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             1,
             &eventType,
             Unmanaged.passUnretained(self).toOpaque(),
-            nil
+            &hotKeyHandlerRef
         )
     }
 
-    private func registerPanelHotKey() {
+    private func register(_ hotKey: (key: UInt32, modifiers: UInt32), as id: UInt32) {
+        var ref: EventHotKeyRef?
         let status = RegisterEventHotKey(
-            UInt32(kVK_Space),
-            UInt32(cmdKey),
-            EventHotKeyID(signature: HotKeyID.signature, id: HotKeyID.panel),
+            hotKey.key,
+            hotKey.modifiers,
+            EventHotKeyID(signature: HotKeyID.signature, id: id),
             GetApplicationEventTarget(),
             0,
-            &hotKeyRef
+            &ref
         )
 
-        if status != noErr {
-            print("[codiclens] hotkey registration failed: \(status)")
+        guard status == noErr, let ref else {
+            print("[codiclens] hotkey \(id) registration failed: \(status)")
+            return
+        }
+        hotKeyRefs.append(ref)
+    }
+
+    private func unregisterHotKeys() {
+        for ref in hotKeyRefs {
+            UnregisterEventHotKey(ref)
+        }
+        hotKeyRefs = []
+
+        if let hotKeyHandlerRef {
+            RemoveEventHandler(hotKeyHandlerRef)
+            self.hotKeyHandlerRef = nil
         }
     }
 
@@ -94,199 +129,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Opens the panel straight into Emoji Mode: Emoji selected, grid open,
+    /// Opens the Panel straight into Emoji Mode: Emoji selected, grid open,
     /// Recents on top, empty Query.
     private func showEmojiPanel() {
         guard let panelController else { return }
         // Dismiss first so `showPanel`'s one-time setup never runs twice over an
-        // already-open panel. It is a no-op when nothing is showing.
+        // already-open Panel. It is a no-op when nothing is showing.
         panelController.hidePanel()
         panelController.coordinator.requestEmojiMode()
         panelController.showPanel()
-    }
-}
-
-// MARK: - Symbolic hotkeys
-
-/// The two private CoreGraphics calls that read and write macOS's own
-/// keyboard shortcuts, resolved at runtime.
-///
-/// **This is private API.** `CGSIsSymbolicHotKeyEnabled` and
-/// `CGSSetSymbolicHotKeyEnabled` are unexported CoreGraphics SPI, which is why
-/// they are looked up with `dlsym` rather than linked. Symbolic hotkey 50 is
-/// `ShowHideCharacterPalette` — the system's Ctrl+Cmd+Space — confirmed against
-/// the live OS via `SLSSymbolicHotKeyName` and against the CGSInternal header's
-/// `kCGSHotKeyToggleCharacterPallette`. Using it is a Mac App Store rejection
-/// risk and acceptable for direct distribution. The decision is recorded in
-/// `docs/adr/0006-private-symbolic-hotkey-api.md`.
-///
-/// Every entry point returns an optional so a future OS that drops these
-/// symbols degrades to "the hotkey is not available" instead of trapping.
-enum SymbolicHotKey {
-    /// `kCGSHotKeyToggleCharacterPallette` — Show/Hide Emoji & Symbols.
-    static let showHideCharacterPalette: Int32 = 50
-
-    private typealias IsEnabledFunction = @convention(c) (Int32) -> DarwinBoolean
-    /// The flag is taken as `Int32` rather than `Bool`: the real parameter has
-    /// been spelled both `bool` and `boolean_t` across headers, and a
-    /// zero-extended word is correct for either.
-    private typealias SetEnabledFunction = @convention(c) (Int32, Int32) -> Int32
-
-    private static let isEnabledFunction: IsEnabledFunction? = symbol("CGSIsSymbolicHotKeyEnabled")
-    private static let setEnabledFunction: SetEnabledFunction? = symbol("CGSSetSymbolicHotKeyEnabled")
-
-    private static func symbol<T>(_ name: String) -> T? {
-        // RTLD_DEFAULT: search every image already loaded, CoreGraphics included.
-        guard let pointer = dlsym(UnsafeMutableRawPointer(bitPattern: -2), name) else { return nil }
-        return unsafeBitCast(pointer, to: T.self)
-    }
-
-    /// Whether both symbols resolved. False means this OS no longer exposes
-    /// them and the takeover cannot work at all.
-    static var isAvailable: Bool {
-        isEnabledFunction != nil && setEnabledFunction != nil
-    }
-
-    /// Whether macOS currently holds this shortcut. `nil` when unavailable.
-    static func isEnabled(_ id: Int32) -> Bool? {
-        isEnabledFunction.map { $0(id).boolValue }
-    }
-
-    /// - Returns: the `CGError` the call reported, or `nil` when unavailable.
-    @discardableResult
-    static func setEnabled(_ id: Int32, _ enabled: Bool) -> CGError? {
-        setEnabledFunction.map { CGError(rawValue: $0(id, enabled ? 1 : 0)) ?? .failure }
-    }
-}
-
-// MARK: - Emoji hotkey
-
-/// Owns Ctrl+Cmd+Space: the preference, the negotiation with macOS over who
-/// gets the keystroke, and the Carbon registration itself.
-///
-/// macOS binds Ctrl+Cmd+Space to Emoji & Symbols and there is no row for it in
-/// System Settings, so a user cannot hand it over by hand. `RegisterEventHotKey`
-/// is no help either — it returns `noErr` while WindowServer quietly eats the
-/// keystroke first. Taking the shortcut therefore means turning the system's
-/// own off, and giving it back means turning it on again.
-@Observable
-final class EmojiHotKeyController {
-    /// Where the app stands with Ctrl+Cmd+Space.
-    enum Status: Equatable {
-        /// The preference is off. macOS still owns the shortcut.
-        case systemOwns
-        /// Codiclens owns it: the system shortcut is off, ours is registered.
-        case codiclensOwns
-        /// The preference is on but the system shortcut is still live, so
-        /// WindowServer will keep swallowing the keystroke.
-        case blockedBySystemShortcut
-        /// The private symbols did not resolve. Nothing can be done here.
-        case unavailable
-    }
-
-    static let preferenceKey = "codiclens.emoji.ownsEmojiHotKey"
-
-    /// The one controller. `SettingsView` cannot reach the delegate to ask for
-    /// it: `@NSApplicationDelegateAdaptor` puts a SwiftUI forwarding object in
-    /// `NSApp.delegate`, so casting that to `AppDelegate` yields nil.
-    static let shared = EmojiHotKeyController()
-
-    private let defaults: UserDefaults
-    private var hotKeyRef: EventHotKeyRef?
-
-    private(set) var status: Status = .systemOwns
-
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-        // Default off. Taking a system shortcut over on first launch, without
-        // being asked, is not ours to do.
-        self.isEnabled = defaults.bool(forKey: Self.preferenceKey)
-    }
-
-    /// Whether Codiclens should own Ctrl+Cmd+Space. Setting it performs the
-    /// takeover or the hand-back there and then.
-    var isEnabled: Bool {
-        didSet {
-            guard isEnabled != oldValue else { return }
-            defaults.set(isEnabled, forKey: Self.preferenceKey)
-            if isEnabled { takeOver() } else { handBack() }
-        }
-    }
-
-    /// Whether this OS still exposes the calls the takeover needs.
-    var isSupported: Bool { SymbolicHotKey.isAvailable }
-
-    /// Whether macOS currently holds Ctrl+Cmd+Space for Emoji & Symbols.
-    /// `nil` when the private symbols are unavailable.
-    var isSystemShortcutEnabled: Bool? {
-        SymbolicHotKey.isEnabled(SymbolicHotKey.showHideCharacterPalette)
-    }
-
-    /// Re-asserts the takeover at every launch when the preference is on.
-    ///
-    /// Assert, don't assume: an OS update, a settings migration or another app
-    /// can put the system shortcut back, and then our hotkey silently stops
-    /// firing. With the preference off this deliberately touches nothing — the
-    /// user may have disabled the system shortcut themselves, and switching it
-    /// back on is not ours to do either.
-    func applyAtLaunch() {
-        guard isEnabled else {
-            status = SymbolicHotKey.isAvailable ? .systemOwns : .unavailable
-            return
-        }
-        takeOver()
-    }
-
-    /// Disables the system shortcut, then registers ours.
-    private func takeOver() {
-        guard SymbolicHotKey.isAvailable else {
-            unregister()
-            status = .unavailable
-            return
-        }
-
-        let error = SymbolicHotKey.setEnabled(SymbolicHotKey.showHideCharacterPalette, false)
-        let systemStillHasIt = isSystemShortcutEnabled ?? true
-        register()
-
-        status = (error == .success && !systemStillHasIt) ? .codiclensOwns : .blockedBySystemShortcut
-    }
-
-    /// Gives macOS its shortcut back and drops ours.
-    ///
-    /// A first-class path, not an afterthought: a user who turns this off — or
-    /// who is about to uninstall — must end up with a working system emoji
-    /// picker again.
-    func handBack() {
-        unregister()
-        guard SymbolicHotKey.isAvailable else {
-            status = .unavailable
-            return
-        }
-        SymbolicHotKey.setEnabled(SymbolicHotKey.showHideCharacterPalette, true)
-        status = .systemOwns
-    }
-
-    private func register() {
-        guard hotKeyRef == nil else { return }
-        let status = RegisterEventHotKey(
-            UInt32(kVK_Space),
-            UInt32(controlKey | cmdKey),
-            EventHotKeyID(signature: HotKeyID.signature, id: HotKeyID.emoji),
-            GetApplicationEventTarget(),
-            0,
-            &hotKeyRef
-        )
-        if status != noErr {
-            print("[codiclens] emoji hotkey registration failed: \(status)")
-            hotKeyRef = nil
-        }
-    }
-
-    private func unregister() {
-        guard let hotKeyRef else { return }
-        UnregisterEventHotKey(hotKeyRef)
-        self.hotKeyRef = nil
     }
 }
 

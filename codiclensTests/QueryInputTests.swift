@@ -9,10 +9,10 @@ import Testing
 struct QueryInputTests {
 
     private func makeCoordinator() -> CommandCoordinator {
-        useInertAppIndex()
         return CommandCoordinator(
             runner: RecordingEffectRunner(),
-            history: ClipboardHistory(store: InMemoryClipboardStore())
+            history: ClipboardHistory(store: InMemoryClipboardStore()),
+            index: inertAppIndex
         )
     }
 

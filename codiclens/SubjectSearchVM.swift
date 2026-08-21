@@ -29,7 +29,7 @@ class SubjectSearchVM {
     private var visibilityCancellable: AnyCancellable?
     private var commitCancellable: AnyCancellable?
 
-    init(index: AppIndex = .current) {
+    init(index: AppIndex) {
         self.index = index
         self.builtIns = Self.makeBuiltIns()
 

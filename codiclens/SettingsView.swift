@@ -4,8 +4,6 @@ struct SettingsView: View {
     @AppStorage("appTheme") private var selectedTheme: String = AppTheme.system.rawValue
     @State private var isShowingAcknowledgements = false
 
-    private var emojiHotKey: EmojiHotKeyController { .shared }
-
     var body: some View {
         Form {
             Section("Appearance") {
@@ -18,7 +16,6 @@ struct SettingsView: View {
             }
 
             Section {
-                emojiHotKeyRow
                 skinToneRow
             } header: {
                 Text("Emoji")
@@ -57,47 +54,15 @@ struct SettingsView: View {
 
     // MARK: - Emoji hotkey
 
-    /// The one control that is genuinely hard to explain, because macOS gives
-    /// the user no way to release Ctrl+Cmd+Space themselves.
-    private var emojiHotKeyRow: some View {
-        Toggle(isOn: Binding(
-            get: { emojiHotKey.isEnabled },
-            set: { emojiHotKey.isEnabled = $0 }
-        )) {
-            Text("Use ⌃⌘Space for Codiclens")
-            statusLabel(for: emojiHotKey.status)
-        }
-        .disabled(!emojiHotKey.isSupported)
-    }
-
-    @ViewBuilder
-    private func statusLabel(for status: EmojiHotKeyController.Status) -> some View {
-        switch status {
-        case .codiclensOwns:
-            Label("Codiclens opens the emoji picker.", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-        case .systemOwns:
-            Text("macOS opens Emoji & Symbols.")
-        case .blockedBySystemShortcut:
-            Label("macOS is still holding this shortcut.", systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-        case .unavailable:
-            Label("This version of macOS does not allow the change.", systemImage: "xmark.circle")
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder
+    /// ⌃⌘Space is registered unconditionally, but macOS ships owning it. The
+    /// footer says so, because a shortcut that silently does nothing is worse
+    /// than one the user knows they have to free up. No path is given for
+    /// freeing it: System Settings has no row for Emoji & Symbols — see
+    /// `docs/adr/0006-private-symbolic-hotkey-api.md`.
     private var emojiHotKeyExplanation: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("macOS reserves ⌃⌘Space for its own Emoji & Symbols window, and offers no setting to release it. Turning this on switches that system shortcut off; turning it off gives the shortcut straight back.")
-            if emojiHotKey.status == .blockedBySystemShortcut {
-                Text("The change did not take. Try turning this off and on again — if it keeps failing, restart your Mac and try once more.")
-                    .foregroundStyle(.orange)
-            }
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
+        Text("⌃⌘Space opens the emoji picker, and ⌘Space opens Codiclens. If macOS's own Emoji & Symbols window appears instead, the system still holds ⌃⌘Space and is consuming the keystroke before Codiclens sees it.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 
     // MARK: - Skin tone
