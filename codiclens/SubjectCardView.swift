@@ -120,7 +120,12 @@ struct SubjectCardView: View {
                 Image(nsImage: EmojiRenderer.image(for: emoji.string, box: Style.cardIcon))
                     .frame(width: Style.cardIcon, height: Style.cardIcon)
 
-                Text(emoji.name)
+                // Marked up like an app name, and for the same reason: the Card
+                // shows what the Query matched, so it should show *where*. An
+                // Emoji found by a keyword has nothing to mark up in its CLDR
+                // name, and `highlightedName` leaves that plain rather than
+                // underlining the characters that happen to line up.
+                Text(highlightedName(emoji.name, query: coordinator.emojiVM.searchText))
                     .font(.system(size: 15, weight: .semibold))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
@@ -248,9 +253,19 @@ struct SubjectCardView: View {
                 .font(.system(size: 48, weight: .light))
                 .foregroundStyle(.quaternary)
 
-            Text(coordinator.subjectVM.searchText.isEmpty ? "Type..." : "No match")
+            Text(placeholderMessage)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.quaternary)
         }
+    }
+
+    /// What an empty Card says, and it must not claim more than it knows.
+    ///
+    /// "No match" is a finding, and the Card is only entitled to it once the app
+    /// Index has answered — before that a Query has not been looked up, so the
+    /// Card is still waiting rather than reporting.
+    private var placeholderMessage: String {
+        if coordinator.subjectVM.searchText.isEmpty { return "Type..." }
+        return coordinator.subjectVM.isIndexReady ? "No match" : "Searching…"
     }
 }

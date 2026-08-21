@@ -128,10 +128,12 @@ struct PanelView: View {
 
     /// Whether the Query matched nothing.
     ///
-    /// `SubjectSearchVM` answers a no-match by standing a text Subject in for
-    /// the app it could not find, and `isTextMode` is that state. Read, not
-    /// changed — the fallback is the view model's decision and stays there.
+    /// The Index having answered *and* answered with nothing — not "the visible
+    /// Subject is a text one", which was the old proxy for it. That proxy also
+    /// matched the moment before the first scan lands, so a cold start shook the
+    /// Panel at a Query it had not looked up yet. Read, not changed: the
+    /// no-match itself is the view model's finding and stays there.
     private var hasNoMatch: Bool {
-        coordinator.phase == .searchingSubject && coordinator.isTextMode
+        coordinator.hasNoSubjectMatch
     }
 }

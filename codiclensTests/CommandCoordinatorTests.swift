@@ -238,7 +238,6 @@ struct CommandCoordinatorTests {
     @Test func selectionCannotLeaveTheResultList() {
         let (coordinator, _) = makeCoordinator()
         seed(coordinator, with: textSubject("hello"))
-        coordinator.subjectVM.isResultsVisible = true
 
         coordinator.moveUp()
         #expect(coordinator.currentSelectedIndex == 0, "already at the top")

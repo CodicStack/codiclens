@@ -39,9 +39,9 @@ struct ResultsListView: View {
             header
             Divider().padding(.horizontal, Style.padding)
             list
-        } else if coordinator.targetVM.isSearching {
+        } else if coordinator.isSearchInFlight {
             searchingState
-        } else if hasQuery {
+        } else if hasQuery && coordinator.canReportNoResults {
             emptyState
         }
     }
@@ -101,11 +101,12 @@ struct ResultsListView: View {
     /// — once here and once in the field directly below — and a long Query
     /// wrapped this line over three of them while the field truncated it. One
     /// Query on screen at a time; the field is where it lives.
+    ///
+    /// No magnifying glass either, for the same reason: the Query bar
+    /// immediately below carries one, and two of them a few points apart read as
+    /// two search fields. The bar's is the one that means something.
     private var emptyState: some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.tertiary)
             Text("No results")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
@@ -214,10 +215,20 @@ private struct ResultRow: View {
                     .lineLimit(1)
 
                 if !item.subtitle.isEmpty {
-                    Text(item.subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    // Marked up like the title where the subtitle names the
+                    // thing — under "Clipboard" it reads "Clipboard History",
+                    // and the characters the Query matched are in both. Left
+                    // plain where the subtitle is derived rather than named;
+                    // `ResultDisplayItem.highlightsSubtitle` is where that is
+                    // decided, per kind of Result.
+                    Text(
+                        item.highlightsSubtitle
+                            ? highlightedName(item.subtitle, query: query)
+                            : AttributedString(item.subtitle)
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
                 }
             }
 

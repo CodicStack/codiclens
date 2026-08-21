@@ -1,3 +1,4 @@
+import SwiftUI
 import Testing
 @testable import codiclens
 
@@ -75,5 +76,61 @@ struct FuzzyMatchTests {
     ])
     func levenshteinCountsEdits(a: String, b: String, expected: Int) {
         #expect(levenshteinDistance(a, b) == expected)
+    }
+
+    // MARK: - Marking up what matched
+
+    /// The characters of `name` that came back underlined, as a string.
+    private func underlined(_ name: String, query: String) -> String {
+        let attributed = highlightedName(name, query: query)
+        return attributed.runs.reduce(into: "") { marked, run in
+            guard run.underlineStyle != nil else { return }
+            marked += String(attributed[run.range].characters)
+        }
+    }
+
+    /// Underline, not weight. Weight was tried and is invisible against a row
+    /// whose title is already bold.
+    @Test func aMatchIsMarkedWithAnUnderline() {
+        let attributed = highlightedName("Safari", query: "saf")
+
+        #expect(attributed.runs.contains { $0.underlineStyle != nil })
+        #expect(!attributed.runs.contains { $0.inlinePresentationIntent == .stronglyEmphasized })
+    }
+
+    /// Tier one: the Query appears whole, so the whole run is underlined once —
+    /// not character by character.
+    @Test func aContiguousMatchUnderlinesTheWholeRun() {
+        #expect(underlined("Safari", query: "saf") == "Saf")
+        #expect(underlined("Mobile Safari", query: "safari") == "Safari")
+
+        let attributed = highlightedName("Safari", query: "saf")
+        let marked = attributed.runs.filter { $0.underlineStyle != nil }
+        #expect(marked.count == 1, "one run, not three")
+    }
+
+    /// Tier two: the Query is spread through the name, so each character it
+    /// matched is underlined where it landed. This is the case the user
+    /// screenshotted — "clib" against "Clipboard History" marks `Cli` and `b`.
+    @Test func aScatteredMatchUnderlinesEachCharacterItMatched() {
+        #expect(underlined("Clipboard History", query: "clib") == "Clib")
+        #expect(underlined("Safari", query: "sfi") == "Sfi")
+    }
+
+    /// A Query the name cannot account for marks nothing. Emoji are matched by
+    /// keyword as well as by name, so this is the ordinary case there: "smile"
+    /// finds 😀 through its keywords, and underlining the `n` and `g` of
+    /// "grinning face" that happen to line up would claim a match that isn't in
+    /// the name at all.
+    @Test func aQueryTheNameCannotAccountForMarksNothing() {
+        #expect(underlined("grinning face", query: "smile").isEmpty)
+        #expect(underlined("Safari", query: "sefari").isEmpty, "a typo match has no run to mark")
+        #expect(underlined("Safari", query: "").isEmpty)
+    }
+
+    /// Marking up must not disturb the text itself.
+    @Test func theNameSurvivesUnchanged() {
+        #expect(String(highlightedName("Clipboard", query: "clib").characters) == "Clipboard")
+        #expect(String(highlightedName("Safari", query: "zzz").characters) == "Safari")
     }
 }

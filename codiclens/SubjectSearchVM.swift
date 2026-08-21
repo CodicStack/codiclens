@@ -11,12 +11,35 @@ class SubjectSearchVM {
     }
     var results: [Subject] = []
     var selectedIndex: Int = 0
-    var isResultsVisible: Bool = false
     var isSearchCommitted: Bool = false
 
     /// The Index of installed apps. This view model consumes it and never
     /// builds it — rebuilds happen behind `AppIndex`.
     private let index: AppIndex
+
+    /// Whether the Index has answered at all yet.
+    ///
+    /// The first scan runs on a background queue, so for the first moment of
+    /// the app's life `index.apps` is empty — not because nothing is installed
+    /// but because nobody has looked. A Query run against that Index has not
+    /// been answered; it has not been *asked*. Everything that would otherwise
+    /// treat zero matches as an answer — the "No results" row, and standing a
+    /// text Subject in for the app that wasn't found — waits on this.
+    ///
+    /// Exposed rather than letting a view reach through to `AppIndex.shared`:
+    /// the Index this view model searches is the one it was handed, and a test
+    /// hands it a different one.
+    var isIndexReady: Bool { index.hasPopulated }
+
+    /// Whether the Index has answered this Query, and answered with nothing.
+    ///
+    /// The state the Panel shakes about. Not the same question as "is the
+    /// visible Subject a text one": that is the *consequence* of a no-match and
+    /// it is also reachable while the Index is still loading, which is a moment
+    /// nothing should be shaking about.
+    var hasNoMatch: Bool {
+        isIndexReady && !searchText.isEmpty && appResults.isEmpty
+    }
 
     /// Built-ins live here, not in the Index: they aren't files on disk, and a
     /// rebuild must not be able to drop them.
@@ -24,9 +47,7 @@ class SubjectSearchVM {
 
     private var appResults: [Subject] = []
 
-    private let visibilitySubject = PassthroughSubject<Void, Never>()
     private let commitSubject = PassthroughSubject<Void, Never>()
-    private var visibilityCancellable: AnyCancellable?
     private var commitCancellable: AnyCancellable?
 
     init(index: AppIndex) {
@@ -36,12 +57,6 @@ class SubjectSearchVM {
         // Starts the first scan on a background queue and begins watching.
         // Nothing about a cold start blocks here.
         index.start()
-
-        visibilityCancellable = visibilitySubject
-            .debounce(for: .milliseconds(600), scheduler: RunLoop.main)
-            .sink { [weak self] in
-                self?.isResultsVisible = true
-            }
 
         commitCancellable = commitSubject
             .debounce(for: .milliseconds(600), scheduler: RunLoop.main)
@@ -116,7 +131,6 @@ class SubjectSearchVM {
     /// fingers and could move the selected row out from under Enter, launching
     /// the wrong app. The new Index takes effect on the next keystroke.
     private func updateResults() {
-        isResultsVisible = false
         isSearchCommitted = false
 
         guard !searchText.isEmpty else {
@@ -146,14 +160,20 @@ class SubjectSearchVM {
                 }
             }
 
+        // Nothing matched, so the Query stands as text — but only once the Index
+        // has actually been consulted. Falling back before the first scan lands
+        // turns every character typed during a cold start into a text Subject,
+        // which is the app deciding the user meant to write prose because it had
+        // not finished reading `/Applications` yet. Text mode is
+        // result-dependent, and until the Index answers there is no result to
+        // depend on.
         if appResults.isEmpty {
-            results = [Subject(text: searchText)]
+            results = isIndexReady ? [Subject(text: searchText)] : []
         } else {
             results = appResults
         }
         selectedIndex = 0
 
-        visibilitySubject.send()
         commitSubject.send()
     }
 
@@ -162,7 +182,6 @@ class SubjectSearchVM {
         results = []
         appResults = []
         selectedIndex = 0
-        isResultsVisible = false
         isSearchCommitted = false
     }
 }
