@@ -72,6 +72,9 @@ final class FocusHandoff {
             action()
         }
 
+        // The one delay in the app, and not a fix for anything: it is the
+        // deadline on an OS notification that may never arrive. The normal path
+        // is the observer above, which cancels this before it fires.
         DispatchQueue.main.asyncAfter(deadline: .now() + activationTimeout, execute: timeout)
         previousApp = nil
     }

@@ -23,8 +23,21 @@ struct ActionCardView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .bottomTrailing) {
+            if let keyHint {
+                KeyHintChip(keys: keyHint)
+                    .padding(Style.padding)
+            }
+        }
         .cardSurface(focused: isFocused)
         .padding(Style.cardInset)
+    }
+
+    /// A Final Action runs on Enter; anything else asks for a Target first, so
+    /// the key that moves you on is Tab.
+    private var keyHint: String? {
+        guard isFocused, let action else { return nil }
+        return action.isFinal ? "⏎" : "⇥"
     }
 
     private func actionContent(_ action: SubjectAction) -> some View {

@@ -13,6 +13,19 @@ We previously ran two real `NSPanel`s. That gave us two animation clocks that vi
 - **Two `NSPanel`s** (the previous design, and what Tuna — our visual reference — does). Lower risk, no refactor. Rejected: it keeps both the timing hack and the two-clock problem, and Tuna only gets away with it because it animates almost nothing.
 - **One merged Slab**, Spotlight/Raycast style. Rejected outright on taste — the two-surface look is the design.
 
+## Update — implemented, and there is only one Slab
+
+This is now the shipping design. Two details came out differently from the wording above:
+
+- **There is no Card Slab.** The Cards float directly over the desktop in a row, each
+  its own glass surface with its own rim and shadow. "We should not have the outer
+  box." The Results Slab is the only Slab.
+- **The Panel's fixed extent includes a margin on all four sides** —
+  `PanelLayout.margin`, sized for the entrance animation's 1.04 overshoot plus a
+  shadow beyond it. Without it a `.shadow()` is clipped into a hard band by the window
+  bounds and a scaling entrance clips the same way, which is why both were disabled
+  before this work.
+
 ## Consequences
 
 - `hasShadow` must be `false` on the Panel; each Slab draws its own SwiftUI shadow. AppKit deriving a shadow from transparent content is slow and artifact-prone.

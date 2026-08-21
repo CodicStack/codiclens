@@ -23,6 +23,12 @@ struct TargetCardView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .bottomTrailing) {
+            if isFocused, target != nil {
+                KeyHintChip(keys: "⏎")
+                    .padding(Style.padding)
+            }
+        }
         .cardSurface(focused: isFocused)
         .padding(Style.cardInset)
     }

@@ -37,11 +37,11 @@ The single floating window Codiclens draws into. Non-activating: it never takes 
 _Avoid_: window, HUD, overlay
 
 **Slab**:
-One of the two visually separate glass surfaces inside the Panel — the Card Slab on top, the Results Slab below, with a real gap between them. They look like two windows and are not.
+A glass surface inside the Panel. There is one — the Results Slab, below the Cards, with a real gap above it. It looks like a second window and is not: the Panel is a single window, and the gap is empty space inside it.
 _Avoid_: panel, pane, tray, sheet
 
 **Card**:
-One tile inside the Card Slab, representing one Phase. The focused Card carries the accent tint.
+One tile representing one Phase. Cards float directly over the desktop in a row at the top of the Panel — there is deliberately no Slab behind them. The focused Card is brighter and more defined at the edge; there is no accent colour anywhere in the app.
 _Avoid_: tile, pane, box
 
 **Result**:

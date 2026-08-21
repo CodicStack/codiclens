@@ -46,9 +46,15 @@ extension ClipboardSearchVM: SearchScope {
 }
 
 extension EmojiSearchVM: SearchScope {
-    /// Emoji are a grid Mode, so the real rendering is `EmojiGridView` reading
-    /// `sections`. This list form exists because the Results Slab still asks
-    /// every scope for rows, and because whether it is empty is what decides
-    /// the slab is worth showing at all.
-    var displayResults: [ResultDisplayItem] { displayItems }
+    /// **Empty on purpose.** In grid Mode a Result is a cell, not a row, and the
+    /// cells are `EmojiGridView` reading `sections` — nothing renders a list of
+    /// Emoji anywhere.
+    ///
+    /// This used to return a built list, maintained on every keystroke, and with
+    /// an empty Query that is all 1,914 Emoji: an `NSImage` and a fresh `UUID`
+    /// each, on the main thread, for rows that were never drawn. Neither of the
+    /// two things that ask a scope whether it has results needs an answer here —
+    /// the Results Slab is unconditional in Emoji Mode because the grid is never
+    /// empty, and row navigation goes through `emojiVM.moveRow`.
+    var displayResults: [ResultDisplayItem] { [] }
 }

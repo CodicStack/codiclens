@@ -100,23 +100,30 @@ struct CardContainerView: View {
                 coordinator.triggerQuickLook()
                 return .handled
             }
-            if press.modifiers.contains(.control) {
-                if press.characters == "e" || press.characters == "\u{05}" {
+            if press.modifiers.contains(.control),
+               let letter = ControlKey.letter(press.characters) {
+                switch letter {
+                case "e":
                     coordinator.toggleClipboardEdit()
                     return .handled
-                }
-                switch press.characters {
                 case "j":
                     coordinator.moveDown()
                     return .handled
                 case "k":
                     coordinator.moveUp()
                     return .handled
+                // In the Emoji grid these two are one cell left and right — or
+                // one Skin Tone while the ⌥Enter picker is open. `moveLeft` and
+                // `moveRight` report whether they meant anything, exactly as the
+                // arrow keys use them, and only when they don't does the key
+                // move the Phase. Routing straight to the Phase is what took
+                // Ctrl+H and Ctrl+L out of Emoji Mode and advanced the Subject
+                // sitting behind it from Subject to Action.
                 case "h":
-                    coordinator.retreatPhase()
+                    if !coordinator.moveLeft() { coordinator.retreatPhase() }
                     return .handled
                 case "l":
-                    coordinator.advancePhase()
+                    if !coordinator.moveRight() { coordinator.advancePhase() }
                     return .handled
                 default:
                     break
@@ -126,35 +133,28 @@ struct CardContainerView: View {
         }
     }
 
+    /// The Cards for the Phases reached so far.
+    ///
+    /// `.identity` on the Cards that come and go is not an oversight. What
+    /// animates when a Phase is added is the *row's* width — driven by
+    /// `PanelView`, which owns this view's frame — while the Card itself
+    /// hard-cuts into place. A Card that scales or fades in delays information
+    /// the user has already asked for, which is the trap `docs/adr/0003` exists
+    /// to prevent.
     private var cardRow: some View {
         HStack(spacing: 6) {
             SubjectCardView(coordinator: coordinator)
 
             if coordinator.cardCount >= 2 {
                 ActionCardView(coordinator: coordinator)
-                    .transition(
-                        .asymmetric(
-                            insertion: .scale(scale: 0, anchor: .leading)
-                                .combined(with: .opacity),
-                            removal: .scale(scale: 0, anchor: .leading)
-                                .combined(with: .opacity)
-                        )
-                    )
+                    .transition(.identity)
             }
 
             if coordinator.cardCount >= 3 {
                 TargetCardView(coordinator: coordinator)
-                    .transition(
-                        .asymmetric(
-                            insertion: .scale(scale: 0, anchor: .leading)
-                                .combined(with: .opacity),
-                            removal: .scale(scale: 0, anchor: .leading)
-                                .combined(with: .opacity)
-                        )
-                    )
+                    .transition(.identity)
             }
         }
-        .animation(Motion.resize, value: coordinator.cardCount)
         .padding(6)
     }
 }

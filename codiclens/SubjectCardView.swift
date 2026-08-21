@@ -66,8 +66,43 @@ struct SubjectCardView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .bottomTrailing) { corner }
         .cardSurface(focused: isFocused, writing: isWriting)
         .padding(Style.cardInset)
+    }
+
+    /// The Card's bottom-trailing corner: what it holds, and what acts on it.
+    private var corner: some View {
+        HStack(spacing: 4) {
+            if let characterCount {
+                Text("\(characterCount) chars")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .chipSurface()
+            }
+            if let keyHint {
+                KeyHintChip(keys: keyHint)
+            }
+        }
+        .padding(Style.padding)
+    }
+
+    /// Shown for a clipboard entry that is text: how long the thing being
+    /// previewed actually is.
+    private var characterCount: Int? {
+        guard isClipboardMode, !coordinator.isEditingClipboardItem,
+              let item = clipboardItem, !item.isImage else { return nil }
+        return item.content.count
+    }
+
+    /// The key that acts on this Card. Only while the Card has the keyboard, and
+    /// only when there is something for the key to act on.
+    private var keyHint: String? {
+        guard isFocused else { return nil }
+        if coordinator.isEditingClipboardItem { return "⌘E" }
+        if coordinator.isEmojiBrowsing { return coordinator.currentEmoji == nil ? nil : "⏎" }
+        if isClipboardMode { return clipboardItem == nil ? nil : "⏎" }
+        return subject == nil ? nil : "⏎"
     }
 
     /// The Card in Emoji Mode: the glyph where an app icon would be, its CLDR
@@ -136,13 +171,6 @@ struct SubjectCardView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(20)
-                .overlay(alignment: .bottomTrailing) {
-                    Text("\(item.content.count) chars")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .chipSurface()
-                        .padding(Style.padding)
-                }
             }
         } else {
             VStack(spacing: 10) {
@@ -179,11 +207,13 @@ struct SubjectCardView: View {
                 }
                 return .ignored
             }
-            .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    isEditorFocused = true
-                }
-            }
+            // Focus has to be taken *after* the update that inserted the editor
+            // has committed — assigning it during that update is dropped,
+            // because the text view it would move focus to does not exist yet.
+            // `task` is the event that says "committed": it starts on the main
+            // actor once the view is in the hierarchy. It replaces a fixed
+            // 0.1-second delay that was guessing at the same moment.
+            .task { isEditorFocused = true }
     }
 
     private var textAreaContent: some View {

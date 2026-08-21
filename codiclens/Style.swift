@@ -22,12 +22,15 @@ import SwiftUI
 /// the Results Slab, and glass stacked on glass loses the backdrop it exists to
 /// reveal.
 ///
-/// **No shadows, and no rim on a Slab.** Both were removed after they produced
-/// visible artefacts, and neither can come back until the Panels are sized
-/// larger than their content: a `.shadow()` on a view that fills its window is
-/// clipped by the window bounds and renders as a hard band down two edges
-/// rather than a falloff. `docs/DESIGN-HANDOFF.md` has the detail. A Card keeps
-/// a faint rim, stroked *after* the clip so the hairline is not half cut away.
+/// **Every surface draws its own shadow, and the window draws none.** A
+/// `.shadow()` on a view that fills its window is clipped by the window bounds
+/// and renders as a hard band down two edges rather than a falloff, which is why
+/// there were no shadows at all until the Panel was sized larger than its
+/// content. `PanelLayout.margin` is the empty space they fall off into; shrink it
+/// and the band comes back. `FloatingPanel.hasShadow` stays `false` regardless —
+/// AppKit deriving a window shadow from transparent glass traces a ragged
+/// contour. `docs/DESIGN-HANDOFF.md` has the detail. A Card keeps a faint rim,
+/// stroked *after* the clip so the hairline is not half cut away.
 enum Style {
 
     // MARK: - Geometry
@@ -64,6 +67,15 @@ enum Style {
     static let rowPaddingV: CGFloat = 7
     static let chipPaddingH: CGFloat = 7
     static let chipPaddingV: CGFloat = 3
+
+    // MARK: - Shadow
+
+    /// How far a surface's shadow reaches, and how far it hangs below the
+    /// surface. Both are bounded by `PanelLayout.margin`: the shadow needs to
+    /// have fallen off to nothing before it reaches the window edge, or it is
+    /// clipped into a hard band instead.
+    static let shadowRadius: CGFloat = 16
+    static let shadowY: CGFloat = 5
 
     // MARK: - Shapes
 
@@ -151,6 +163,14 @@ private struct Palette {
     let chipFill: Color
     let chipRim: Color
 
+    /// What a surface casts onto whatever is behind it.
+    ///
+    /// Black in both appearances — a shadow is an absence of light, so unlike
+    /// `tint` it does not flip polarity. Only the weight differs, and it is
+    /// heavier in dark: the falloff has to be visible against a dark desktop
+    /// without turning into a halo on a light one.
+    let shadow: Color
+
     // MARK: Derived surface tints
 
     /// Slab, focused Card and unfocused Card all share this. The Slab is not a
@@ -183,7 +203,8 @@ private struct Palette {
         raisedRim: .white.opacity(0.38),
         selectionFill: .white.opacity(0.13),
         chipFill: .white.opacity(0.09),
-        chipRim: .white.opacity(0.10)
+        chipRim: .white.opacity(0.10),
+        shadow: .black.opacity(0.44)
     )
 
     static let light = Palette(
@@ -196,7 +217,8 @@ private struct Palette {
         raisedRim: .black.opacity(0.16),
         selectionFill: .black.opacity(0.07),
         chipFill: .white.opacity(0.62),
-        chipRim: .black.opacity(0.07)
+        chipRim: .black.opacity(0.07),
+        shadow: .black.opacity(0.20)
     )
 
     static func of(_ scheme: ColorScheme) -> Palette {
@@ -230,6 +252,9 @@ private struct SlabSurface: ViewModifier {
         return content
             .glassEffect(glass(palette.surfaceTint), in: Style.slabShape)
             .clipShape(Style.slabShape)
+            // After the clip, so the falloff follows the corner radius rather
+            // than the content's own bounds.
+            .shadow(color: palette.shadow, radius: Style.shadowRadius, y: Style.shadowY)
     }
 }
 
@@ -264,6 +289,7 @@ private struct CardSurface: ViewModifier {
             .overlay {
                 Style.cardShape.strokeBorder(rim, lineWidth: Style.hairline)
             }
+            .shadow(color: palette.shadow, radius: Style.shadowRadius, y: Style.shadowY)
     }
 }
 
