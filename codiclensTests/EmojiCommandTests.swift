@@ -8,7 +8,6 @@ import Testing
 struct EmojiCommandTests {
 
     private func makeCoordinator() throws -> (CommandCoordinator, RecordingEffectRunner) {
-        useInertAppIndex()
         let runner = RecordingEffectRunner()
         let emojiVM = EmojiSearchVM(
             index: try EmojiIndex.bundled(),
@@ -18,7 +17,8 @@ struct EmojiCommandTests {
         let coordinator = CommandCoordinator(
             runner: runner,
             history: ClipboardHistory(store: InMemoryClipboardStore()),
-            emojiVM: emojiVM
+            emojiVM: emojiVM,
+            index: inertAppIndex
         )
         return (coordinator, runner)
     }

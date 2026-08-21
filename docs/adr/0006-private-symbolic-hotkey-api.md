@@ -1,8 +1,23 @@
 ---
-status: accepted
+status: superseded
 ---
 
 # Disabling the system emoji hotkey via private CoreGraphics API
+
+> **Superseded.** The takeover was built and then removed unused. Codiclens now
+> registers Ctrl+Cmd+Space with `RegisterEventHotKey` and nothing else: whoever
+> holds the shortcut at the OS level holds it. The private symbols, the
+> preference and the Settings toggle are all gone.
+>
+> Why: the takeover was off by default (see the Consequences below), so the
+> shipping behaviour was already "macOS wins" — the code carried Mac App Store
+> risk and a hand-back path for a feature nobody had switched on. A user who
+> wants Codiclens to answer ⌃⌘Space can free the shortcut themselves, and the
+> first one to ask had already done so.
+>
+> The findings below are still accurate and are the reason Settings explains the
+> conflict rather than offering to resolve it. If the takeover is ever wanted
+> back, this is the record of how it worked.
 
 Codiclens binds Ctrl+Cmd+Space to its emoji picker. To make that key actually reach us, we call the **private** CoreGraphics function `CGSSetSymbolicHotKeyEnabled(50, false)`, where symbolic hotkey **50 is `ShowHideCharacterPalette`**. Detection uses the sibling `CGSIsSymbolicHotKeyEnabled(50)`.
 

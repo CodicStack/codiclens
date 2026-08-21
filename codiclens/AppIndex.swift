@@ -29,15 +29,6 @@ final class AppIndex {
     /// The app's Index.
     static let shared = AppIndex()
 
-    /// The Index a `SubjectSearchVM` adopts when it isn't handed one.
-    ///
-    /// The app leaves this pointing at `shared`. Tests replace it with an Index
-    /// over no directories, so no test scans `/Applications` or starts an
-    /// FSEvents stream. It exists because `CommandCoordinator` builds its
-    /// `SubjectSearchVM` itself — the tidier seam would be an `index:` argument
-    /// on `CommandCoordinator.init`.
-    static var current: AppIndex = shared
-
     /// The five directories the Index is built from.
     static let searchDirectories: [String] = [
         "/Applications",
@@ -90,6 +81,18 @@ final class AppIndex {
         watcher.start()
 
         refresh()
+    }
+
+    /// Stops watching the application directories.
+    ///
+    /// Called from `applicationWillTerminate`. `AppIndex.shared` is a singleton
+    /// and never deinitialises, so the FSEvents stream it holds would otherwise
+    /// outlive the app's decision to quit. A rebuild already in flight is left
+    /// to finish and land on a dead Index — harmless, and cheaper than a
+    /// cancellation protocol nothing else needs.
+    func stop() {
+        watcher?.stop()
+        watcher = nil
     }
 
     /// Rebuilds the Index from disk.

@@ -122,9 +122,7 @@ final class SystemEffectRunner: EffectRunner {
     // MARK: - Input simulation
 
     static func simulatePaste() {
-        if !AXIsProcessTrusted() {
-            print("[codiclens] accessibility not trusted (may differ between Xcode and installed builds)")
-        }
+        requestAccessibilityIfNeeded()
 
         let source = CGEventSource(stateID: .combinedSessionState)
         guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true),
@@ -138,6 +136,19 @@ final class SystemEffectRunner: EffectRunner {
         keyUp.flags = .maskCommand
         keyDown.post(tap: .cgSessionEventTap)
         keyUp.post(tap: .cgSessionEventTap)
+    }
+
+    /// Asks for Accessibility, and only at the moment something needs it.
+    ///
+    /// Deliberately not done at launch: an app that prompts on every cold start
+    /// trains the user to dismiss the dialog, and a build under test launches
+    /// dozens of times. Synthesising a keystroke is the one operation that
+    /// actually requires the grant, so this is where the question belongs.
+    private static func requestAccessibilityIfNeeded() {
+        guard !AXIsProcessTrusted() else { return }
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+        print("[codiclens] accessibility not granted — paste simulation needs it")
     }
 
     private static func simulatePasteFallback() {

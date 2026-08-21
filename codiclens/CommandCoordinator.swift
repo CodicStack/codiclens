@@ -21,7 +21,7 @@ class CommandCoordinator {
     /// The clipboard entry being acted on, when the selected subject is one.
     var selectedClipboardItem: ClipboardItem? { selectedSubject?.clipboardItem }
 
-    let subjectVM = SubjectSearchVM()
+    let subjectVM: SubjectSearchVM
     let actionVM = ActionSearchVM()
     let targetVM = TargetSearchVM()
     let clipboardVM: ClipboardSearchVM
@@ -34,17 +34,23 @@ class CommandCoordinator {
     private let runner: EffectRunner
     private let history: ClipboardHistory
 
-    /// - Parameter emojiVM: injected so tests get their own Recents and
-    ///   preferences instead of the ones in Application Support.
+    /// - Parameters:
+    ///   - emojiVM: injected so tests get their own Recents and preferences
+    ///     instead of the ones in Application Support.
+    ///   - index: the app Index Subject search matches against. Tests pass an
+    ///     Index over no directories, so no test scans `/Applications` or
+    ///     starts an FSEvents stream.
     init(
         runner: EffectRunner,
         history: ClipboardHistory,
-        emojiVM: EmojiSearchVM = EmojiSearchVM()
+        emojiVM: EmojiSearchVM = EmojiSearchVM(),
+        index: AppIndex = .shared
     ) {
         self.runner = runner
         self.history = history
         self.clipboardVM = ClipboardSearchVM(history: history)
         self.emojiVM = emojiVM
+        self.subjectVM = SubjectSearchVM(index: index)
     }
 
     var cardCount: Int {

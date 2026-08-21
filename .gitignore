@@ -37,3 +37,6 @@ Pods/
 
 # Crash logs
 *.crash
+
+# Coverage artefacts from running the binary directly
+default.profraw
