@@ -37,8 +37,7 @@ class FloatingPanel: NSPanel {
                 rootView: AnyView(
                     ThemeWrapper {
                         view
-                            .modifier(ThemedGlass(cornerRadius: 28))
-                            .clipShape(RoundedRectangle(cornerRadius: 28))
+                            .slabSurface()
                     }
                 )
             )

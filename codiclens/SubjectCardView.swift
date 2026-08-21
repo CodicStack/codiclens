@@ -3,13 +3,18 @@ import SwiftUI
 struct SubjectCardView: View {
     @Bindable var coordinator: CommandCoordinator
     @FocusState private var isEditorFocused: Bool
-    @Environment(\.colorScheme) private var colorScheme
 
     private var isFocused: Bool {
         switch coordinator.phase {
-        case .searchingSubject, .browsingClipboard: true
+        case .searchingSubject, .browsingClipboard, .browsingEmoji: true
         default: false
         }
+    }
+
+    /// Whether the Card is holding text rather than naming something, which is
+    /// the one case that needs a near-solid ground to stay readable.
+    private var isWriting: Bool {
+        isClipboardText || isTextMode
     }
 
     private var subject: Subject? {
@@ -50,6 +55,8 @@ struct SubjectCardView: View {
                 clipboardEditor
             } else if isClipboardMode {
                 clipboardPreview
+            } else if coordinator.isEmojiBrowsing {
+                emojiContent
             } else if isTextMode {
                 textAreaContent
             } else if let subject {
@@ -59,25 +66,36 @@ struct SubjectCardView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            ZStack {
-                if isClipboardText || isTextMode {
-                    RoundedRectangle(cornerRadius: 32)
-                        .fill(colorScheme == .dark ? Color(white: 0.15) : Color.white)
-                } else {
-                    RoundedRectangle(cornerRadius: 32)
-                        .fill(.ultraThinMaterial)
-                    RoundedRectangle(cornerRadius: 32)
-                        .fill(colorScheme == .dark
-                            ? Color.black.opacity(0.92)
-                            : Color.white.opacity(0.7))
-                }
+        .cardSurface(focused: isFocused, writing: isWriting)
+        .padding(Style.cardInset)
+    }
+
+    /// The Card in Emoji Mode: the glyph where an app icon would be, its CLDR
+    /// name where an app name would be, so the Card reads the same either way.
+    ///
+    /// The glyph goes through `EmojiRenderer` rather than a large `Text`.
+    /// Apple Color Emoji is a bitmap font whose largest strike here is 48pt, so
+    /// the renderer draws at 48 and centres it in the 96pt icon slot the other
+    /// Cards use. Asking for a glyph that *fills* 96pt would upscale that
+    /// bitmap 2x and read visibly soft; a sharp glyph in a slightly roomy slot
+    /// is the better trade, and it keeps the Card's metrics identical.
+    @ViewBuilder
+    private var emojiContent: some View {
+        if let emoji = coordinator.currentEmoji {
+            VStack(spacing: 10) {
+                Image(nsImage: EmojiRenderer.image(for: emoji.string, box: 96))
+                    .frame(width: 96, height: 96)
+
+                Text(emoji.name)
+                    .font(.system(size: 15, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .foregroundStyle(.primary)
             }
-            .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 32))
-        .opacity(isFocused || isClipboardText || isTextMode || coordinator.phase == .showingResult("") ? 1 : 0.7)
-        .padding(4)
+            .padding(.horizontal, Style.padding)
+        } else {
+            placeholder
+        }
     }
 
     private func resultPreview(_ result: String) -> some View {
@@ -123,13 +141,8 @@ struct SubjectCardView: View {
                     Text("\(item.content.count) chars")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(colorScheme == .dark
-                            ? Color.black.opacity(0.92)
-                            : Color.white.opacity(0.92))
-                        .clipShape(Capsule())
-                        .padding(12)
+                        .chipSurface()
+                        .padding(Style.padding)
                 }
             }
         } else {

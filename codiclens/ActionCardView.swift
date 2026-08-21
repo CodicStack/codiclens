@@ -2,7 +2,6 @@ import SwiftUI
 
 struct ActionCardView: View {
     let coordinator: CommandCoordinator
-    @Environment(\.colorScheme) private var colorScheme
 
     private var isFocused: Bool {
         if case .pickingAction = coordinator.phase { return true }
@@ -24,20 +23,8 @@ struct ActionCardView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 32)
-                    .fill(.ultraThinMaterial)
-                RoundedRectangle(cornerRadius: 32)
-                    .fill(colorScheme == .dark
-                        ? Color.black.opacity(0.92)
-                        : Color.white.opacity(0.7))
-            }
-            .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 32))
-        .opacity(isFocused ? 1 : 0.7)
-        .padding(4)
+        .cardSurface(focused: isFocused)
+        .padding(Style.cardInset)
     }
 
     private func actionContent(_ action: SubjectAction) -> some View {

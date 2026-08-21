@@ -41,17 +41,6 @@
                ReferencedContainer = "container:codiclens.xcodeproj">
             </BuildableReference>
          </TestableReference>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "383D3F052FAD061500B48984"
-               BuildableName = "codiclensUITests.xctest"
-               BlueprintName = "codiclensUITests"
-               ReferencedContainer = "container:codiclens.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction
