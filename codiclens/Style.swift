@@ -126,11 +126,11 @@ private struct Palette {
     let chipRim: Color
 
     static let dark = Palette(
-        glassTint: .black.opacity(0.10),
-        cardRim: .white.opacity(0.10),
+        glassTint: .black.opacity(0.16),
+        cardRim: .white.opacity(0.14),
         recessedFill: nil,
         raisedFill: .white.opacity(0.09),
-        raisedRim: .white.opacity(0.22),
+        raisedRim: .white.opacity(0.28),
         writingFill: .black.opacity(0.52),
         selectionFill: .white.opacity(0.13),
         chipFill: .white.opacity(0.09),
@@ -138,11 +138,11 @@ private struct Palette {
     )
 
     static let light = Palette(
-        glassTint: .white.opacity(0.14),
-        cardRim: .black.opacity(0.08),
+        glassTint: .white.opacity(0.22),
+        cardRim: .black.opacity(0.10),
         recessedFill: nil,
         raisedFill: .white.opacity(0.30),
-        raisedRim: .black.opacity(0.13),
+        raisedRim: .black.opacity(0.16),
         writingFill: .white.opacity(0.80),
         selectionFill: .black.opacity(0.07),
         chipFill: .white.opacity(0.62),
@@ -156,12 +156,23 @@ private struct Palette {
 
 // MARK: - Tier modifiers
 
-/// `.regular` glass, tinted only if there is a tint. There is no
-/// `.tint(nil)` — passing a clear colour still counts as a tint layer — so the
-/// two cases have to be built separately.
-private func glass(_ tint: Color?) -> Glass {
-    guard let tint else { return .regular }
-    return .regular.tint(tint)
+/// Glass, tinted only if there is a tint. There is no `.tint(nil)` — passing a
+/// clear colour still counts as a tint layer — so the two cases have to be built
+/// separately.
+///
+/// **`.clear`, not `.regular`.** `.regular` is the heavily-blurred material; it
+/// obscures what is behind it, which is what made these surfaces read as opaque
+/// panels. `.clear` keeps the refraction and the specular edge but lets the
+/// desktop through, so a Slab looks like a sheet of glass lying over the screen
+/// rather than a frosted tile.
+///
+/// `readable` opts back into `.regular`. One case needs it: a Card holding
+/// editable body text, where 13pt glyphs over a wallpaper or a code editor are
+/// genuinely unreadable through clear glass.
+private func glass(_ tint: Color?, readable: Bool = false) -> Glass {
+    let base: Glass = readable ? .regular : .clear
+    guard let tint else { return base }
+    return base.tint(tint)
 }
 
 private struct SlabSurface: ViewModifier {
@@ -192,7 +203,7 @@ private struct CardSurface: ViewModifier {
             : (focused ? palette.raisedFill : palette.recessedFill)
         let rim = focused ? palette.raisedRim : palette.cardRim
         return content
-            .glassEffect(glass(fill), in: Style.cardShape)
+            .glassEffect(glass(fill, readable: writing), in: Style.cardShape)
             .clipShape(Style.cardShape)
             .overlay {
                 Style.cardShape.strokeBorder(rim, lineWidth: Style.hairline)
