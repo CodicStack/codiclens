@@ -1,0 +1,18 @@
+name: Bootstrap
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  bootstrap:
+    runs-on: xcode-27
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Export Xcode skills
+        timeout-minutes: 5
+        run: ./bootstrap.sh
+      - name: Verify bundled skills
+        run: test -s bundled/swiftui-specialist/SKILL.md
