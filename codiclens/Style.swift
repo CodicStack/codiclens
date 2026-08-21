@@ -138,11 +138,9 @@ private struct Palette {
 
     /// Added for a Card holding editable body text.
     ///
-    /// The one genuinely large delta, and the only surface that also swaps to
-    /// `.regular`. 13pt glyphs over a code editor are unreadable through clear
-    /// glass. Even here the tint stays the same *colour* as everything else, so
-    /// the Card reads as a frostier piece of the same sheet rather than a
-    /// different substance — it used to be white 0.80 against a 0.22 Slab.
+    /// Added for a Card holding editable body text, which needs the most
+    /// contrast of anything on screen. Much smaller than it was: the material
+    /// carries legibility now, so this only has to nudge.
     ///
     /// Unlike focus, this one *is* a delta on `base`, and correctly so: more
     /// tint means more contrast against the body text in both appearances,
@@ -182,22 +180,18 @@ private struct Palette {
 
     static let dark = Palette(
         tint: .black,
-        // Much heavier than light mode's, for a reason that is about contrast
-        // rather than taste. Dark appearance draws primary text in white, and
-        // clear glass passes whatever is behind the Panel straight through — so
-        // over a light document the Slab goes pale and white-on-pale is
-        // unreadable. The tint is what guarantees a dark ground for that text
-        // regardless of what happens to be underneath. Light mode needs far
-        // less, because dark text on a light surface is the same polarity as
-        // whatever it is floating over.
-        base: 0.58,
+        // Still heavier than light's, because dark appearance draws primary
+        // text in white and needs a dark ground for it. Far lower than it was
+        // under clear glass, though: 0.58 was propping up legibility that the
+        // material now provides, and it read as opaque rather than as glass.
+        base: 0.26,
         // Deliberately faint. In dark appearance a white highlight is the one
         // thing that can lift a Card off the tint it shares with the Slab, and
         // a Card that reads lighter than the Slab both breaks that shared-sheet
         // look and takes white text back towards unreadable. The rim carries
         // most of the focus signal here instead.
         highlight: .white.opacity(0.06),
-        writingLift: 0.22,
+        writingLift: 0.14,
         slabRim: .white.opacity(0.10),
         cardRim: .white.opacity(0.12),
         raisedRim: .white.opacity(0.38),
@@ -209,9 +203,9 @@ private struct Palette {
 
     static let light = Palette(
         tint: .white,
-        base: 0.24,
+        base: 0.15,
         highlight: .white.opacity(0.30),
-        writingLift: 0.34,
+        writingLift: 0.18,
         slabRim: .black.opacity(0.08),
         cardRim: .black.opacity(0.10),
         raisedRim: .black.opacity(0.16),
@@ -230,18 +224,16 @@ private struct Palette {
 
 /// Glass at one shared tint.
 ///
-/// **`.clear`, not `.regular`.** `.regular` is the heavily-blurred material; it
-/// obscures what is behind it, which is what made these surfaces read as opaque
-/// panels. `.clear` keeps the refraction and the specular edge but lets the
-/// desktop through, so a Slab looks like a sheet of glass lying over the screen
-/// rather than a frosted tile.
+/// **`.regular`, and the tint kept low.** `Glass` offers two steps rather than a
+/// dial — `.regular` and `.clear` — so "a little more frosted" is not directly
+/// expressible. `.clear` let the desktop through so completely that the Panel's
+/// own content was hard to read, and dark appearance had to push its tint to
+/// 0.58 to keep white text legible, which read as opaque anyway. `.regular`
+/// supplies the blur and the tints come down a long way behind it. Blur and tint
+/// are separate levers; the earlier mistake was cranking both.
 ///
-/// `readable` opts back into `.regular`. One case needs it: a Card holding
-/// editable body text, where 13pt glyphs over a wallpaper or a code editor are
-/// genuinely unreadable through clear glass.
-private func glass(_ tint: Color, readable: Bool = false) -> Glass {
-    let base: Glass = readable ? .regular : .clear
-    return base.tint(tint)
+private func glass(_ tint: Color) -> Glass {
+    .regular.tint(tint)
 }
 
 private struct SlabSurface: ViewModifier {
@@ -273,7 +265,7 @@ private struct CardSurface: ViewModifier {
         let fill = writing ? palette.writingTint : palette.surfaceTint
         let rim = focused ? palette.raisedRim : palette.cardRim
         return content
-            .glassEffect(glass(fill, readable: writing), in: Style.cardShape)
+            .glassEffect(glass(fill), in: Style.cardShape)
             // Focus brightens the Card by sitting a light fill *behind* the
             // glass, so the glass carries it and the Card's own content is not
             // washed over. Never by tinting the glass instead: the tint's
