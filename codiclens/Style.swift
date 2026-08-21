@@ -114,9 +114,15 @@ private struct Palette {
     /// precisely so it cannot drift into a different material again.
     let base: Double
 
-    /// Added for the focused Card. Small: it only has to be *visibly* brighter
-    /// than its neighbour, and the rim carries the rest of the signal.
-    let focusLift: Double
+    /// The focused Card's brightening, laid *over* the glass rather than mixed
+    /// into its tint.
+    ///
+    /// It has to be a separate overlay, not a delta on `base`, because `tint`
+    /// changes polarity between appearances. Adding to the tint brightens a
+    /// white-tinted light Slab but *darkens* a black-tinted dark one — so
+    /// `base + focusLift` made a focused Card in dark mode dimmer than its
+    /// unfocused neighbour, which is backwards. Light brightens both.
+    let highlight: Color
 
     /// Added for a Card holding editable body text.
     ///
@@ -125,6 +131,10 @@ private struct Palette {
     /// glass. Even here the tint stays the same *colour* as everything else, so
     /// the Card reads as a frostier piece of the same sheet rather than a
     /// different substance — it used to be white 0.80 against a 0.22 Slab.
+    ///
+    /// Unlike focus, this one *is* a delta on `base`, and correctly so: more
+    /// tint means more contrast against the body text in both appearances,
+    /// because the tint's polarity already follows the text colour.
     let writingLift: Double
 
     let slabRim: Color
@@ -143,17 +153,21 @@ private struct Palette {
 
     // MARK: Derived surface tints
 
-    /// Slab and unfocused Card are deliberately identical. The Slab is not a
-    /// different material from the Cards floating above it.
+    /// Slab, focused Card and unfocused Card all share this. The Slab is not a
+    /// different material from the Cards floating above it, and focus is an
+    /// overlay on top rather than a different glass.
     var surfaceTint: Color { tint.opacity(base) }
-    var focusedTint: Color { tint.opacity(base + focusLift) }
+
     var writingTint: Color { tint.opacity(base + writingLift) }
 
     static let dark = Palette(
         tint: .black,
-        base: 0.16,
-        focusLift: 0.10,
-        writingLift: 0.30,
+        // Heavier than light mode's. A black tint over glass that is already
+        // dark barely registers, so a value that reads as "smoked glass" here
+        // has to be roughly double what reads as "frosted" in light.
+        base: 0.34,
+        highlight: .white.opacity(0.16),
+        writingLift: 0.26,
         slabRim: .white.opacity(0.10),
         cardRim: .white.opacity(0.12),
         raisedRim: .white.opacity(0.26),
@@ -165,7 +179,7 @@ private struct Palette {
     static let light = Palette(
         tint: .white,
         base: 0.24,
-        focusLift: 0.12,
+        highlight: .white.opacity(0.30),
         writingLift: 0.34,
         slabRim: .black.opacity(0.08),
         cardRim: .black.opacity(0.10),
@@ -221,12 +235,21 @@ private struct CardSurface: ViewModifier {
 
     func body(content: Content) -> some View {
         let palette = Palette.of(scheme)
-        let fill = writing
-            ? palette.writingTint
-            : (focused ? palette.focusedTint : palette.surfaceTint)
+        let fill = writing ? palette.writingTint : palette.surfaceTint
         let rim = focused ? palette.raisedRim : palette.cardRim
         return content
             .glassEffect(glass(fill, readable: writing), in: Style.cardShape)
+            // Focus brightens the Card by sitting a light fill *behind* the
+            // glass, so the glass carries it and the Card's own content is not
+            // washed over. Never by tinting the glass instead: the tint's
+            // polarity flips between appearances and would dim the Card in dark
+            // mode. Alpha is higher than it looks like it needs to be because
+            // translucent glass eats most of it.
+            .background {
+                if focused {
+                    Style.cardShape.fill(palette.highlight)
+                }
+            }
             .clipShape(Style.cardShape)
             .overlay {
                 Style.cardShape.strokeBorder(rim, lineWidth: Style.hairline)
