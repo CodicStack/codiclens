@@ -307,4 +307,131 @@ struct EmojiCommandTests {
         #expect(coordinator.emojiVM.sections.count == coordinator.emojiVM.index.groups.count)
         #expect(!coordinator.emojiVM.flattened.isEmpty)
     }
+
+    // MARK: - Grid Mode builds no rows
+
+    /// The grid renders `sections`. Nothing renders a list of Emoji, and
+    /// building one meant an `NSImage` and a fresh `UUID` for all 1,914 of them
+    /// on every keystroke.
+    @Test
+    func theGridPublishesNoListRows() throws {
+        let (coordinator, _) = try makeCoordinator()
+        coordinator.enterEmojiMode()
+
+        #expect(!coordinator.emojiVM.flattened.isEmpty, "the grid itself is full")
+        #expect(coordinator.currentResults.isEmpty, "and there are no rows behind it")
+
+        coordinator.currentSearchText = "fire"
+        #expect(!coordinator.emojiVM.flattened.isEmpty)
+        #expect(coordinator.currentResults.isEmpty)
+    }
+
+    // MARK: - The grid and the Card agree
+
+    /// With a default Skin Tone set, the cell and the Card have to be the same
+    /// glyph. They were not: the cell drew the base and the Card drew the tone.
+    @Test
+    func aCellShowsTheSameGlyphTheCardAndThePasteDo() throws {
+        let runner = RecordingEffectRunner()
+        let emojiVM = EmojiSearchVM(
+            index: try EmojiIndex.bundled(),
+            recents: EmojiRecents(store: InMemoryEmojiRecentsStore()),
+            preferences: EmojiPreferences(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        )
+        emojiVM.preferences.defaultSkinTone = .dark
+        let coordinator = CommandCoordinator(
+            runner: runner,
+            history: ClipboardHistory(store: InMemoryClipboardStore()),
+            emojiVM: emojiVM,
+            index: inertAppIndex
+        )
+        coordinator.enterEmojiMode()
+        try select("💪", in: coordinator)
+
+        let base = try #require(coordinator.emojiVM.selected)
+        #expect(base.string == "💪", "identity and order stay with the base")
+        #expect(coordinator.emojiVM.displayed(base).string == "💪🏿", "the cell wears the tone")
+        #expect(coordinator.currentEmoji?.string == "💪🏿", "and so does the Card")
+    }
+
+    /// No default tone, no lookup, no difference.
+    @Test
+    func withoutADefaultToneTheCellIsTheBase() throws {
+        let (coordinator, _) = try makeCoordinator()
+        coordinator.enterEmojiMode()
+        try select("💪", in: coordinator)
+
+        let base = try #require(coordinator.emojiVM.selected)
+        #expect(coordinator.emojiVM.displayed(base).string == "💪")
+        #expect(coordinator.currentEmoji?.string == "💪")
+    }
+
+    // MARK: - Left and right belong to the grid
+
+    /// Ctrl+H and Ctrl+L fall back to the Phase only when the horizontal move
+    /// meant nothing. In the grid it always means something, which is why they
+    /// must not reach `retreatPhase` there.
+    @Test
+    func horizontalMovesAreConsumedByTheGrid() throws {
+        let (coordinator, _) = try makeCoordinator()
+        coordinator.enterEmojiMode()
+        coordinator.emojiVM.selectedIndex = 4
+
+        #expect(coordinator.moveRight() == true)
+        #expect(coordinator.emojiVM.selectedIndex == 5)
+        #expect(coordinator.moveLeft() == true)
+        #expect(coordinator.emojiVM.selectedIndex == 4)
+        #expect(coordinator.phase == .browsingEmoji, "the Phase never moved")
+    }
+
+    @Test
+    func horizontalMovesMeanNothingOutsideTheGrid() throws {
+        let (coordinator, _) = try makeCoordinator()
+
+        #expect(coordinator.moveLeft() == false)
+        #expect(coordinator.moveRight() == false)
+        #expect(coordinator.phase == .searchingSubject)
+    }
+
+    @Test
+    func verticalMovesJumpAWholeRowInTheGrid() throws {
+        let (coordinator, _) = try makeCoordinator()
+        coordinator.enterEmojiMode()
+        coordinator.emojiVM.selectedIndex = 0
+
+        coordinator.moveDown()
+        #expect(coordinator.emojiVM.selectedIndex == EmojiSearchVM.columnCount)
+        coordinator.moveUp()
+        #expect(coordinator.emojiVM.selectedIndex == 0)
+        #expect(coordinator.phase == .browsingEmoji)
+    }
+}
+
+/// Folding a Control-modified key press onto the letter it means.
+struct ControlKeyTests {
+
+    @Test(arguments: [
+        ("\u{05}", Character("e")),
+        ("\u{08}", Character("h")),
+        ("\u{0A}", Character("j")),
+        ("\u{0B}", Character("k")),
+        ("\u{0C}", Character("l")),
+    ])
+    func aControlCharacterFoldsOntoItsLetter(input: String, expected: Character) {
+        #expect(ControlKey.letter(input) == expected)
+    }
+
+    @Test(arguments: ["e", "h", "j", "k", "l"])
+    func aPlainLetterIsItself(input: String) {
+        #expect(ControlKey.letter(input) == Character(input))
+    }
+
+    @Test func anUppercaseLetterFoldsDown() {
+        #expect(ControlKey.letter("L") == "l")
+    }
+
+    @Test(arguments: ["", "hl", "\u{05}\u{05}"])
+    func anythingThatIsNotOneCharacterIsNil(input: String) {
+        #expect(ControlKey.letter(input) == nil)
+    }
 }

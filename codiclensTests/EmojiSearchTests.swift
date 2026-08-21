@@ -334,4 +334,198 @@ struct EmojiSearchTests {
         EmojiRecents(store: store).record(fire)
         #expect(EmojiRecents(store: store).strings == ["🔥"])
     }
+
+    // MARK: - The grid, the selection and the Card are one thing
+
+    private func makeVM(tone: SkinTone = .none) throws -> EmojiSearchVM {
+        let preferences = EmojiPreferences(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        preferences.defaultSkinTone = tone
+        let vm = EmojiSearchVM(
+            index: try EmojiIndex.bundled(),
+            recents: makeRecents(),
+            preferences: preferences
+        )
+        vm.load()
+        return vm
+    }
+
+    /// The three things a user sees have to be derived from one another, or the
+    /// grid can show one set while the Card shows another. `flattened` is
+    /// literally `sections` flattened, the selection is an index into it, and the
+    /// Card is that selection wearing the tone in force — so this checks the
+    /// whole chain in one place, and after everything that can move it.
+    private func expectOneTruth(_ vm: EmojiSearchVM, _ comment: Comment) throws {
+        #expect(
+            vm.sections.flatMap(\.emoji).map(\.string) == vm.flattened.map(\.string),
+            comment
+        )
+        guard !vm.flattened.isEmpty else {
+            #expect(vm.selected == nil, comment)
+            #expect(vm.resolvedSelection == nil, comment)
+            return
+        }
+        #expect(vm.flattened.indices.contains(vm.selectedIndex), comment)
+
+        let selected = try #require(vm.selected, comment)
+        #expect(selected.string == vm.flattened[vm.selectedIndex].string, comment)
+
+        // What the highlighted cell draws, and what the Card draws, are the same
+        // glyph. This is the invariant the user kept hitting.
+        let card = try #require(vm.resolvedSelection, comment)
+        #expect(vm.displayed(selected).string == card.string, comment)
+        // And toning never moves identity: the Result is still the base.
+        #expect(vm.flattened[vm.selectedIndex].string == selected.string, comment)
+    }
+
+    @Test
+    func aQueryFiltersTheGrid() throws {
+        let vm = try makeVM()
+        let unfiltered = vm.flattened.count
+
+        vm.searchText = "salue"
+
+        #expect(vm.sections.map(\.title) == ["Results"])
+        #expect(vm.flattened.count < unfiltered, "the default set is gone")
+        // A subsequence match on both, best first in canonical order.
+        #expect(vm.flattened.map(\.string).prefix(2) == ["🫡", "🖖"])
+        try expectOneTruth(vm, "after a Query")
+    }
+
+    @Test
+    func theSelectionAndTheCardAgreeThroughEveryKeystroke() throws {
+        let vm = try makeVM()
+        try expectOneTruth(vm, "with no Query")
+
+        var typed = ""
+        for character in "salue" {
+            typed.append(character)
+            vm.searchText = typed
+            #expect(vm.selectedIndex == 0, "a new Query starts at the first cell")
+            try expectOneTruth(vm, "after typing \(typed)")
+        }
+
+        vm.searchText = ""
+        try expectOneTruth(vm, "after clearing the Query")
+    }
+
+    @Test
+    func theSelectionAndTheCardAgreeThroughEveryMove() throws {
+        let vm = try makeVM()
+        vm.searchText = "salue"
+
+        vm.moveCell(1)
+        #expect(vm.selected?.string == "🖖", "one cell right is the next match")
+        try expectOneTruth(vm, "after moveCell(1)")
+
+        vm.moveRow(1)
+        try expectOneTruth(vm, "after moveRow(1)")
+
+        vm.moveRow(-1)
+        try expectOneTruth(vm, "after moveRow(-1)")
+
+        vm.moveCell(-1)
+        try expectOneTruth(vm, "after moveCell(-1)")
+    }
+
+    @Test
+    func aDefaultToneShowsOnTheCellAsWellAsTheCard() throws {
+        let vm = try makeVM(tone: .dark)
+        vm.searchText = "salue"
+
+        let base = try #require(vm.selected)
+        #expect(base.string == "🫡")
+        #expect(vm.displayed(base).string == "🫡", "no variants, so nothing to wear")
+
+        vm.moveCell(1)
+        let vulcan = try #require(vm.selected)
+        #expect(vulcan.string == "🖖", "identity stays with the base")
+        #expect(vm.displayed(vulcan).string == "🖖🏿", "and the cell wears the tone")
+        #expect(vm.resolvedSelection?.string == "🖖🏿", "same as the Card")
+        try expectOneTruth(vm, "with a default tone")
+    }
+
+    /// The tone override is previewed everywhere at once, so opening it cannot
+    /// put the cell and the Card out of step.
+    @Test
+    func theToneOverrideMovesTheCellAndTheCardTogether() throws {
+        let vm = try makeVM()
+        vm.searchText = "vulcan"
+        #expect(vm.selected?.string == "🖖")
+        #expect(vm.openTonePicker())
+
+        vm.toneIndex = SkinTone.dark.rawValue
+        let selected = try #require(vm.selected)
+        #expect(vm.displayed(selected).string == "🖖🏿")
+        try expectOneTruth(vm, "with the tone picker open")
+    }
+
+    @Test
+    func aQueryThatMatchesNothingLeavesNothingSelected() throws {
+        let vm = try makeVM()
+        vm.searchText = "qqzzxx"
+
+        #expect(vm.sections.isEmpty)
+        #expect(vm.flattened.isEmpty)
+        #expect(vm.selected == nil)
+        #expect(vm.resolvedSelection == nil)
+        try expectOneTruth(vm, "with no matches")
+    }
+
+    /// A lazy container reuses a child whose id has not changed. Every Query
+    /// produces a section called "Results", so the id cannot be the title alone
+    /// or the grid is entitled to keep showing the previous set.
+    @Test
+    func aSectionsIdentityMovesWithItsContents() throws {
+        let vm = try makeVM()
+
+        vm.searchText = "salue"
+        let first = try #require(vm.sections.first)
+        vm.searchText = "vulcan"
+        let second = try #require(vm.sections.first)
+
+        #expect(first.title == second.title, "both are called Results")
+        #expect(first.id != second.id, "and are still two different sections")
+    }
+
+    // MARK: - Which dataset the view model searches
+
+    @Test
+    func anInjectedIndexIsTheOneSearched() throws {
+        let index = try EmojiIndex.decode(try #require(payload()))
+
+        let vm = EmojiSearchVM(index: index, recents: makeRecents())
+
+        #expect(vm.index === index)
+        vm.load()
+        #expect(vm.flattened.map(\.string) == ["🔥"])
+    }
+
+    /// Constructing the view model must not read `EmojiIndex.shared`: it is
+    /// `CommandCoordinator`'s own default argument, so that read happened while
+    /// the app was launching and parsed 226 KB of JSON on the main thread.
+    @Test
+    func theDatasetIsOnlyResolvedWhenSomethingSearchesIt() throws {
+        let vm = EmojiSearchVM(recents: makeRecents())
+
+        // Nothing has asked for an Emoji yet, so nothing has been decoded.
+        #expect(vm.sections.isEmpty)
+        #expect(vm.flattened.isEmpty)
+
+        // Asking resolves it, and resolves it to the bundled dataset.
+        #expect(vm.index === EmojiIndex.shared)
+        #expect(vm.index === vm.index, "resolved once, not per access")
+    }
+
+    /// A one-emoji dataset in the shipping format.
+    private func payload() -> Data? {
+        """
+        {
+          "unicodeVersion": "17.0",
+          "cldrVersion": "48",
+          "groups": ["Test"],
+          "emoji": [{ "e": "🔥", "n": "fire", "k": ["hot"], "g": 0 }],
+          "skinTones": {}
+        }
+        """.data(using: .utf8)
+    }
 }

@@ -35,6 +35,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         panelController = PanelController()
+        // Off-thread, so neither launch nor the first Emoji Mode waits on the
+        // 226 KB dataset being decoded.
+        EmojiIndex.prewarm()
         pasteboardWatcher.start()
         installHotKeyHandler()
         register(HotKey.panel, as: HotKeyID.panel)

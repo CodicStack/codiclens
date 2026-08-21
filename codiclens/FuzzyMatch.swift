@@ -56,10 +56,23 @@ func fuzzyScore(_ name: String, _ query: String) -> Int? {
         return 50
     }
 
+    // Typo tolerance, and the expensive branch: everything above rejects in a
+    // scan, this builds a matrix. Most candidates reach it — a Query matches a
+    // handful of names and *nothing else about* the other 1,900 — so the cheap
+    // rejection below is what keeps ranking the whole emoji dataset affordable.
     let prefixLen = min(n.count, q.count + 2)
-    let nPrefix = String(n.prefix(prefixLen))
-    let dist = levenshteinDistance(q, nPrefix)
-    if dist <= max(1, q.count / 3) {
+    let threshold = max(1, q.count / 3)
+
+    // An edit changes a string's length by at most one, so the distance can
+    // never be smaller than the difference in length. When that lower bound is
+    // already over the threshold the matrix cannot change the answer. Exactly
+    // equivalent, not an approximation — and for any Query under six characters
+    // it rejects every name longer than the Query plus one, which is almost all
+    // of them.
+    if abs(prefixLen - q.count) > threshold { return nil }
+
+    let dist = levenshteinDistance(q, String(n.prefix(prefixLen)))
+    if dist <= threshold {
         return 100 + dist
     }
 

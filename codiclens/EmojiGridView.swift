@@ -50,7 +50,15 @@ struct EmojiGridView: View {
                             LazyVGrid(columns: columns, spacing: 2) {
                                 ForEach(Array(section.emoji.enumerated()), id: \.element.id) { offset, emoji in
                                     let flatIndex = vm.start(of: number) + offset
-                                    cell(emoji, isSelected: flatIndex == vm.selectedIndex)
+                                    // The cell draws the Emoji in the user's
+                                    // default Skin Tone, which is what the
+                                    // Subject Card shows and what Enter pastes.
+                                    // Drawing the untoned base here made the
+                                    // Card look like it was showing a different
+                                    // emoji — see `EmojiSearchVM.displayed`.
+                                    // Selection, order and identity are still
+                                    // the base's: a variant is never a Result.
+                                    cell(vm.displayed(emoji), isSelected: flatIndex == vm.selectedIndex)
                                         .id(flatIndex)
                                         .onTapGesture {
                                             vm.selectedIndex = flatIndex

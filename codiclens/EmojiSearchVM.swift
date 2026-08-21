@@ -12,7 +12,32 @@ final class EmojiSearchVM {
     struct Section: Identifiable {
         let title: String
         let emoji: [Emoji]
-        var id: String { title }
+
+        /// Derived from the contents, and computed once when the section is
+        /// built rather than on every diff.
+        ///
+        /// **Identity has to move when the contents do.** It used to be the
+        /// title alone, and every Query produces a section called "Results" — so
+        /// from a lazy container's point of view the section it was already
+        /// showing was still the current one, and a `LazyVStack` that believes
+        /// that is entitled to keep the cells it has already built. That is how
+        /// a grid filtered to ten matches went on showing the previous Query's
+        /// results while the Subject Card, reading `flattened` directly, showed
+        /// the right one. Anything short of the whole contents — a count, a
+        /// first element — leaves two different Queries able to collide.
+        ///
+        /// `Hasher` is seeded per process, so this is stable for as long as any
+        /// diff cares about and deliberately not persisted.
+        let id: String
+
+        init(title: String, emoji: [Emoji]) {
+            self.title = title
+            self.emoji = emoji
+            var hasher = Hasher()
+            hasher.combine(title)
+            for one in emoji { hasher.combine(one.string) }
+            self.id = "\(title)#\(hasher.finalize())"
+        }
     }
 
     // MARK: Ranking weights
@@ -51,27 +76,40 @@ final class EmojiSearchVM {
     /// space; the grid renders from `sections`.
     private(set) var flattened: [Emoji] = []
 
-    /// `flattened` as the Results Slab's list form. Built once per rebuild
-    /// rather than on demand: with no Query this is every Emoji there is, and
-    /// the slab asks for it several times per keystroke.
-    private(set) var displayItems: [ResultDisplayItem] = []
-
     /// The Emoji whose six-tone override picker is open, if one is.
     private(set) var tonePickerEmoji: Emoji?
 
     /// Index into `SkinTone.allCases` while the picker is open.
     var toneIndex: Int = 0
 
-    let index: EmojiIndex
+    /// The dataset, resolved the first time anything actually needs it.
+    ///
+    /// Deliberately not `EmojiIndex.shared` as a default argument. This view
+    /// model is constructed as `CommandCoordinator`'s own default, which happens
+    /// while the app is launching — and reading `shared` there parsed a 226 KB
+    /// JSON on the main thread before the first Panel could appear.
+    /// `EmojiIndex.prewarm()` gets it decoded off-thread instead, and this only
+    /// ever asks for it once Emoji Mode is being built.
+    var index: EmojiIndex {
+        if let resolvedIndex { return resolvedIndex }
+        let shared = EmojiIndex.shared
+        resolvedIndex = shared
+        return shared
+    }
+
+    @ObservationIgnored private var resolvedIndex: EmojiIndex?
+
     let recents: EmojiRecents
     let preferences: EmojiPreferences
 
+    /// - Parameter index: the dataset to search. Nil means the bundled one,
+    ///   fetched lazily; tests pass their own.
     init(
-        index: EmojiIndex = .shared,
+        index: EmojiIndex? = nil,
         recents: EmojiRecents = .shared,
         preferences: EmojiPreferences = .shared
     ) {
-        self.index = index
+        self.resolvedIndex = index
         self.recents = recents
         self.preferences = preferences
     }
@@ -89,7 +127,6 @@ final class EmojiSearchVM {
         searchText = ""
         sections = []
         flattened = []
-        displayItems = []
         selectedIndex = 0
         closeTonePicker()
     }
@@ -101,7 +138,6 @@ final class EmojiSearchVM {
             recents: recents
         )
         flattened = sections.flatMap(\.emoji)
-        displayItems = flattened.map { ResultDisplayItem(from: $0) }
         selectedIndex = 0
         closeTonePicker()
     }
@@ -185,6 +221,30 @@ final class EmojiSearchVM {
     var resolvedSelection: Emoji? {
         guard let selected else { return nil }
         return index.emoji(selected, in: effectiveTone)
+    }
+
+    /// An Emoji as the grid should draw it: wearing the tone in force.
+    ///
+    /// The grid drew untoned bases while the Subject Card drew
+    /// `resolvedSelection` — the same Emoji wearing the tone in force — so
+    /// anyone with a default tone set saw the Card showing a visibly different
+    /// glyph from the cell they had highlighted, and reported it as the Card
+    /// showing the wrong emoji. It was not wrong; the two surfaces were
+    /// answering different questions.
+    ///
+    /// `effectiveTone`, the same one `resolvedSelection` uses, so there is
+    /// exactly one tone on screen at a time and the highlighted cell is always
+    /// the glyph the Card shows and Enter pastes. Choosing the *persisted*
+    /// default here instead would be cheaper while the ⌥Enter picker is open,
+    /// and would reintroduce a state where the Card and the cell disagree.
+    ///
+    /// Free when no tone is in force, which is the common case: applying
+    /// `SkinTone.none` returns the Emoji unchanged without a lookup.
+    ///
+    /// Toning is presentation only. Selection, ordering and identity all stay
+    /// with the base — a variant never becomes a Result of its own.
+    func displayed(_ emoji: Emoji) -> Emoji {
+        index.emoji(emoji, in: effectiveTone)
     }
 
     var effectiveTone: SkinTone {

@@ -3,33 +3,53 @@ import Quartz
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Owns the one Panel and everything visible in it.
+///
+/// One window, fixed size, never resized — see
+/// `docs/adr/0001-single-panel-two-slabs.md`. The Card row and the Results Slab
+/// are SwiftUI views inside it, so there is one animation clock instead of two
+/// windows disagreeing about where they are.
+///
+/// What is left here is the AppKit half: where the window sits, when it appears
+/// and disappears, who has activation, and which clicks count as "outside".
 class PanelController {
-    private let cardPanel: FloatingPanel
-    private let resultsPanel: FloatingPanel
+    private let panel: FloatingPanel
+    private let presentation = PanelPresentation()
     private var settingsWindow: NSWindow?
     let coordinator: CommandCoordinator
     private let effectRunner: SystemEffectRunner
     private var clickMonitor: Any?
+    private var localClickMonitor: Any?
     private var deactivationObserver: Any?
     private var appSwitchObserver: Any?
     private let quickLookHelper = QuickLookHelper()
     private(set) var quickLookActive = false
     private var savePanelActive = false
     private let focus = FocusHandoff()
-    private var animatingTargetWidth: CGFloat?
-    private var animatingTargetOriginX: CGFloat?
     private var isTornDown = false
 
-    private let cardWidth: CGFloat = 260
-    private let cardHeight: CGFloat = 240
+    /// Whether the Panel is up as far as this controller is concerned.
+    ///
+    /// Deliberately not `panel.isVisible`: the exit animation runs while the
+    /// window is still on screen, and during it the Panel is already gone as far
+    /// as the user and the hotkey are concerned.
+    private var isShowing = false
+
+    /// Bumped on every show, so a pending exit-animation completion can tell
+    /// whether it is still the current one before it orders the window out.
+    private var showGeneration = 0
 
     init() {
-        let initialWidth: CGFloat = 280
         let runner = SystemEffectRunner()
         effectRunner = runner
         coordinator = CommandCoordinator(runner: runner, history: .shared)
-        cardPanel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: initialWidth, height: 240))
-        resultsPanel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: initialWidth, height: 300))
+        panel = FloatingPanel(
+            contentRect: NSRect(
+                x: 0, y: 0,
+                width: PanelLayout.panelWidth,
+                height: PanelLayout.panelHeight
+            )
+        )
 
         // The runner performs the OS side of every effect; these closures give
         // it the panel-owned steps it deliberately doesn't own.
@@ -49,14 +69,9 @@ class PanelController {
             self?.showSavePanel(data: data, fileName: name, contentType: type)
         }
 
-        coordinator.onPhaseChange = { [weak self] in
-            self?.animateCardCount()
-        }
-
         quickLookHelper.onDismiss = { [weak self] in
             self?.quickLookDidClose()
         }
-
 
         quickLookHelper.onMoveUp = { [weak self] in
             guard let self else { return nil }
@@ -79,18 +94,29 @@ class PanelController {
             self.showQuickLook(context: context)
         }
 
-        cardPanel.onCancel = { [weak self] in
+        panel.onCancel = { [weak self] in
             self?.hidePanel()
         }
 
-        resultsPanel.onCancel = { [weak self] in
-            self?.hidePanel()
+        // The Panel's empty space is not part of the UI. The layout reports
+        // where the surfaces are; everything else is desktop.
+        //
+        // `isShowing` is in the guard so that a Panel which is logically gone
+        // hit-tests as nothing at all. The exit animation orders the window out
+        // from a completion handler, and if that handler ever failed to arrive
+        // the window would sit there invisible; this makes such a window
+        // harmless — transparent to clicks — rather than a trap that eats them.
+        panel.acceptsClick = { [weak self] point in
+            guard let self, self.isShowing else { return false }
+            return self.presentation.hitRegions.accepts(
+                windowPoint: point,
+                panelHeight: PanelLayout.panelHeight
+            )
         }
 
-        cardPanel.setContent(CardContainerView(coordinator: coordinator), withBackground: false)
-        resultsPanel.setContent(ResultsListView(coordinator: coordinator))
-
-        resultsPanel.level = .floating
+        panel.setContent(
+            PanelView(coordinator: coordinator, presentation: presentation)
+        )
 
         updatePanelAppearance()
         observeResults()
@@ -104,13 +130,8 @@ class PanelController {
         case .dark: appearance = NSAppearance(named: .darkAqua)
         case .system: appearance = nil
         }
-        cardPanel.appearance = appearance
-        resultsPanel.appearance = appearance
+        panel.appearance = appearance
         settingsWindow?.appearance = appearance
-    }
-
-    private func widthForCardCount(_ count: Int) -> CGFloat {
-        CGFloat(count) * cardWidth + 20
     }
 
     /// Re-arms itself on every change, because `withObservationTracking` fires
@@ -120,41 +141,20 @@ class PanelController {
     /// returns the *tracked* closure's value, which here is `Void`. Storing that
     /// and nilling it in `tearDown()` cancelled nothing and read as if it did.
     /// `isTornDown` is what actually stops the loop.
+    ///
+    /// Only Quick Look needs this now. Whether the Results Slab is showing, and
+    /// how big it is, is the SwiftUI layout's business.
     private func observeResults() {
         withObservationTracking {
             _ = coordinator.currentResults
-            _ = coordinator.currentQuery
             _ = coordinator.currentSelectedIndex
-            _ = coordinator.targetVM.isSearching
             return ()
         } onChange: { [weak self] in
             DispatchQueue.main.async { [weak self] in
                 guard let self, !self.isTornDown else { return }
-                self.updateResultsVisibility()
                 self.updateQuickLookSelection()
                 self.observeResults()
             }
-        }
-    }
-
-    private func updateResultsVisibility() {
-        let results = coordinator.currentResults
-        let hasQuery = !coordinator.currentQuery.isEmpty
-        let isSearching = coordinator.targetVM.isSearching
-        let hasContent = !results.isEmpty || hasQuery || isSearching
-
-        guard hasContent, cardPanel.isVisible else {
-            resultsPanel.orderOut(nil)
-            return
-        }
-
-        // Positioned and shown in the same turn of the run loop. There was a
-        // 0.25s delay here, which is what made the Panel feel slow to arrive;
-        // it was also a timing hack, which AGENTS.md forbids. Nothing needs
-        // waiting for — the frame is known before the window is ordered in.
-        positionResultsPanel()
-        if !resultsPanel.isVisible {
-            resultsPanel.orderFront(nil)
         }
     }
 
@@ -172,32 +172,8 @@ class PanelController {
         quickLookHelper.update(context: context)
     }
 
-    private func animateCardCount() {
-        let newWidth = widthForCardCount(coordinator.cardCount)
-        let currentFrame = cardPanel.frame
-        let deltaW = newWidth - currentFrame.width
-        let newX = currentFrame.origin.x - deltaW / 2
-
-        animatingTargetWidth = newWidth
-        animatingTargetOriginX = newX
-
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = Motion.resizeDuration
-            context.timingFunction = Motion.resizeTimingFunction
-            self.cardPanel.animator().setFrame(
-                NSRect(x: newX, y: currentFrame.origin.y, width: newWidth, height: self.cardHeight),
-                display: false
-            )
-        } completionHandler: { [weak self] in
-            self?.animatingTargetWidth = nil
-            self?.animatingTargetOriginX = nil
-        }
-
-        positionResultsPanel(overrideWidth: newWidth, originX: newX)
-    }
-
     func toggle() {
-        if cardPanel.isVisible {
+        if isShowing {
             hidePanel()
         } else {
             showPanel()
@@ -205,24 +181,36 @@ class PanelController {
     }
 
     func showPanel() {
+        guard !isTornDown else { return }
+        showGeneration += 1
+        isShowing = true
+
         coordinator.reset()
         updatePanelAppearance()
         focus.capture(frontmost: NSWorkspace.shared.frontmostApplication)
         centerOnScreen()
-        cardPanel.orderFront(nil)
-        cardPanel.makeKey()
+
+        // The Panel arrives out of `Motion.entrance`, so it has to be rendered
+        // once in its pre-arrival state for the animation to have anything to
+        // animate from. `layoutSubtreeIfNeeded` does that synchronously — no
+        // delay, nothing waited on.
+        presentation.visible = false
+        panel.orderFront(nil)
+        panel.makeKey()
+        panel.contentView?.layoutSubtreeIfNeeded()
+
+        withAnimation(Motion.entrance) { presentation.visible = true }
         setupObservers()
     }
 
     /// Releases everything the controller holds outside its own memory:
-    /// observers, the observation tracking loop, and the windows themselves.
+    /// observers, the observation tracking loop, and the window itself.
     /// Called from `applicationWillTerminate`.
     func tearDown() {
         isTornDown = true
         removeObservers()
         quickLookHelper.dismiss()
-        resultsPanel.orderOut(nil)
-        cardPanel.orderOut(nil)
+        hideImmediately()
         settingsWindow?.close()
         settingsWindow = nil
     }
@@ -262,16 +250,42 @@ class PanelController {
 
     private func restoreFocusAfterQuickLook() {
         NSApp.activate(ignoringOtherApps: true)
-        cardPanel.makeKeyAndOrderFront(nil)
+        panel.makeKeyAndOrderFront(nil)
         coordinator.focusTrigger.toggle()
     }
 
+    /// Dismisses with the exit animation.
+    ///
+    /// Everything the next action depends on happens now — activation goes back,
+    /// the observers come off, Quick Look closes. Only `orderOut` waits for the
+    /// animation, and only on this path: see `pasteAndHide`.
     func hidePanel() {
+        guard isShowing else { return }
+        isShowing = false
+        let generation = showGeneration
+
         dismissQuickLook()
-        resultsPanel.orderOut(nil)
-        cardPanel.orderOut(nil)
         removeObservers()
         focus.restore()
+
+        withAnimation(Motion.entrance, completionCriteria: .logicallyComplete) {
+            presentation.visible = false
+        } completion: { [weak self] in
+            guard let self, !self.isShowing, self.showGeneration == generation else { return }
+            self.panel.orderOut(nil)
+        }
+    }
+
+    /// Dismisses this instant, with no animation at all.
+    ///
+    /// The paste path needs this: it hands activation back and then synthesises
+    /// Cmd+V, and a Panel still on screen — even mid-fade — is a Panel that can
+    /// take the keystroke. Correctness beats the exit curve every time.
+    private func hideImmediately() {
+        isShowing = false
+        showGeneration += 1
+        presentation.visible = false
+        panel.orderOut(nil)
     }
 
     /// Dismisses, hands activation back to whatever was frontmost, and only
@@ -279,13 +293,14 @@ class PanelController {
     private func pasteAndHide(simulateAction: @escaping () -> Void) {
         dismissQuickLook()
         removeObservers()
-        resultsPanel.orderOut(nil)
-        cardPanel.orderOut(nil)
+        hideImmediately()
 
         focus.yield(then: simulateAction)
     }
 
     private func setupObservers() {
+        // Clicks that go to another app. The Panel is non-activating, so this is
+        // the ordinary case: the click never reaches us at all.
         clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             guard let self else { return }
             if self.quickLookActive {
@@ -295,9 +310,28 @@ class PanelController {
             }
         }
 
+        // Clicks that land on the Panel's own empty space — the margin, or the
+        // gap between the Slabs. The window covers them, so the global monitor
+        // above never sees them, but they are still clicks *outside* the UI and
+        // have to dismiss. `PanelHitRegions` is what says where the UI is.
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            guard let self, event.window === self.panel else { return event }
+            guard !self.presentation.hitRegions.accepts(
+                windowPoint: event.locationInWindow,
+                panelHeight: PanelLayout.panelHeight
+            ) else { return event }
+
+            if self.quickLookActive {
+                self.dismissQuickLook()
+            } else {
+                self.hidePanel()
+            }
+            return nil
+        }
+
         deactivationObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didResignKeyNotification,
-            object: cardPanel,
+            object: panel,
             queue: .main
         ) { [weak self] _ in
             guard let self, !self.quickLookActive, !self.savePanelActive else { return }
@@ -322,17 +356,28 @@ class PanelController {
             clickMonitor = nil
         }
 
+        if let monitor = localClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            localClickMonitor = nil
+        }
+
         if let observer = deactivationObserver {
             NotificationCenter.default.removeObserver(observer)
             deactivationObserver = nil
         }
-        
+
         if let observer = appSwitchObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
             appSwitchObserver = nil
         }
     }
 
+    /// Puts the Panel on the screen the mouse is on.
+    ///
+    /// The window is one fixed size, so centring is about the *Card row* rather
+    /// than the window: it lands horizontally centred with its bottom edge on
+    /// the screen's vertical midpoint, exactly where it sat when the Cards had a
+    /// window of their own.
     private func centerOnScreen() {
         let mouseLocation = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) }
@@ -340,16 +385,23 @@ class PanelController {
             ?? NSScreen.screens[0]
 
         let screenFrame = screen.visibleFrame
-        let w = widthForCardCount(1)
-        let h = cardHeight
-        let x = screenFrame.midX - w / 2
-        let y = screenFrame.midY
+        let x = screenFrame.midX - PanelLayout.panelWidth / 2
+        let y = screenFrame.midY - PanelLayout.cardRowBottomInset
 
-        cardPanel.setFrame(NSRect(x: x, y: y, width: w, height: h), display: false)
+        panel.setFrame(
+            NSRect(x: x, y: y, width: PanelLayout.panelWidth, height: PanelLayout.panelHeight),
+            display: false
+        )
     }
 
     func showSettings() {
-        hidePanel()
+        // Instant, not animated: the settings window is about to take
+        // activation, and a Panel fading out on top of it looks like a glitch.
+        removeObservers()
+        quickLookHelper.dismiss()
+        quickLookActive = false
+        hideImmediately()
+        focus.restore()
 
         if settingsWindow == nil {
             let window = NSWindow(
@@ -365,37 +417,44 @@ class PanelController {
             settingsWindow = window
         }
 
+        updatePanelAppearance()
         settingsWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
     private func showSavePanel(data: Data, fileName: String, contentType: UTType) {
         savePanelActive = true
-        cardPanel.orderOut(nil)
-        resultsPanel.orderOut(nil)
+        hideImmediately()
         removeObservers()
         NSApp.activate(ignoringOtherApps: true)
 
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [contentType]
-        panel.nameFieldStringValue = fileName
-        panel.canCreateDirectories = true
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [contentType]
+        savePanel.nameFieldStringValue = fileName
+        savePanel.canCreateDirectories = true
 
-        let response = panel.runModal()
+        let response = savePanel.runModal()
         savePanelActive = false
 
-        if response == .OK, let url = panel.url {
+        if response == .OK, let url = savePanel.url {
             try? data.write(to: url, options: .atomic)
-            hidePanel()
+            dismissQuickLook()
+            focus.restore()
         } else {
+            // Cancelled: put the Panel back exactly as it was, and re-arm the
+            // dismissal observers only once it is key again — arming them any
+            // earlier dismisses it on the way in.
             NSApp.activate(ignoringOtherApps: true)
-            cardPanel.makeKeyAndOrderFront(nil)
+            isShowing = true
+            showGeneration += 1
+            presentation.visible = true
+            panel.makeKeyAndOrderFront(nil)
             coordinator.focusTrigger.toggle()
 
             var keyObserver: Any?
             keyObserver = NotificationCenter.default.addObserver(
                 forName: NSWindow.didBecomeKeyNotification,
-                object: cardPanel,
+                object: panel,
                 queue: .main
             ) { [weak self] _ in
                 if let obs = keyObserver {
@@ -404,36 +463,5 @@ class PanelController {
                 self?.setupObservers()
             }
         }
-    }
-
-    private let rowHeight: CGFloat = 46
-    private let headerHeight: CGFloat = 34
-    private let statusHeight: CGFloat = 40
-    private let maxResultsHeight: CGFloat = 300
-
-    private func resultsHeight() -> CGFloat {
-        let results = coordinator.currentResults
-        let hasQuery = !coordinator.currentQuery.isEmpty
-        let isSearching = coordinator.targetVM.isSearching
-
-        if !results.isEmpty {
-            let listHeight = CGFloat(results.count) * rowHeight + 6
-            let total = headerHeight + min(listHeight, 260) + 1
-            return min(total, maxResultsHeight)
-        }
-        if isSearching || hasQuery {
-            return statusHeight
-        }
-        return 0
-    }
-
-    private func positionResultsPanel(overrideWidth: CGFloat? = nil, originX: CGFloat? = nil) {
-        let cardFrame = cardPanel.frame
-        let w = overrideWidth ?? animatingTargetWidth ?? cardFrame.width
-        let h = resultsHeight()
-        let x = originX ?? animatingTargetOriginX ?? cardFrame.origin.x
-        let y = cardFrame.origin.y - h - 8
-
-        resultsPanel.setFrame(NSRect(x: x, y: y, width: w, height: h), display: false)
     }
 }

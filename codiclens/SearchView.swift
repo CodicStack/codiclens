@@ -9,21 +9,56 @@ struct ResultsListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if coordinator.isEmojiBrowsing {
-                EmojiGridView(coordinator: coordinator)
-            } else if !coordinator.currentResults.isEmpty {
-                header
-                Divider().padding(.horizontal, Style.padding)
-                list
-            } else if coordinator.targetVM.isSearching {
-                searchingState
-            } else if hasQuery {
-                emptyState
-            }
+            results
+            queryField
         }
         .frame(maxWidth: .infinity)
         .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    @ViewBuilder
+    private var results: some View {
+        if coordinator.isEmojiBrowsing {
+            EmojiGridView(coordinator: coordinator)
+        } else if !coordinator.currentResults.isEmpty {
+            header
+            Divider().padding(.horizontal, Style.padding)
+            list
+        } else if coordinator.targetVM.isSearching {
+            searchingState
+        } else if hasQuery {
+            emptyState
+        }
+    }
+
+    /// The Query, spelled out along the bottom of the Slab.
+    ///
+    /// Display-only: every keystroke is still captured by the hidden field in
+    /// `CardContainerView`, and this only ever reads. It exists because the
+    /// Subject Card shows what the Query *matched* — type `saf` and the Card says
+    /// "Safari" — so without this there is nowhere to see what you actually
+    /// typed. With 1,914 Emoji to filter, that is not optional.
+    private var queryField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.tertiary)
+
+            Text(hasQuery ? coordinator.currentQuery : "Type to search")
+                .font(.system(size: 13))
+                .foregroundStyle(hasQuery ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                .lineLimit(1)
+                // The tail is what was typed most recently, so a long Query
+                // truncates at the front.
+                .truncationMode(.head)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Style.padding)
+        .padding(.vertical, Style.rowPaddingV)
+        .overlay(alignment: .top) {
+            Divider().padding(.horizontal, Style.padding)
+        }
     }
 
     private var searchingState: some View {
@@ -55,16 +90,11 @@ struct ResultsListView: View {
 
     private var header: some View {
         HStack(spacing: 6) {
+            // No Query here. It used to be repeated in this header; the field
+            // pinned along the bottom of the Slab is where it belongs.
             Text("\(coordinator.currentResults.count) results")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
-
-            if !coordinator.currentQuery.isEmpty {
-                Text("\"\(coordinator.currentQuery)\"")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-            }
 
             Spacer()
 

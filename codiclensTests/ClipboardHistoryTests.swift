@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import codiclens
@@ -194,5 +195,101 @@ struct PasteboardWatcherTests {
     @Test(arguments: ["txt", "swift", "zip", ""])
     func otherFilesAreNot(ext: String) {
         #expect(PasteboardWatcher.isPreviewableImageFile(URL(fileURLWithPath: "/tmp/x.\(ext)")) == false)
+    }
+
+    // MARK: - Recording
+
+    /// Counts the conversions, so a test can tell whether the expensive path was
+    /// taken at all. Runs inline, which keeps `record()` synchronous here.
+    private final class SpyReencoder: ImageReencoder {
+        private(set) var conversions = 0
+
+        func reencode(_ convert: @escaping () -> Data?, completion: @escaping (Data?) -> Void) {
+            conversions += 1
+            completion(convert())
+        }
+    }
+
+    /// A pasteboard of this test's own, so nothing touches the user's.
+    private func makePasteboard() -> NSPasteboard {
+        NSPasteboard(name: NSPasteboard.Name("codiclens.tests.\(UUID().uuidString)"))
+    }
+
+    private func tiffData() throws -> Data {
+        let image = NSImage(size: NSSize(width: 4, height: 4))
+        image.lockFocus()
+        NSColor.red.setFill()
+        NSRect(x: 0, y: 0, width: 4, height: 4).fill()
+        image.unlockFocus()
+        return try #require(image.tiffRepresentation)
+    }
+
+    private static let pngMagic = Data([0x89, 0x50, 0x4E, 0x47])
+
+    @Test func tiffIsReencodedAsPNGAwayFromTheCaller() throws {
+        let history = ClipboardHistory(store: InMemoryClipboardStore())
+        let pasteboard = makePasteboard()
+        let spy = SpyReencoder()
+        pasteboard.clearContents()
+        pasteboard.setData(try tiffData(), forType: .tiff)
+
+        let watcher = PasteboardWatcher(
+            history: history, pasteboard: pasteboard, reencoder: spy
+        )
+        watcher.record()
+
+        #expect(spy.conversions == 1, "the re-encode goes through the seam, not the main thread")
+        let item = try #require(history.items.first)
+        #expect(item.isImage)
+        let stored = try #require(history.imageData(for: item))
+        #expect(stored.prefix(4) == Self.pngMagic)
+    }
+
+    @Test func pngIsStoredVerbatimWithoutReencoding() throws {
+        let history = ClipboardHistory(store: InMemoryClipboardStore())
+        let pasteboard = makePasteboard()
+        let spy = SpyReencoder()
+        let png = Self.pngMagic + Data([0x0D, 0x0A, 0x1A, 0x0A])
+        pasteboard.clearContents()
+        pasteboard.setData(png, forType: .png)
+
+        let watcher = PasteboardWatcher(
+            history: history, pasteboard: pasteboard, reencoder: spy
+        )
+        watcher.record()
+
+        #expect(spy.conversions == 0, "nothing to convert, so nothing is dispatched")
+        let item = try #require(history.items.first)
+        #expect(history.imageData(for: item) == png)
+    }
+
+    @Test func textIsRecordedAsText() throws {
+        let history = ClipboardHistory(store: InMemoryClipboardStore())
+        let pasteboard = makePasteboard()
+        pasteboard.clearContents()
+        pasteboard.setString("copied", forType: .string)
+
+        let watcher = PasteboardWatcher(
+            history: history, pasteboard: pasteboard, reencoder: InlineImageReencoder()
+        )
+        watcher.record()
+
+        #expect(history.items.map(\.content) == ["copied"])
+    }
+
+    @Test func undecodableImageDataIsKeptRatherThanDropped() throws {
+        let history = ClipboardHistory(store: InMemoryClipboardStore())
+        let pasteboard = makePasteboard()
+        let junk = Data([0x00, 0x01, 0x02, 0x03])
+        pasteboard.clearContents()
+        pasteboard.setData(junk, forType: .tiff)
+
+        let watcher = PasteboardWatcher(
+            history: history, pasteboard: pasteboard, reencoder: InlineImageReencoder()
+        )
+        watcher.record()
+
+        let item = try #require(history.items.first)
+        #expect(history.imageData(for: item) == junk, "an entry in the wrong format still pastes")
     }
 }

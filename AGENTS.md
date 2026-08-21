@@ -29,9 +29,12 @@ keyword-less or any variant cannot be filed under a base. `--unicode` and
 ```
 codiclens/           # Main app source (Swift)
 codiclensTests/      # Unit tests
-codiclensUITests/    # UI tests
 Codiclens.app/       # Built app bundle
 ```
+
+There are two targets, app and unit tests. There is no UI test target.
+`codiclens/` is a `PBXFileSystemSynchronizedRootGroup`, so a new `.swift` file
+needs no `project.pbxproj` edit.
 
 ## Rules
 
@@ -54,11 +57,21 @@ Codiclens.app/       # Built app bundle
 - **`FloatingPanel.hasShadow` must stay `false`.** AppKit derives a window shadow
   from the content's alpha mask. This Panel's content is transparent glass with soft
   edges, and that derivation traces a ragged wavy contour around it plus a ghost
-  second outline. Separation is the content's job.
+  second outline. Separation is the content's job: each Slab and Card draws its own
+  SwiftUI shadow.
 - **No `.shadow()` on a view that fills its window.** It is clipped by the window
-  bounds and renders as a hard band down two edges instead of a falloff. Shadows —
-  and a scaling entrance animation, which clips the same way — require the Panel to
-  be sized larger than its content first.
+  bounds and renders as a hard band down two edges instead of a falloff. This is why
+  `PanelLayout.margin` exists: the Panel is deliberately larger than its content, by
+  enough for the entrance animation's 1.04 overshoot *and* `Style.shadowRadius`
+  beyond it. Shrink the margin and both artefacts come back. `PanelLayoutTests`
+  asserts the relationship.
+- **The empty space inside the Panel must not be hit-testable.** The margin and the
+  gap between the Slabs belong to the window, and click-outside-to-dismiss depends on
+  a click there counting as outside. Three things cooperate:
+  `PanelHitRegions` (where the surfaces actually are, reported by the layout),
+  `FloatingPanel`'s content view declining to hit-test outside them, and a *local*
+  mouse monitor in `PanelController` — the global monitor never sees these clicks,
+  because the window is ours.
 - **Stroke a rim *after* clipping, not before.** `overlay { strokeBorder }` followed
   by `clipShape` cuts the hairline in half and aliases along the curve.
 - **A tint heavy enough to read as a colour stops glass being glass.**
@@ -68,7 +81,21 @@ Codiclens.app/       # Built app bundle
 - **Emoji glyphs go through `EmojiRenderer`.** Apple Color Emoji is a bitmap font
   with strikes at 20/26/32/40/48px; an off-strike point size resamples and reads
   soft. The largest strike is 48, so a glyph slot much above 64pt looks soft unless a
-  larger strike is added.
+  larger strike is added. `EmojiRenderer.image` is cached on the glyph **and** the box
+  size — it is called from a view body, and two call sites ask for two sizes.
+- **A `ForEach` id has to move when its contents do.** `EmojiSearchVM.Section` hashes
+  its whole contents into its id. Every Query produces a section titled "Results", and
+  while the id was the title alone a `LazyVStack` was entitled to keep the cells it
+  had already built — so a filtered grid went on showing the previous Query's results
+  while the Subject Card showed the right one. `ResultDisplayItem.id` is a `String`
+  taken from the source for the same reason: it was a `UUID` and one initialiser
+  minted a fresh one per call, re-identifying every row on every keystroke.
+- **The grid and the Subject Card must draw the same glyph.** Both go through the tone
+  in force — `EmojiSearchVM.displayed` for a cell, `resolvedSelection` for the Card.
+  Toning is presentation only: selection, ordering and identity stay with the base,
+  because a variant is never a Result.
+- **Nothing builds a `ResultDisplayItem` for an Emoji.** In grid Mode a Result is a
+  cell. `EmojiSearchVM.displayResults` is empty on purpose.
 - Deployment target is **26.4**. Liquid Glass is unconditional — no `#available`.
 - `ConcentricRectangle` exists and derives nested radii from an enclosing
   `containerShape`, but it is a `Shape` and **not** an `InsettableShape`, so it has no
@@ -89,23 +116,38 @@ codiclensApp (@main)
 ## Core Components
 
 ### PanelController — Window orchestrator
-Owns everything visible. Creates and manages:
-- **cardPanel** (FloatingPanel) — the main card UI
-- **resultsPanel** (FloatingPanel) — dropdown results list below cards
+Owns the AppKit half: where the window sits, when it appears and disappears, who has
+activation, and which clicks count as outside. Creates and manages:
+- **panel** (FloatingPanel) — the *one* window, fixed at `PanelLayout.panelWidth` ×
+  `panelHeight`, never resized
+- **PanelPresentation** — the two values the SwiftUI content and the controller pass
+  between them: `visible` (drives `Motion.panelEntrance`) and `hitRegions`
 - **CommandCoordinator** — all business logic
 - **QuickLookHelper** — QLPreviewPanel data source/delegate
 
-Wires coordinator callbacks:
-- `onHide` → `hidePanel()` — hides both panels, removes observers
-- `onPasteAndHide` → `pasteAndHide()` — hides panels, restores previous app focus if needed, then fires paste simulation
-- `onPhaseChange` → `animateCardCount()` — animates card panel width
+Wires runner callbacks:
+- `onHide` → `hidePanel()` — the animated dismissal
+- `onPasteAndHide` → `pasteAndHide()` — `hideImmediately()`, then hands activation
+  back, then fires the paste. **Never animated**: a Panel still on screen takes the
+  synthesised Cmd+V.
 - `onQuickLook` → `showQuickLook()` — activates app, shows QLPreviewPanel
 - `onSavePanel` → `showSavePanel()` — NSSavePanel for file export
 - `onShowSettings` → `showSettings()` — settings window
 
-Manages focus lifecycle:
-- `previousApp` — captured in `showPanel()`, restored in `pasteAndHide()` when Quick Look broke the nonactivating contract
-- `pasteActivationObserver` — event-driven wait for previous app activation before firing CGEvent paste
+`coordinator.onPhaseChange` is **not** wired. It used to resize the card window; the
+window no longer resizes, and the Card row's width is a SwiftUI animation driven by
+`coordinator.cardCount`.
+
+Show and hide:
+- `showPanel()` centres the *Card row* on the screen the mouse is on, renders once at
+  `visible == false`, then flips it inside `withAnimation(Motion.entrance)`
+- `hidePanel()` drops the observers and hands activation back immediately, and lets
+  only the `orderOut` wait for the exit animation's completion. `isShowing` and
+  `showGeneration` are what stop a re-show racing a pending completion
+- `hideImmediately()` is the no-animation path: paste, save panel, settings, teardown
+
+Focus lifecycle lives in **FocusHandoff** — `capture`, `restore`, `yield`. Every
+`previousApp` read and write in the app is in that one file.
 
 ### CommandCoordinator — State machine + execution
 Owns four view models, one per search phase:
@@ -143,21 +185,43 @@ Critical contract: the panel floats over other apps WITHOUT stealing macOS activ
 When Quick Look is shown, `NSApp.activate()` breaks this contract. PanelController captures `previousApp` and restores it event-driven before pasting.
 
 ### CardContainerView — Keyboard input capture
-Contains a hidden `TextField` that captures all keyboard input. Routes to coordinator:
-- Enter → `submit()`
+Contains a hidden `TextField` that captures all keyboard input, and the Card row.
+**The keyboard lives here and nowhere else** — the Query field in the Results Slab is
+display-only. Routes to coordinator:
+- Enter → `submit()`, ⌥Enter → `toggleSkinTonePicker()`
 - Tab → `advancePhase()` / Shift+Tab → `retreatPhase()`
 - Up/Down → `moveUp()` / `moveDown()`
+- Left/Right → `moveLeft()` / `moveRight()`, which mean something only in a grid
 - Escape → `handleEscape()`
 - Shift+Space → `triggerQuickLook()`
 - Ctrl+E / Cmd+E → `toggleClipboardEdit()`
+- Ctrl+J/K → `moveDown()` / `moveUp()`
+- Ctrl+H/L → `moveLeft()` / `moveRight()` **first**, and only `retreatPhase()` /
+  `advancePhase()` when the horizontal move meant nothing. Routing them straight to
+  the Phase took Ctrl+H and Ctrl+L out of Emoji Mode. Both spellings of a
+  Control-modified key are accepted, via `ControlKey.letter`.
 
 ### View Cards
-- **SubjectCardView** — shows app icon/name, text preview, or clipboard content
+- **SubjectCardView** — shows app icon/name, text preview, emoji glyph, or clipboard
+  content, plus the corner chips
 - **ActionCardView** — shows available actions for selected subject
 - **TargetCardView** — shows file/app targets for selected action
 
-### ClipboardManager — Singleton clipboard watcher
-Polls `NSPasteboard.general` every 0.5s. Stores up to 100 items as JSON in Application Support. Images saved as PNG files in `codiclens/images/`. Text previews for Quick Look in `codiclens/previews/`.
+Each Card carries a `KeyHintChip` in its bottom-trailing corner while it has the
+keyboard, and only where its action has an obvious key.
+
+### PanelView / ResultsListView — the Panel's contents
+`PanelView` is the Card row, a real gap, and the Results Slab. The Slab animates in
+when there are Results and out when there are not, with `Motion.resize` — except in
+Emoji Mode, where the grid is never empty and the Slab is unconditional. A
+display-only Query field is pinned along its bottom, because the Subject Card shows
+what the Query *matched* rather than what was typed.
+
+### ClipboardHistory / PasteboardWatcher — clipboard capture
+Polls `NSPasteboard.general` every 0.5s. Stores up to 100 items as JSON in Application
+Support. Images saved as PNG files in `codiclens/images/`. Text previews for Quick Look
+in `codiclens/previews/`. The pasteboard is only ever read on the main thread; the
+PNG re-encode goes through `ImageReencoder`, off-main in the app and inline in tests.
 
 ### QuickLookHelper — QLPreviewPanel bridge
 Data source and delegate for system Quick Look. Handles keyboard events (j/k navigation, Shift+Space dismiss). Reports dismissal via `onDismiss` callback.
@@ -170,7 +234,7 @@ User selects clipboard item → Enter
   → pasteClipboardItem(): writes to NSPasteboard.general
   → onPasteAndHide callback
   → PanelController.pasteAndHide():
-      1. Hide all panels (orderOut)
+      1. Hide the Panel (orderOut, no animation)
       2. If codiclens stole activation (Quick Look was used):
          - Activate previousApp
          - Wait for didActivateApplicationNotification (event-driven)
@@ -195,7 +259,12 @@ User types query → Enter
 |------|------|
 | `codiclensApp.swift` | @main entry, AppDelegate adaptor |
 | `AppDelegate.swift` | Hotkey registration, QLPreviewPanel responder |
-| `PanelController.swift` | Window management, focus lifecycle, observers |
+| `PanelController.swift` | The one window: show/hide, focus lifecycle, observers, hit test |
+| `PanelView.swift` | The SwiftUI content of the Panel: Card row, gap, Results Slab |
+| `PanelLayout.swift` | The Panel's fixed geometry, the margin, and `PanelHitRegions` |
+| `FocusHandoff.swift` | Who had activation, and how it is given back |
+| `ControlKey.swift` | Folding a Control-modified key press onto its letter |
+| `KeyHintChip.swift` | The keyboard hint in a Card's bottom-trailing corner |
 | `CommandCoordinator.swift` | State machine, execution, paste simulation |
 | `FloatingPanel.swift` | Non-activating NSPanel subclass |
 | `CardContainerView.swift` | Hidden TextField keyboard capture |
@@ -222,18 +291,39 @@ User types query → Enter
 
 Real, unfixed, none urgent.
 
-- `PasteboardWatcher.record()` decodes and PNG-re-encodes image data **synchronously
-  on the main thread**. Copying a large screenshot stalls the UI.
-- `EmojiIndex.shared` parses a 226 KB JSON on the main thread at launch, forced by a
-  default argument in `CommandCoordinator.init`.
-- `EffectRunner.simulateTyping` uses `usleep(10_000)` per character. Off the main
-  thread, but it still breaks the no-timing-hacks rule.
-- `SubjectCardView.clipboardEditor` has a `DispatchQueue.main.asyncAfter(0.1)` focus
-  hack. Same rule.
-- Signing teams are inconsistent — app and unit tests are `L256GR2793`. Will bite on
-  a clean checkout.
-- `Motion.panelEntrance` and `Motion.shake` are written but wired to nothing. Both
-  need the Panel sized larger than its content (see Visual layer above).
-- Still two `NSPanel`s. ADR-0001 specifies collapsing them into one Panel drawing two
-  Slabs; that work has not been done, and the ADR's "two Slabs" premise is itself
-  unsettled — the Cards currently float with no enclosing Slab behind them.
+- Signing teams are inconsistent. Both targets override `DEVELOPMENT_TEAM` to
+  `L256GR2793`, while the project-level default is `HHNPP7C8GB`. Will bite on a clean
+  checkout.
+- `SubjectCardView.clipboardEditor` takes focus from a `.task`, which is the first
+  main-actor turn after the editor is inserted. That is ordering, not a delay — but it
+  is still the weakest link in the focus story, and if the clipboard editor ever comes
+  up unfocused, this is why.
+- `Motion.resizeDuration` and `Motion.resizeTimingFunction` are unused. They are the
+  AppKit spelling of `resize`, kept for the next time something animates a window
+  frame; nothing does now that the Panel never resizes.
+- **Ranking the whole emoji dataset is the remaining per-keystroke cost.**
+  `EmojiSearchVM.rank` runs `fuzzyScore` over 1,914 names and ~15,000 keywords on the
+  main thread. Measured on this dataset: **26–52 ms per keystroke unoptimised, 6–10 ms
+  optimised** (it was 2× worse before `fuzzyScore` learned to reject on the length
+  difference before building the Levenshtein matrix). Debug builds feel it; Release
+  does not. The next move, if it is ever needed, is to stop allocating a `lowercased()`
+  pair per call — the dataset is already lowercase — or to move ranking off the main
+  thread. Do not "optimise" it by loosening the scoring: `FuzzyMatchTests` pins the
+  tiers, and app search shares the function.
+- The Panel's runtime behaviour has not been verified on screen from this environment:
+  screen recording is not granted, so no screenshot was possible, and Cmd+Space is
+  taken by Spotlight so the hotkey could not be driven either. The geometry and the
+  hit-test rule are covered by `PanelLayoutTests`; the show/hide *window* sequence is
+  not covered by anything.
+
+### Two deliberate exceptions to the no-timing-hacks rule
+
+Both are device or API constraints, not fixes. Do not "clean them up".
+
+- `FocusHandoff.yield` arms a 0.5s `asyncAfter` as the deadline on
+  `didActivateApplicationNotification`. The normal path is the notification, which
+  cancels it. It exists because an OS notification may never arrive.
+- `EffectRunner.keystrokeInterval` is a 10ms `usleep` between synthesised keystrokes,
+  off the main thread. `CGEvent.post` has no delivery acknowledgement, and an unpaced
+  burst outruns the receiving app's text input system, so characters go missing. It is
+  the emulated device having a plausible key rate.

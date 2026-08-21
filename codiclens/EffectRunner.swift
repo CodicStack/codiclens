@@ -164,6 +164,18 @@ final class SystemEffectRunner: EffectRunner {
         }
     }
 
+    /// How long to leave between synthesised keystrokes.
+    ///
+    /// **A device constraint, not a bug fix.** `CGEvent.post` hands a keystroke
+    /// to the window server, which delivers it to whatever is frontmost; the
+    /// receiving app then has to run its own event loop and its text input
+    /// system to turn it into a character. There is no acknowledgement to wait
+    /// on and no API that reports delivery, so an unpaced burst of events
+    /// arrives faster than the far side consumes it and characters go missing —
+    /// reliably, in Electron apps and in terminals. This is the input device
+    /// being emulated having a plausible key rate, which is why it stays.
+    private static let keystrokeInterval: useconds_t = 10_000
+
     private static func simulateTyping(_ text: String) {
         DispatchQueue.global(qos: .userInitiated).async {
             let source = CGEventSource(stateID: .combinedSessionState)
@@ -174,7 +186,9 @@ final class SystemEffectRunner: EffectRunner {
                 event.post(tap: .cgSessionEventTap)
                 let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
                 up?.post(tap: .cgSessionEventTap)
-                usleep(10_000)
+                // A device constraint — see `keystrokeInterval`. Off the main
+                // thread, and not standing in for a fix.
+                usleep(keystrokeInterval)
             }
         }
     }

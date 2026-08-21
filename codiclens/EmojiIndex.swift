@@ -42,6 +42,21 @@ final class EmojiIndex {
     /// happens once, the first time something asks for an Emoji.
     static let shared: EmojiIndex = (try? bundled()) ?? EmojiIndex.empty
 
+    /// Decodes the dataset off the main thread.
+    ///
+    /// Nothing on the launch path reads `shared` any more — see
+    /// `EmojiSearchVM.index` — so without this the first Emoji Mode would pay
+    /// for the parse instead, on the main thread, as the Panel opened. Calling
+    /// this at launch moves the cost to a background queue and leaves it decoded
+    /// by the time anyone asks.
+    ///
+    /// Safe to race with any other access: `shared` is a `static let`, so
+    /// whichever caller arrives second waits for the first rather than decoding
+    /// again.
+    static func prewarm() {
+        DispatchQueue.global(qos: .utility).async { _ = shared }
+    }
+
     // MARK: - Loading
 
     private struct Payload: Decodable {
