@@ -130,6 +130,21 @@ struct PanelLayoutTests {
         )
     }
 
+    /// Shorter still, and a real state: while the app Index is being built a
+    /// Subject search has no Results *and* no right to say "No results", so the
+    /// Slab holds the Query bar and nothing else. It has to add up on its own —
+    /// the Slab hugs its content, so this is a height the Panel really shows.
+    @Test func aSlabHoldingOnlyTheQueryBarIsShorterStill() {
+        #expect(PanelLayout.queryOnlyResultsHeight == PanelLayout.queryFieldHeight)
+        #expect(PanelLayout.queryOnlyResultsHeight < PanelLayout.minResultsHeight)
+        #expect(
+            PanelLayout.minResultsHeight - PanelLayout.queryOnlyResultsHeight
+                == PanelLayout.messageRowHeight,
+            "the difference between the two is exactly the message row"
+        )
+        #expect(PanelLayout.queryOnlyResultsHeight <= PanelLayout.maxResultsHeight)
+    }
+
     @Test func aListGrowsOneRowAtATime() {
         #expect(PanelLayout.listContentHeight(rows: 0) == 0)
         #expect(

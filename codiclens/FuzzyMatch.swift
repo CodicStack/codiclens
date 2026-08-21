@@ -1,11 +1,23 @@
 import Foundation
 import SwiftUI
 
-/// Emphasises the characters of `name` that `query` matched.
+/// Underlines the characters of `name` that `query` matched.
 ///
-/// Weight, not underline. Underlining every matched character scattered broken
-/// rules through the middle of a word — with a subsequence match on a long app
-/// name it looked like a spellchecker had given up.
+/// Two tiers, and they are the top two of `fuzzyScore`'s: a contiguous
+/// substring match underlines the whole run, and otherwise every matched
+/// character is underlined on its own.
+///
+/// **Underline, not weight.** Weight was tried and rejected: at 13pt a bolded
+/// character or two inside a name is barely a difference, and where the name is
+/// already bold — a selected row draws its title bold — it is no difference at
+/// all. An underline reads at any weight.
+///
+/// The subsequence tier only runs when the **whole** Query is a subsequence of
+/// the name. That is what keeps a highlight honest: Emoji are matched by their
+/// keywords as well as their names, and a keyword hit has nothing to underline
+/// in the CLDR name — underlining the two or three characters that happen to
+/// line up before the Query runs out marks up a match that isn't there. Nothing
+/// to say means plain text, not scattered marks.
 func highlightedName(_ name: String, query: String) -> AttributedString {
     var attributed = AttributedString(name)
     guard !query.isEmpty else { return attributed }
@@ -19,9 +31,11 @@ func highlightedName(_ name: String, query: String) -> AttributedString {
 
         let attrStart = attributed.index(attributed.startIndex, offsetByCharacters: start)
         let attrEnd = attributed.index(attrStart, offsetByCharacters: length)
-        attributed[attrStart..<attrEnd].inlinePresentationIntent = .stronglyEmphasized
+        attributed[attrStart..<attrEnd].underlineStyle = .single
         return attributed
     }
+
+    guard isSubsequence(queryLower, of: lower) else { return attributed }
 
     var qi = queryLower.startIndex
     for (i, char) in lower.enumerated() {
@@ -29,7 +43,7 @@ func highlightedName(_ name: String, query: String) -> AttributedString {
         if char == queryLower[qi] {
             let attrIdx = attributed.index(attributed.startIndex, offsetByCharacters: i)
             let attrNext = attributed.index(attrIdx, offsetByCharacters: 1)
-            attributed[attrIdx..<attrNext].inlinePresentationIntent = .stronglyEmphasized
+            attributed[attrIdx..<attrNext].underlineStyle = .single
             qi = queryLower.index(after: qi)
         }
     }

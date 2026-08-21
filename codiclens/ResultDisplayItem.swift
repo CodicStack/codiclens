@@ -19,11 +19,23 @@ struct ResultDisplayItem: Identifiable {
     let icon: ResultIcon
     let subtitle: String
 
+    /// Whether the subtitle is worth marking the Query's characters up in.
+    ///
+    /// True where the subtitle names the thing — "Clipboard History" under
+    /// "Clipboard", the path under an app — because there the same characters
+    /// the Query matched in the name usually appear again, and marking them
+    /// says why the row is here. False where the subtitle is a *derived* value:
+    /// a relative timestamp like "5m ago" can line up with a letter of the
+    /// Query by pure coincidence, and an underline there is noise pretending to
+    /// be information.
+    let highlightsSubtitle: Bool
+
     init(from subject: Subject) {
         self.id = subject.id.uuidString
         self.name = subject.displayName
         self.icon = .nsImage(subject.icon)
         self.subtitle = subject.subtitle
+        self.highlightsSubtitle = true
     }
 
     init(from action: SubjectAction) {
@@ -34,6 +46,7 @@ struct ResultDisplayItem: Identifiable {
         case .appIcon(let image): .nsImage(image)
         }
         self.subtitle = action.isFinal ? "" : "→"
+        self.highlightsSubtitle = false
     }
 
     init(from target: ActionTarget) {
@@ -41,6 +54,7 @@ struct ResultDisplayItem: Identifiable {
         self.name = target.name
         self.icon = .nsImage(target.icon)
         self.subtitle = target.subtitle
+        self.highlightsSubtitle = true
     }
 
     init(from item: ClipboardItem) {
@@ -50,5 +64,6 @@ struct ResultDisplayItem: Identifiable {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         self.subtitle = formatter.localizedString(for: item.timestamp, relativeTo: Date())
+        self.highlightsSubtitle = false
     }
 }

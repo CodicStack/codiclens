@@ -151,9 +151,38 @@ class CommandCoordinator {
     }
 
     var currentResults: [ResultDisplayItem] {
-        guard phase == .searchingSubject else { return currentScope?.displayResults ?? [] }
-        // Same visibility gate `SubjectSearchVM` applies to its own results.
-        return subjectVM.isResultsVisible ? subjectVM.results.map { ResultDisplayItem(from: $0) } : []
+        currentScope?.displayResults ?? []
+    }
+
+    /// Whether a search the current Mode cannot have finished yet is running,
+    /// which is what "Searching…" is for.
+    ///
+    /// Only Target search can be in this state: it shells out to `mdfind` and
+    /// says so. Every other Mode matches against something already in memory,
+    /// so by the time anything reads this it has its answer.
+    var isSearchInFlight: Bool {
+        phase == .pickingTarget && targetVM.isSearching
+    }
+
+    /// Whether zero Results means "nothing matched" rather than "not answered
+    /// yet".
+    ///
+    /// Clipboard, Emoji and Action search all match in memory: zero matches is
+    /// the truth the instant the key lands, and the message must not be
+    /// delayed. Subject search is the exception — it matches against the app
+    /// Index, and until the first scan lands there is nothing to match against
+    /// and no honest way to say "No results". Target search is answering out of
+    /// process, so it reports `isSearchInFlight` instead.
+    var canReportNoResults: Bool {
+        if isSearchInFlight { return false }
+        if phase == .searchingSubject { return subjectVM.isIndexReady }
+        return true
+    }
+
+    /// Whether the Query was put to Subject search and matched nothing. The
+    /// state the Panel shakes about.
+    var hasNoSubjectMatch: Bool {
+        phase == .searchingSubject && subjectVM.hasNoMatch
     }
 
     var currentSelectedIndex: Int {

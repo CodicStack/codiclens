@@ -97,6 +97,27 @@ needs no `project.pbxproj` edit.
   the Action and Target Card placeholders all used to repeat it, which put the
   same string on screen twice and wrapped a long Query over three lines. One
   Query on screen at a time; everything else names what it *matched*.
+- **"No results" is a claim, and a Mode has to be entitled to it.**
+  `CommandCoordinator.canReportNoResults` is that entitlement and
+  `isSearchInFlight` is the "Searching…" one. Clipboard, Emoji and Action search
+  match in memory, so zero matches is true the instant the key lands and the
+  message must not be delayed. Subject search matches the app Index, and until
+  the first scan lands the Slab shows the Query bar **alone** — no message row,
+  which is the shortest Slab there is (`PanelLayout.queryOnlyResultsHeight`).
+  Target search answers out of process and says "Searching…" instead. Subject
+  Results used to be withheld for 600ms by a debounced visibility flag on top of
+  all that, which left "No results" as the only thing the Slab could draw in the
+  meantime: every search said no and then changed its mind. A debounce cannot
+  fix that, because a debounce is what it was.
+- **A matched name is marked with an underline, in `highlightedName`.** Weight
+  was tried and is no difference at all against a selected row, whose title is
+  already bold. The subsequence tier only marks up when the *whole* Query is a
+  subsequence of the name, so an Emoji found by its keywords — which have nothing
+  to underline in the CLDR name — degrades to plain text instead of marking the
+  two characters that happen to line up. A Result's subtitle is marked up only
+  where it names the thing; `ResultDisplayItem.highlightsSubtitle` decides, and
+  it is false for a derived subtitle like a clipboard entry's relative
+  timestamp.
 - **Emoji glyphs go through `EmojiRenderer`.** Apple Color Emoji is a bitmap font
   with strikes at 20/26/32/40/48px; an off-strike point size resamples and reads
   soft. The largest strike is 48, so a glyph slot much above 64pt looks soft unless a
@@ -193,7 +214,11 @@ searchingSubject ──"Clipboard"──→ browsingClipboard ──Enter──�
                                    pickingAction (clipboard-specific)
 ```
 
-Text mode: activates only when fuzzy search returns zero app matches (result-dependent, not input-dependent).
+Text mode: activates only when fuzzy search returns zero app matches
+(result-dependent, not input-dependent) — **and only once the Index has
+answered**. `SubjectSearchVM.isIndexReady` is that gate. Before the first scan
+lands there are zero matches because nothing was searched, and standing a text
+Subject in for that turned every character of a cold start into prose.
 
 ### FloatingPanel — Non-activating NSPanel
 ```swift

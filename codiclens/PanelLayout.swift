@@ -69,9 +69,18 @@ enum PanelLayout {
     /// while being a point or two mean would let the Slab outgrow it.
     static let resultsHeaderHeight: CGFloat = 34
 
-    /// The shortest the Slab ever gets: one message row and the Query field.
-    /// Nothing matched, so there is nothing else in it to be tall.
+    /// The shortest Slab that is *saying* something: one message row and the
+    /// Query field. Nothing matched, so there is nothing else in it to be tall.
     static var minResultsHeight: CGFloat { messageRowHeight + queryFieldHeight }
+
+    /// The Slab with nothing in it but the Query bar, and the shortest it gets.
+    ///
+    /// A real state, not a degenerate one: while the app Index is still being
+    /// built, a Subject search has no Results *and* no right to say "No
+    /// results", so the message row is absent and the bar stands alone. The
+    /// Slab hugs its content, so this is simply what it measures — the number
+    /// exists so the arithmetic can be pinned rather than assumed.
+    static var queryOnlyResultsHeight: CGFloat { queryFieldHeight }
 
     /// The tallest the scrolling Results area gets, before whatever fixed
     /// furniture sits above it is taken off. The Query field is always under

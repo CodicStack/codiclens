@@ -20,10 +20,17 @@ protocol SearchScope: AnyObject {
 // MARK: - Adapters
 
 extension SubjectSearchVM: SearchScope {
-    /// Subject results stay hidden until the debounced visibility gate opens,
-    /// so the dropdown doesn't flicker on every keystroke.
+    /// Every match, as soon as there is one.
+    ///
+    /// These used to be withheld for 600ms after each keystroke by a debounced
+    /// visibility flag, to stop the list "flickering". What it actually did was
+    /// hold an answer the app already had: with the Slab showing and no Results
+    /// in it, the only thing left to draw was the "No results" row — so every
+    /// search said *no* for six-tenths of a second and then changed its mind.
+    /// That is the whole of the reported defect, and a debounce cannot fix it
+    /// because a debounce is what it is.
     var displayResults: [ResultDisplayItem] {
-        isResultsVisible ? results.map { ResultDisplayItem(from: $0) } : []
+        results.map { ResultDisplayItem(from: $0) }
     }
 }
 
