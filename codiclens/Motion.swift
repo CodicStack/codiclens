@@ -121,7 +121,7 @@ private struct PanelEntrance: ViewModifier, Animatable {
     // MARK: Measurements
 
     /// How much blur the Panel arrives out of and leaves into.
-    private static let maxBlur: CGFloat = 14
+    private static let maxBlur: CGFloat = 9
 
     private static let showStartScale: CGFloat = 0.90
     private static let showPeakScale: CGFloat = 1.04
@@ -130,9 +130,9 @@ private struct PanelEntrance: ViewModifier, Animatable {
     /// reference app's 1.04 frame sits (~50ms into a ~100ms show).
     private static let showPeakAt: Double = 0.60
     /// Progress by which the show is fully opaque — about 33ms in.
-    private static let showOpaqueAt: Double = 0.33
+    private static let showOpaqueAt: Double = 0.16
     /// Progress by which the show's blur has cleared — about 85ms in.
-    private static let showSharpAt: Double = 0.85
+    private static let showSharpAt: Double = 0.50
 
     private static let exitKickScale: CGFloat = 1.02
     /// How far the hide gets before the anticipation kick tops out. Small, and
