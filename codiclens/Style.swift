@@ -171,11 +171,16 @@ private struct Palette {
         // less, because dark text on a light surface is the same polarity as
         // whatever it is floating over.
         base: 0.58,
-        highlight: .white.opacity(0.16),
+        // Deliberately faint. In dark appearance a white highlight is the one
+        // thing that can lift a Card off the tint it shares with the Slab, and
+        // a Card that reads lighter than the Slab both breaks that shared-sheet
+        // look and takes white text back towards unreadable. The rim carries
+        // most of the focus signal here instead.
+        highlight: .white.opacity(0.06),
         writingLift: 0.22,
         slabRim: .white.opacity(0.10),
         cardRim: .white.opacity(0.12),
-        raisedRim: .white.opacity(0.26),
+        raisedRim: .white.opacity(0.38),
         selectionFill: .white.opacity(0.13),
         chipFill: .white.opacity(0.09),
         chipRim: .white.opacity(0.10)
