@@ -31,19 +31,36 @@ enum Motion {
     /// 0.90 → 1.04 → 1.00 excursion is far larger than any spring that settles
     /// this fast produces on its own.
     static var entrance: Animation {
-        collapsed(.spring(duration: 0.16, bounce: 0.28))
+        collapsed(.spring(duration: 0.12, bounce: 0.24))
     }
 
     /// A surface changing size. Calmer than `entrance` — a Slab that rings after
     /// it has finished growing reads as sloppy rather than lively.
     static var resize: Animation {
-        collapsed(.spring(duration: 0.18, bounce: 0.16))
+        collapsed(.spring(duration: 0.14, bounce: 0.14))
     }
 
     /// Scroll-to-selection. Short and unconditionally decelerating: the row has
     /// already been chosen, so the scroll is catching up, not deciding.
     static var snappy: Animation {
         collapsed(.easeOut(duration: 0.10))
+    }
+
+    /// `resize`, for AppKit. An `NSWindow` frame change goes through
+    /// `NSAnimationContext`, which takes a duration and a `CAMediaTimingFunction`
+    /// rather than an `Animation` — so the same curve has to be sayable twice.
+    /// Keeping both spellings here is what stops the window call site from
+    /// declaring a literal of its own.
+    static var resizeDuration: TimeInterval {
+        isReduced ? crossFadeDuration : 0.14
+    }
+
+    static var resizeTimingFunction: CAMediaTimingFunction {
+        // A gentle out-curve, matching `resize`'s low bounce. Windows cannot
+        // overshoot their own frame convincingly, so this does not try.
+        isReduced
+            ? CAMediaTimingFunction(name: .linear)
+            : CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.2, 1)
     }
 
     // MARK: - Collapsing
@@ -62,7 +79,7 @@ enum Motion {
 
     /// How long a collapsed animation takes. Long enough to read as a fade
     /// rather than a cut, short enough not to be waited on.
-    private static let crossFadeDuration: TimeInterval = 0.09
+    fileprivate static let crossFadeDuration: TimeInterval = 0.09
 
     /// The one place either switch is honoured. Everything that animates goes
     /// through here, so turning motion off cannot be forgotten in a corner.
