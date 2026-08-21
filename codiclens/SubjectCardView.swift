@@ -14,7 +14,7 @@ struct SubjectCardView: View {
     /// Whether the Card is holding text rather than naming something, which is
     /// the one case that needs a near-solid ground to stay readable.
     private var isWriting: Bool {
-        isClipboardText || isTextMode
+        isClipboardText || isTextMode || retargetedText != nil
     }
 
     private var subject: Subject? {
@@ -28,6 +28,27 @@ struct SubjectCardView: View {
         return false
     }
 
+    /// The text of a Subject that has *replaced* what the Query matched — OCR
+    /// Text, or a transform's output.
+    ///
+    /// `subjectVM.results` is what the Query matched, and after a retarget that
+    /// is no longer what the Card is about. A transform got away with reading
+    /// the results because retargeting also rewrote the Query, so the results
+    /// were rebuilt around the new text; OCR Text cannot be written into a
+    /// one-line Query bar, so the Card asks the coordinator what the Subject is
+    /// instead. Only outside the searching Phases, where the Query is still the
+    /// thing being answered.
+    private var retargetedText: String? {
+        switch coordinator.phase {
+        case .searchingSubject, .browsingClipboard, .browsingEmoji:
+            return nil
+        default:
+            break
+        }
+        guard case .text(let rawText)? = coordinator.selectedSubject?.kind else { return nil }
+        return rawText
+    }
+
     private var isClipboardMode: Bool {
         coordinator.isClipboardBrowsing
             || (coordinator.phase == .pickingAction && coordinator.selectedClipboardItem != nil)
@@ -35,7 +56,7 @@ struct SubjectCardView: View {
 
     private var isClipboardText: Bool {
         if isClipboardMode, let item = clipboardItem, !item.isImage { return true }
-        if coordinator.isEditingClipboardItem { return true }
+        if coordinator.isEditingTextSubject { return true }
         return false
     }
 
@@ -51,8 +72,10 @@ struct SubjectCardView: View {
         Group {
             if case .showingResult(let result) = coordinator.phase {
                 resultPreview(result)
-            } else if coordinator.isEditingClipboardItem {
-                clipboardEditor
+            } else if coordinator.isEditingTextSubject {
+                textSubjectEditor
+            } else if let retargetedText {
+                textPreview(retargetedText)
             } else if isClipboardMode {
                 clipboardPreview
             } else if coordinator.isEmojiBrowsing {
@@ -87,19 +110,24 @@ struct SubjectCardView: View {
         .padding(Style.padding)
     }
 
-    /// Shown for a clipboard entry that is text: how long the thing being
-    /// previewed actually is.
+    /// Shown wherever the Card is previewing text rather than naming
+    /// something: how long the thing being previewed actually is. A page of OCR
+    /// Text needs that as much as a clipboard entry does.
     private var characterCount: Int? {
-        guard isClipboardMode, !coordinator.isEditingClipboardItem,
-              let item = clipboardItem, !item.isImage else { return nil }
+        guard !coordinator.isEditingTextSubject else { return nil }
+        if let retargetedText { return retargetedText.count }
+        guard isClipboardMode, let item = clipboardItem, !item.isImage else { return nil }
         return item.content.count
     }
 
     /// The key that acts on this Card. Only while the Card has the keyboard, and
     /// only when there is something for the key to act on.
     private var keyHint: String? {
+        // Editing is the one case where the Card holds the keyboard without
+        // being the focused Card of the Phase — the editor has it, wherever the
+        // Phase happens to be — so this is asked before `isFocused`.
+        if coordinator.isEditingTextSubject { return "⌘E" }
         guard isFocused else { return nil }
-        if coordinator.isEditingClipboardItem { return "⌘E" }
         if coordinator.isEmojiBrowsing { return coordinator.currentEmoji == nil ? nil : "⏎" }
         if isClipboardMode { return clipboardItem == nil ? nil : "⏎" }
         return subject == nil ? nil : "⏎"
@@ -189,20 +217,22 @@ struct SubjectCardView: View {
         }
     }
 
-    private var clipboardEditor: some View {
-        TextEditor(text: $coordinator.clipboardEditText)
+    /// The editor for a text Subject, wherever it is being edited from — the
+    /// Clipboard browser, OCR Text, a transform's output.
+    private var textSubjectEditor: some View {
+        TextEditor(text: $coordinator.textSubjectEditText)
             .font(.system(size: 13))
             .scrollContentBackground(.hidden)
             .focused($isEditorFocused)
             .padding(16)
             .onKeyPress { press in
                 if press.key == .tab && press.modifiers.isEmpty {
-                    coordinator.saveClipboardEditAndAdvance()
+                    coordinator.saveTextSubjectEditAndAdvance()
                     return .handled
                 }
                 if (press.modifiers.contains(.command) && press.characters == "e")
                     || (press.modifiers.contains(.control) && (press.characters == "e" || press.characters == "\u{05}")) {
-                    coordinator.toggleClipboardEdit()
+                    coordinator.toggleTextSubjectEdit()
                     return .handled
                 }
                 if press.key == .escape {
@@ -219,6 +249,20 @@ struct SubjectCardView: View {
             // actor once the view is in the hierarchy. It replaces a fixed
             // 0.1-second delay that was guessing at the same moment.
             .task { isEditorFocused = true }
+    }
+
+    /// A block of text the Card is holding, scrollable because OCR Text can be
+    /// a page of it.
+    private func textPreview(_ text: String) -> some View {
+        ScrollView {
+            Text(text)
+                .font(.system(size: 13))
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(20)
     }
 
     private var textAreaContent: some View {

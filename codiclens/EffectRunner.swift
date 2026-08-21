@@ -19,6 +19,17 @@ final class SystemEffectRunner: EffectRunner {
     var onShowSettings: (() -> Void)?
     var onSavePanel: ((Data, String, UTType) -> Void)?
 
+    /// Where the OCR Text goes.
+    ///
+    /// `.ocr` is *answered*, not merely performed — `.savePanel` is the
+    /// precedent, and OCR is the second user, which is the point at which the
+    /// shape is a pattern. The runner does the awaiting, so
+    /// `CommandCoordinator` neither imports Vision nor `await`s; see
+    /// `docs/adr/0007-async-action-behind-the-effect-seam.md`. Called with
+    /// `nil` when the image had no readable text, so no empty text Subject is
+    /// ever created.
+    var onOCRText: ((String?) -> Void)?
+
     func run(_ effects: [Effect]) {
         for effect in effects {
             perform(effect)
@@ -83,6 +94,16 @@ final class SystemEffectRunner: EffectRunner {
 
         case .savePanel(let data, let fileName, let contentType):
             onSavePanel?(data, fileName, contentType)
+
+        case .ocr(let url):
+            // The one Effect that is awaited. Nothing is hidden and nothing
+            // else in the list is reordered around it: the coordinator has
+            // already flagged the run as in flight, and the answer comes back
+            // through the callback whenever Vision has one.
+            guard let onOCRText else { return }
+            Task { @MainActor in
+                onOCRText(await OCR.text(in: url))
+            }
         }
     }
 

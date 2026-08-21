@@ -41,6 +41,19 @@ enum Effect {
     /// keystroke — for targets that refuse a paste.
     case typeText(String)
 
+    /// Read the text out of the image at this URL and hand the OCR Text back.
+    ///
+    /// The only Effect that is *answered* rather than merely performed —
+    /// `.savePanel` is the precedent — and the only one with no `.hide`
+    /// anywhere near it. That is the point: the OCR Text lands *in* the Panel,
+    /// so the Panel has to still be there. An OCR Effect that hides is a bug,
+    /// not a variation. See
+    /// `docs/adr/0007-async-action-behind-the-effect-seam.md`.
+    ///
+    /// A URL crosses the seam, never image bytes: loading the image in the
+    /// coordinator would be file I/O on the wrong side of the line.
+    case ocr(URL)
+
     // Everything else
     case runAppleScript(String)
     case share(Payload, via: NSSharingService)
@@ -71,6 +84,8 @@ extension Effect: Equatable {
         case let (.paste(a), .paste(b)):
             a == b
         case let (.typeText(a), .typeText(b)):
+            a == b
+        case let (.ocr(a), .ocr(b)):
             a == b
         case let (.runAppleScript(a), .runAppleScript(b)):
             a == b

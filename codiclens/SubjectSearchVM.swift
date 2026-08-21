@@ -31,14 +31,28 @@ class SubjectSearchVM {
     /// hands it a different one.
     var isIndexReady: Bool { index.hasPopulated }
 
-    /// Whether the Index has answered this Query, and answered with nothing.
+    /// Whether this Query is a path rather than an app search.
+    ///
+    /// `/` and `~` and nothing else — see `PathSubject`. The prefixes were
+    /// chosen because they cannot begin an app name, which is what lets a Path
+    /// Subject sit alongside the Index without touching any of its gates.
+    var isPathQuery: Bool { PathSubject.isPath(searchText) }
+
+    /// Whether this Query was answered with nothing.
     ///
     /// The state the Panel shakes about. Not the same question as "is the
     /// visible Subject a text one": that is the *consequence* of a no-match and
     /// it is also reachable while the Index is still loading, which is a moment
     /// nothing should be shaking about.
+    ///
+    /// A path is answered by the filesystem, synchronously and completely, so
+    /// it needs no Index gate: `~/nope` names nothing the instant the key
+    /// lands. The app branch is unchanged and still waits on `isIndexReady` —
+    /// the two sources never mix, because a Query is one or the other.
     var hasNoMatch: Bool {
-        isIndexReady && !searchText.isEmpty && appResults.isEmpty
+        guard !searchText.isEmpty else { return false }
+        if isPathQuery { return results.isEmpty }
+        return isIndexReady && appResults.isEmpty
     }
 
     /// Built-ins live here, not in the Index: they aren't files on disk, and a
@@ -137,6 +151,19 @@ class SubjectSearchVM {
             appResults = []
             results = []
             selectedIndex = 0
+            return
+        }
+
+        // A path is not an app search. `/` and `~` cannot begin an app name, so
+        // the Index is never consulted, none of its gates move, and nothing
+        // falls back to a text Subject: the path either names exactly one
+        // thing or it names nothing at all. No completion list, no directory
+        // read — see `docs/adr/0008-a-file-can-be-a-subject.md`.
+        if isPathQuery {
+            appResults = []
+            results = PathSubject.resolve(searchText).map { [$0] } ?? []
+            selectedIndex = 0
+            commitSubject.send()
             return
         }
 

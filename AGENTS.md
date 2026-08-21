@@ -104,7 +104,9 @@ needs no `project.pbxproj` edit.
   message must not be delayed. Subject search matches the app Index, and until
   the first scan lands the Slab shows the Query bar **alone** — no message row,
   which is the shortest Slab there is (`PanelLayout.queryOnlyResultsHeight`).
-  Target search answers out of process and says "Searching…" instead. Subject
+  Target search answers out of process and says "Searching…" instead, and OCR
+  — which is not a search at all — says "Reading text…" off
+  `CommandCoordinator.isOCRInFlight`. Subject
   Results used to be withheld for 600ms by a debounced visibility flag on top of
   all that, which left "No results" as the only thing the Slab could draw in the
   meantime: every search said no and then changed its mind. A debounce cannot
@@ -173,6 +175,10 @@ Wires runner callbacks:
 - `onQuickLook` → `showQuickLook()` — activates app, shows QLPreviewPanel
 - `onSavePanel` → `showSavePanel()` — NSSavePanel for file export
 - `onShowSettings` → `showSettings()` — settings window
+- `onOCRText` → `coordinator.receiveOCRText(_:)` — the OCR Text coming back the
+  other way. The only callback that answers the coordinator rather than doing
+  something to the window, and the reason `CommandCoordinator` neither imports
+  Vision nor `await`s. See `docs/adr/0007-async-action-behind-the-effect-seam.md`.
 
 `coordinator.onPhaseChange` is **not** wired. It used to resize the card window; the
 window no longer resizes, and the Card row's width is a SwiftUI animation driven by
@@ -214,6 +220,19 @@ searchingSubject ──"Clipboard"──→ browsingClipboard ──Enter──�
                                    pickingAction (clipboard-specific)
 ```
 
+A file becomes a Subject two ways, and neither is a file browser — see
+`docs/adr/0008-a-file-can-be-a-subject.md`. A **Path Subject** is a Query
+beginning `/` or `~`, resolved by `PathSubject` to exactly one file or folder;
+those two prefixes cannot collide with an app name, so none of the Index's
+gates move for one. **Use as Subject** is a non-Final Action that promotes a
+file-or-app Target into the Subject and lands back on `.pickingAction`. Files
+are deliberately *not* ranked alongside apps in Subject search.
+
+OCR is the one Action that takes time. It returns `[.ocr(url)]` and **no
+`.hide`** — the OCR Text lands *in* the Panel — and `EffectRunner` awaits
+Vision and answers through `onOCRText`. `isOCRInFlight` gates a second Enter
+and is what the Slab's "Reading text…" row reads.
+
 Text mode: activates only when fuzzy search returns zero app matches
 (result-dependent, not input-dependent) — **and only once the Index has
 answered**. `SubjectSearchVM.isIndexReady` is that gate. Before the first scan
@@ -238,7 +257,8 @@ display-only. Routes to coordinator:
 - Left/Right → `moveLeft()` / `moveRight()`, which mean something only in a grid
 - Escape → `handleEscape()`
 - Shift+Space → `triggerQuickLook()`
-- Ctrl+E / Cmd+E → `toggleClipboardEdit()`
+- Ctrl+E / Cmd+E → `toggleTextSubjectEdit()` — **any** text Subject, not just a
+  Clipboard Item: OCR Text and a transform's output too
 - Ctrl+J/K → `moveDown()` / `moveUp()`
 - Ctrl+H/L → `moveLeft()` / `moveRight()` **first**, and only `retreatPhase()` /
   `advancePhase()` when the horizontal move meant nothing. Routing them straight to
@@ -327,6 +347,8 @@ User types query → Enter
 | `ClipboardSearchVM.swift` | Clipboard search/filter |
 | `QuickLookHelper.swift` | QLPreviewPanel data source/delegate |
 | `Subject.swift` | Subject model (app/file/folder/text/builtIn) |
+| `PathSubject.swift` | A Query beginning `/` or `~`, and the one URL→Subject resolver |
+| `OCR.swift` | The whole of the app's Vision use: URL → OCR Text |
 | `SubjectAction.swift` | Action model, text transforms, action handlers |
 | `FuzzyMatch.swift` | Fuzzy scoring (exact/prefix/substring/subsequence/levenshtein) |
 | `Emoji.swift` | Emoji model, SkinTone, default-tone preference, glyph→NSImage rendering |
@@ -346,7 +368,7 @@ Real, unfixed, none urgent.
 - Signing teams are inconsistent. Both targets override `DEVELOPMENT_TEAM` to
   `L256GR2793`, while the project-level default is `HHNPP7C8GB`. Will bite on a clean
   checkout.
-- `SubjectCardView.clipboardEditor` takes focus from a `.task`, which is the first
+- `SubjectCardView.textSubjectEditor` takes focus from a `.task`, which is the first
   main-actor turn after the editor is inserted. That is ordering, not a delay — but it
   is still the weakest link in the focus story, and if the clipboard editor ever comes
   up unfocused, this is why.

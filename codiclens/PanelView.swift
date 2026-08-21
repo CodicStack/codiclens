@@ -67,6 +67,12 @@ struct PanelView: View {
             guard noMatch else { return }
             withAnimation(Motion.entrance) { shakeTrigger += 1 }
         }
+        // An image with no readable text is a no-match too, and it shakes about
+        // it the same way. The same trigger, not a second mechanism.
+        .onChange(of: coordinator.ocrFoundNoText) { _, foundNothing in
+            guard foundNothing else { return }
+            withAnimation(Motion.entrance) { shakeTrigger += 1 }
+        }
     }
 
     // MARK: - The Card row
@@ -121,6 +127,9 @@ struct PanelView: View {
     /// run, so the Slab is unconditional there.
     private var showsResults: Bool {
         if coordinator.isEmojiBrowsing { return true }
+        // "Reading text…" is something the Slab is saying, so the Slab has to
+        // be there to say it — even if the Action list behind it were empty.
+        if coordinator.isOCRInFlight { return true }
         if !coordinator.currentResults.isEmpty { return true }
         if coordinator.targetVM.isSearching { return true }
         return !coordinator.currentQuery.isEmpty

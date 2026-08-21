@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 enum BuiltInType {
     case settings
@@ -8,7 +9,14 @@ enum BuiltInType {
 
 enum SubjectKind {
     case app(bundleIdentifier: String?, isRunning: Bool)
-    case file(contentType: String)
+    /// A file on disk, carrying the `UTType` it was resolved to.
+    ///
+    /// A `UTType` rather than its identifier because the type is what Actions
+    /// ask questions of — OCR appears only where it `conforms(to: .image)` —
+    /// and re-deriving one from a string at every such question is how the two
+    /// spellings drift apart. Resolved once, at Subject construction, in
+    /// `PathSubject`.
+    case file(contentType: UTType)
     case folder
     case text(rawText: String)
     /// An entry from clipboard history, acted on exactly like any other subject.
