@@ -2,7 +2,6 @@ import SwiftUI
 
 struct ResultsListView: View {
     @Bindable var coordinator: CommandCoordinator
-    @Environment(\.colorScheme) private var colorScheme
 
     private var hasQuery: Bool {
         !coordinator.currentQuery.isEmpty
@@ -14,7 +13,7 @@ struct ResultsListView: View {
                 EmojiGridView(coordinator: coordinator)
             } else if !coordinator.currentResults.isEmpty {
                 header
-                Divider().padding(.horizontal, 10)
+                Divider().padding(.horizontal, Style.padding)
                 list
             } else if coordinator.targetVM.isSearching {
                 searchingState
@@ -31,36 +30,40 @@ struct ResultsListView: View {
         HStack(spacing: 8) {
             ProgressView()
                 .controlSize(.small)
-            Text("Searching...")
+            Text("Searching…")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, Style.padding)
+        .padding(.vertical, Style.padding)
     }
 
     private var emptyState: some View {
-        HStack {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.tertiary)
             Text("No results for \"\(coordinator.currentQuery)\"")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, Style.padding)
+        .padding(.vertical, Style.padding)
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 6) {
             Text("\(coordinator.currentResults.count) results")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
 
             if !coordinator.currentQuery.isEmpty {
                 Text("\"\(coordinator.currentQuery)\"")
-                    .font(.system(size: 12))
+                    .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             }
 
             Spacer()
@@ -69,16 +72,11 @@ struct ResultsListView: View {
                 Text(hint)
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(colorScheme == .dark
-                        ? Color.black.opacity(0.92)
-                        : Color.white.opacity(0.92))
-                    .clipShape(Capsule())
+                    .chipSurface()
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Style.padding)
+        .padding(.vertical, Style.rowPaddingV)
     }
 
     private var hints: [String] {
@@ -114,7 +112,7 @@ struct ResultsListView: View {
                         }
                     }
                 }
-                .padding(.bottom, 6)
+                .padding(.vertical, Style.resultInset)
             }
             .frame(maxHeight: 260)
             .onChange(of: coordinator.currentSelectedIndex) { _, newIndex in
@@ -153,12 +151,10 @@ private struct ResultRow: View {
 
             Spacer()
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
-        .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .padding(.horizontal, 6)
-        .contentShape(Rectangle())
+        .padding(.horizontal, Style.rowPaddingH)
+        .padding(.vertical, Style.rowPaddingV)
+        .resultSurface(selected: isSelected)
+        .padding(.horizontal, Style.resultInset)
     }
 
     @ViewBuilder

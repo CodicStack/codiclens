@@ -29,21 +29,3 @@ struct ThemeWrapper<Content: View>: View {
             .preferredColorScheme(AppTheme(rawValue: theme)?.resolvedColorScheme)
     }
 }
-
-struct ThemedGlass: ViewModifier {
-    @Environment(\.colorScheme) private var colorScheme
-    var cornerRadius: CGFloat = 32
-
-    func body(content: Content) -> some View {
-        content.background(
-            ZStack {
-                RoundedRectangle(cornerRadius: cornerRadius)
-                    .fill(.ultraThinMaterial)
-                RoundedRectangle(cornerRadius: cornerRadius)
-                    .fill(colorScheme == .dark
-                        ? Color.black.opacity(0.92)
-                        : Color.white.opacity(0.7))
-            }
-        )
-    }
-}

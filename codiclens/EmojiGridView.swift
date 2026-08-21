@@ -2,10 +2,13 @@ import SwiftUI
 
 /// The Results Slab in grid Mode.
 ///
-/// Deliberately plain. The visual language — Liquid Glass, radii, the
-/// mode-aware slab — arrives in a later phase and will replace everything
-/// cosmetic in here. What has to be right now is the data, the keyboard model,
-/// and the cell geometry.
+/// Everything cosmetic here comes from `Style.swift`: a cell is a Result, so it
+/// wears the same `resultSurface(selected:)` as a row in the list Mode, and the
+/// section headers and the tone picker use the same chip the list header's
+/// keyboard hints do. Nothing in this file holds a radius or a colour.
+///
+/// Two numbers are measurements rather than taste and are not tokens: the glyph
+/// strike and the cell frame, both explained below.
 struct EmojiGridView: View {
     @Bindable var coordinator: CommandCoordinator
 
@@ -32,6 +35,7 @@ struct EmojiGridView: View {
         VStack(spacing: 0) {
             if vm.isTonePickerOpen {
                 tonePicker
+                Divider().padding(.horizontal, Style.padding)
             }
             grid
         }
@@ -55,16 +59,12 @@ struct EmojiGridView: View {
                                 }
                             }
                         } header: {
-                            Text(section.title)
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 3)
+                            sectionHeader(section.title)
                         }
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 6)
+                .padding(.horizontal, Style.rowPaddingH)
+                .padding(.bottom, Style.resultInset)
             }
             .frame(maxHeight: 260)
             .onChange(of: vm.selectedIndex) { _, index in
@@ -73,13 +73,25 @@ struct EmojiGridView: View {
         }
     }
 
+    /// Pinned, so cells scroll underneath it. The chip is what keeps the title
+    /// legible while they do — a bare label over passing glyphs is unreadable.
+    private func sectionHeader(_ title: String) -> some View {
+        HStack(spacing: 0) {
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .kerning(0.5)
+                .foregroundStyle(.secondary)
+                .chipSurface()
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 3)
+    }
+
     private func cell(_ emoji: Emoji, isSelected: Bool) -> some View {
         Text(emoji.string)
             .font(.system(size: Self.glyphSize))
             .frame(width: Self.cellSize, height: Self.cellSize)
-            .background(isSelected ? Color.accentColor.opacity(0.25) : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .contentShape(Rectangle())
+            .resultSurface(selected: isSelected)
     }
 
     /// The six-tone override, opened with ⌥Enter on an Emoji that takes tones.
@@ -89,9 +101,7 @@ struct EmojiGridView: View {
                 Text(choice.string)
                     .font(.system(size: Self.glyphSize))
                     .frame(width: Self.cellSize, height: Self.cellSize)
-                    .background(offset == vm.toneIndex ? Color.accentColor.opacity(0.25) : Color.clear)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .contentShape(Rectangle())
+                    .resultSurface(selected: offset == vm.toneIndex)
                     .onTapGesture {
                         vm.toneIndex = offset
                         coordinator.submit()
@@ -99,7 +109,7 @@ struct EmojiGridView: View {
             }
             Spacer()
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
+        .padding(.horizontal, Style.rowPaddingH)
+        .padding(.vertical, Style.resultInset)
     }
 }
