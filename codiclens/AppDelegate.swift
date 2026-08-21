@@ -15,7 +15,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Ctrl+Cmd+Space and everything it has to negotiate with macOS.
     /// `SettingsView` drives this.
-    let emojiHotKey = EmojiHotKeyController()
+    let emojiHotKey = EmojiHotKeyController.shared
 
     private var hotKeyRef: EventHotKeyRef?
 
@@ -185,6 +185,11 @@ final class EmojiHotKeyController {
     }
 
     static let preferenceKey = "codiclens.emoji.ownsEmojiHotKey"
+
+    /// The one controller. `SettingsView` cannot reach the delegate to ask for
+    /// it: `@NSApplicationDelegateAdaptor` puts a SwiftUI forwarding object in
+    /// `NSApp.delegate`, so casting that to `AppDelegate` yields nil.
+    static let shared = EmojiHotKeyController()
 
     private let defaults: UserDefaults
     private var hotKeyRef: EventHotKeyRef?
