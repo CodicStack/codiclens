@@ -10,40 +10,32 @@ import SwiftUI
 ///
 /// - **surface** — a Slab. Liquid Glass, its own hairline rim, its own shadow.
 ///   `slabSurface()`.
-/// - **raised** — the focused Card. A neutral lift out of the Slab plus an
-///   accent stroke. The stroke is the focus signal; the fill stays neutral,
-///   because accent across a whole Card reads as a coloured box rather than as
-///   a tint. `cardSurface(focused: true)`.
+/// - **raised** — the focused Card. Brighter and a touch more defined at the
+///   edge than its neighbours. No accent colour: brightness is the focus
+///   signal. `cardSurface(focused: true)`.
 /// - **recessed** — an unfocused Card, and every Result row or grid cell.
 ///   A neutral well sunk into the Slab. `cardSurface(focused: false)` and
 ///   `resultSurface(selected:)`.
 ///
-/// Only the Slab uses `.glassEffect`. Cards and Results sit *inside* a Slab, and
-/// glass stacked on glass loses the backdrop it is meant to reveal, so those two
-/// tiers are fills over the Slab's glass rather than glass of their own.
+/// Slabs and Cards both use `.glassEffect`, because both are top-level surfaces
+/// floating over the desktop — there is no Card Slab behind the Cards. Results
+/// are the one flat tier: they sit *inside* the Results Slab, and glass stacked
+/// on glass loses the backdrop it exists to reveal.
 enum Style {
 
     // MARK: - Geometry
 
-    /// A Slab — the outer glass surface, and the container everything else is
-    /// concentric with.
-    static let slabRadius: CGFloat = 28
+    /// The Results Slab. Lower than a Card on purpose: it is the larger, calmer
+    /// surface, and matching the Cards' curvature made it look inflated.
+    static let slabRadius: CGFloat = 18
 
-    /// A Card inside the Card Slab.
-    ///
-    /// Genuinely concentric: a Card sits `cardInset` in from the Slab's edge, so
-    /// its radius is the Slab's less that inset. Concentric corners are what
-    /// make a nested rounded rectangle look nested rather than merely rounded —
-    /// the two curves stay parallel instead of drifting apart at the corner.
-    static let cardRadius: CGFloat = concentric(inset: cardInset)
+    /// A Card. Cards are their own top-level surfaces — there is no Card Slab
+    /// behind them — so this is chosen for the Card's own proportions rather
+    /// than derived from a container.
+    static let cardRadius: CGFloat = 22
 
     /// A Result row or grid cell.
-    ///
-    /// Deliberately *not* derived. A row lives in the middle of a list, not in
-    /// the Slab's corner, so it has nothing to be concentric with; taking the
-    /// concentric value would give a 46pt row a 22pt radius and turn it into a
-    /// capsule.
-    static let resultRadius: CGFloat = 12
+    static let resultRadius: CGFloat = 10
 
     static let padding: CGFloat = 12
     static let gap: CGFloat = 12
@@ -51,31 +43,23 @@ enum Style {
     /// One device pixel's worth of rim at 1x, which is what a hairline means.
     static let hairline: CGFloat = 1
 
-    static let shadowRadius: CGFloat = 24
-    static let shadowOffsetY: CGFloat = 8
+    static let shadowRadius: CGFloat = 20
+    static let shadowOffsetY: CGFloat = 6
 
-    /// A Card's inset from the Card Slab's edge. The Card Slab must pad by this
-    /// much, or `cardRadius` is concentric with nothing.
-    static let cardInset: CGFloat = 10
+    /// The gap between two Cards.
+    static let cardInset: CGFloat = 6
     /// A Result's own inset from the Slab edge, so its selection fill reads as a
     /// row inside the Slab rather than a band across it.
     static let resultInset: CGFloat = 6
+
+    /// The icon in a Card. Smaller than it was: a 96pt glyph left no room for a
+    /// label and made a Card read as one big picture.
+    static let cardIcon: CGFloat = 64
 
     static let rowPaddingH: CGFloat = 10
     static let rowPaddingV: CGFloat = 7
     static let chipPaddingH: CGFloat = 7
     static let chipPaddingV: CGFloat = 3
-
-    /// The radius that keeps a shape inset by `inset` concentric with the Slab.
-    ///
-    /// macOS 26 ships `ConcentricRectangle`, which derives this from the
-    /// enclosing `containerShape` automatically. We do the arithmetic instead
-    /// because `ConcentricRectangle` is a `Shape` but not an `InsettableShape`,
-    /// so it has no `strokeBorder` — and every tier here draws a hairline rim.
-    /// Revisit if it gains the conformance.
-    static func concentric(inset: CGFloat) -> CGFloat {
-        max(inset, slabRadius - inset)
-    }
 
     // MARK: - Shapes
 
@@ -96,72 +80,69 @@ enum Style {
 
 /// The one place light and dark diverge.
 ///
-/// The two appearances are treated **asymmetrically on purpose**. A light Slab
-/// floats over a light wallpaper, where a blur alone leaves nothing to see, so
-/// light gets a stronger tint into the glass, a darker rim to cut its own edge,
-/// and a lighter shadow. A dark Slab has contrast for free and leans on the
-/// shadow instead, so its tint stays thin and its rim is a light catch along the
-/// edge rather than a border. Symmetric values are what made the old treatment
-/// wash out in light and read as a solid black box in dark.
+/// The two appearances are treated **asymmetrically on purpose**. A light
+/// surface floats over a light wallpaper, where a blur alone leaves nothing to
+/// see, so light gets a stronger tint into the glass and a darker rim to cut its
+/// own edge. A dark surface has contrast for free and leans on the shadow
+/// instead, so its tint stays thin and its rim is a light catch along the edge
+/// rather than a border.
+///
+/// **There is no accent colour here, deliberately.** Focus and selection are
+/// signalled by brightness and rim weight alone. An accent fill across a whole
+/// Card turned the Panel into a coloured box, and a tinted selection fought
+/// every app icon it sat next to.
 private struct Palette {
 
-    // Slab
-    /// Tint mixed into the glass. This is the *whole* material adjustment — the
-    /// old `Color.black.opacity(0.92)` overlay is gone; it was opaque, which is
-    /// precisely why the app read as solid rather than as glass.
+    /// Tint mixed into the glass of a Slab or an unfocused Card.
     let glassTint: Color
     let slabRim: Color
     let shadow: Color
 
-    // Card
+    /// An unfocused Card: present, but plainly not where the keyboard is.
     let cardRim: Color
     let recessedFill: Color
-    /// The focused Card's fill. Neutral, not accent-tinted: a Card is a large
-    /// surface, and an accent fill across it at any legible alpha stops reading
-    /// as a tint and becomes a coloured box. The accent lives in `raisedRim`
-    /// instead, where it signals focus without painting the Panel.
+    /// The focused Card. Brighter than its neighbours and a touch more defined
+    /// at the edge — that difference is the whole focus signal.
     let raisedFill: Color
     let raisedRim: Color
     /// The Card you are typing into. The least transparent thing in the app,
     /// deliberately: 13pt body text over a wallpaper is unreadable otherwise.
     let writingFill: Color
 
-    // Result
+    /// The selected Result. A neutral lift, strong enough to find at a glance
+    /// and quiet enough to sit under a row of app icons.
     let selectionFill: Color
-    let selectionRim: Color
 
-    // Chip — keyboard hints, counts, badges
+    /// Chip — keyboard hints, counts, badges.
     let chipFill: Color
     let chipRim: Color
 
     static let dark = Palette(
-        glassTint: .black.opacity(0.30),
-        slabRim: .white.opacity(0.14),
-        shadow: .black.opacity(0.28),
+        glassTint: .black.opacity(0.28),
+        slabRim: .white.opacity(0.12),
+        shadow: .black.opacity(0.32),
         cardRim: .white.opacity(0.10),
-        recessedFill: .black.opacity(0.22),
-        raisedFill: .white.opacity(0.10),
-        raisedRim: .accentColor.opacity(0.50),
+        recessedFill: .white.opacity(0.05),
+        raisedFill: .white.opacity(0.13),
+        raisedRim: .white.opacity(0.22),
         writingFill: .black.opacity(0.52),
-        selectionFill: .accentColor.opacity(0.28),
-        selectionRim: .accentColor.opacity(0.34),
-        chipFill: .white.opacity(0.10),
+        selectionFill: .white.opacity(0.13),
+        chipFill: .white.opacity(0.09),
         chipRim: .white.opacity(0.10)
     )
 
     static let light = Palette(
-        glassTint: .white.opacity(0.55),
-        slabRim: .black.opacity(0.12),
-        shadow: .black.opacity(0.18),
-        cardRim: .black.opacity(0.10),
-        recessedFill: .black.opacity(0.05),
-        raisedFill: .white.opacity(0.62),
-        raisedRim: .accentColor.opacity(0.40),
-        writingFill: .white.opacity(0.72),
-        selectionFill: .accentColor.opacity(0.18),
-        selectionRim: .accentColor.opacity(0.30),
-        chipFill: .white.opacity(0.55),
-        chipRim: .black.opacity(0.08)
+        glassTint: .white.opacity(0.58),
+        slabRim: .black.opacity(0.10),
+        shadow: .black.opacity(0.16),
+        cardRim: .black.opacity(0.08),
+        recessedFill: .white.opacity(0.34),
+        raisedFill: .white.opacity(0.82),
+        raisedRim: .black.opacity(0.13),
+        writingFill: .white.opacity(0.80),
+        selectionFill: .black.opacity(0.07),
+        chipFill: .white.opacity(0.62),
+        chipRim: .black.opacity(0.07)
     )
 
     static func of(_ scheme: ColorScheme) -> Palette {
@@ -186,6 +167,11 @@ private struct SlabSurface: ViewModifier {
     }
 }
 
+/// A Card is a top-level surface, not a fill inside a Slab.
+///
+/// There is no Card Slab behind the Cards, so each Card carries its own glass,
+/// its own rim and its own shadow — the same construction as a Slab at a
+/// different radius. A plain fill would have nothing to sit on.
 private struct CardSurface: ViewModifier {
     @Environment(\.colorScheme) private var scheme
     let focused: Bool
@@ -198,11 +184,12 @@ private struct CardSurface: ViewModifier {
             : (focused ? palette.raisedFill : palette.recessedFill)
         let rim = focused ? palette.raisedRim : palette.cardRim
         return content
-            .background { Style.cardShape.fill(fill) }
+            .glassEffect(.regular.tint(fill), in: Style.cardShape)
             .overlay {
                 Style.cardShape.strokeBorder(rim, lineWidth: Style.hairline)
             }
             .clipShape(Style.cardShape)
+            .shadow(color: palette.shadow, radius: Style.shadowRadius, y: Style.shadowOffsetY)
     }
 }
 
@@ -215,12 +202,7 @@ private struct ResultSurface: ViewModifier {
         return content
             .background {
                 if selected {
-                    Style.resultShape
-                        .fill(palette.selectionFill)
-                        .overlay {
-                            Style.resultShape
-                                .strokeBorder(palette.selectionRim, lineWidth: Style.hairline)
-                        }
+                    Style.resultShape.fill(palette.selectionFill)
                 }
             }
             .clipShape(Style.resultShape)
@@ -251,11 +233,11 @@ extension View {
         modifier(SlabSurface())
     }
 
-    /// A Card inside the Card Slab.
+    /// A Card: a top-level glass surface with its own rim and shadow.
     ///
     /// - Parameters:
-    ///   - focused: the accent-tinted selection signal — an accent fill and an
-    ///     accent stroke, never a system focus ring.
+    ///   - focused: where the keyboard is. Signalled by a brighter fill and a
+    ///     stronger rim, never by an accent colour or a system focus ring.
     ///   - writing: the Card holds editable or long-form text, which needs a
     ///     near-solid ground to stay legible over a wallpaper.
     func cardSurface(focused: Bool, writing: Bool = false) -> some View {
