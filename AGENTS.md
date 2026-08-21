@@ -78,6 +78,25 @@ needs no `project.pbxproj` edit.
   `.regular.tint(.white.opacity(0.58))` is a white wash over a blur — that is what
   "material" looks like. The blur and specular edge of `.regular` are the effect; a
   tint is only ever a nudge for legibility.
+- **A Slab inside a window sized to the worst case must carry a *definite*
+  height.** `maxHeight` is flexible, so a Slab given one takes every point the
+  Panel reserved for it — which is how the Results Slab came to be a mostly-empty
+  pane with the Query field floating under the divider. The Slab hugs
+  (`fixedSize(vertical:)`) and the scrolling area inside it is given a definite
+  `PanelLayout.resultsAreaHeight(contentHeight:chromeHeight:)`. That also keeps the
+  proposal definite all the way down to the `LazyVStack`: hugging a lazy container
+  by proposing it an unspecified height makes it build all 1,914 cells to answer,
+  so the content heights are **arithmetic** (`EmojiGridView.contentHeight`,
+  `PanelLayout.listContentHeight`), not measurements. Where an intrinsic piece of
+  furniture has to appear in that arithmetic it is rounded *up* — see
+  `PanelLayout.resultsHeaderHeight`. `PanelLayoutTests` pins the sums.
+- **The Query field is a bar, not a row.** `PanelLayout.queryFieldHeight` and
+  nothing else, pinned along the Slab's bottom edge in every Mode; the Results
+  area above it takes all the variable height. It is also the **only** place the
+  Query is spelled out — the results header, the empty and searching states and
+  the Action and Target Card placeholders all used to repeat it, which put the
+  same string on screen twice and wrapped a long Query over three lines. One
+  Query on screen at a time; everything else names what it *matched*.
 - **Emoji glyphs go through `EmojiRenderer`.** Apple Color Emoji is a bitmap font
   with strikes at 20/26/32/40/48px; an off-strike point size resamples and reads
   soft. The largest strike is 48, so a glyph slot much above 64pt looks soft unless a
@@ -216,6 +235,14 @@ when there are Results and out when there are not, with `Motion.resize` — exce
 Emoji Mode, where the grid is never empty and the Slab is unconditional. A
 display-only Query field is pinned along its bottom, because the Subject Card shows
 what the Query *matched* rather than what was typed.
+
+The Slab is **sized to its content**, up to `PanelLayout.maxResultsHeight`: ten
+matching Emoji make a Slab two grid rows tall, and "No results" plus the Query bar
+makes the shortest one there is (`PanelLayout.minResultsHeight`). Growing and
+shrinking is the same `Motion.resize`, applied to the Results area's own frame with
+`hardCut()` on the content inside it, so the surface springs while the cells cut.
+`hitRegions.results` follows because the layout *reports* the Slab's frame — the
+space the Panel reserved and the Slab did not use has to dismiss on a click.
 
 ### ClipboardHistory / PasteboardWatcher — clipboard capture
 Polls `NSPasteboard.general` every 0.5s. Stores up to 100 items as JSON in Application

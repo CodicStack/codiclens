@@ -22,13 +22,54 @@ struct EmojiGridView: View {
     /// goes ragged.
     private static let cellSize: CGFloat = 40
 
+    /// Between two cells, and between one section's block and the next.
+    private static let cellSpacing: CGFloat = 2
+    private static let sectionSpacing: CGFloat = 4
+
+    /// A pinned section heading: the chip, plus the padding around it.
+    ///
+    /// Rounded up rather than measured, for the same reason as
+    /// `PanelLayout.resultsHeaderHeight`: it is added to what the grid asks for,
+    /// and asking for a couple of points more than the rows need costs a couple
+    /// of points of slack inside a scrolling area, while asking for less would
+    /// scroll a grid that fits — and clip the bottom row of cells doing it.
+    private static let sectionHeaderHeight: CGFloat = 26
+
+    /// The Skin Tone picker and its divider — fixed furniture above the grid,
+    /// which the grid's ceiling has to leave room for while it is open.
+    private static let tonePickerHeight: CGFloat =
+        cellSize + Style.resultInset * 2 + Style.hairline
+
     private var vm: EmojiSearchVM { coordinator.emojiVM }
 
     private var columns: [GridItem] {
         Array(
-            repeating: GridItem(.fixed(Self.cellSize), spacing: 2),
+            repeating: GridItem(.fixed(Self.cellSize), spacing: Self.cellSpacing),
             count: EmojiSearchVM.columnCount
         )
+    }
+
+    /// The height the grid's content wants, for sections holding these many
+    /// cells each.
+    ///
+    /// Arithmetic rather than a measurement, because the Slab is sized to it:
+    /// fixed cells in a fixed number of columns, one heading per section, and
+    /// the stack's spacing between them. Asking SwiftUI instead would mean
+    /// proposing an unspecified height to a `LazyVStack`, which is how you make
+    /// a lazy container build all 1,914 cells to answer.
+    static func contentHeight(sectionCellCounts: [Int]) -> CGFloat {
+        guard !sectionCellCounts.isEmpty else { return 0 }
+        var total: CGFloat = 0
+        for count in sectionCellCounts {
+            let perRow = EmojiSearchVM.columnCount
+            let rows = CGFloat((max(count, 0) + perRow - 1) / perRow)
+            let cells = rows * cellSize + max(rows - 1, 0) * cellSpacing
+            // The heading, the stack's spacing under it, and the rows.
+            total += sectionHeaderHeight + sectionSpacing + cells
+        }
+        // The spacing between one section's block and the next, and the inset
+        // under the last row.
+        return total + CGFloat(sectionCellCounts.count - 1) * sectionSpacing + Style.resultInset
     }
 
     var body: some View {
@@ -41,13 +82,25 @@ struct EmojiGridView: View {
         }
     }
 
+    /// The cells, in an area as tall as the cells are — up to what is left of
+    /// the Slab once the Query field and any open Skin Tone picker have had
+    /// theirs. Ten matching Emoji make two rows and a short Slab.
     private var grid: some View {
-        ScrollViewReader { proxy in
+        let height = PanelLayout.resultsAreaHeight(
+            contentHeight: Self.contentHeight(sectionCellCounts: vm.sections.map(\.emoji.count)),
+            chromeHeight: vm.isTonePickerOpen ? Self.tonePickerHeight : 0
+        )
+
+        return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 4, pinnedViews: [.sectionHeaders]) {
+                LazyVStack(
+                    alignment: .leading,
+                    spacing: Self.sectionSpacing,
+                    pinnedViews: [.sectionHeaders]
+                ) {
                     ForEach(Array(vm.sections.enumerated()), id: \.element.id) { number, section in
                         Section {
-                            LazyVGrid(columns: columns, spacing: 2) {
+                            LazyVGrid(columns: columns, spacing: Self.cellSpacing) {
                                 ForEach(Array(section.emoji.enumerated()), id: \.element.id) { offset, emoji in
                                     let flatIndex = vm.start(of: number) + offset
                                     // The cell draws the Emoji in the user's
@@ -73,8 +126,16 @@ struct EmojiGridView: View {
                 }
                 .padding(.horizontal, Style.rowPaddingH)
                 .padding(.bottom, Style.resultInset)
+                // The area's size springs; the cells inside it do not.
+                .hardCut()
             }
-            .frame(maxHeight: 260)
+            .frame(height: height)
+            // A Slab following its content is a surface changing size, which is
+            // what `resize` is for. Keyed to the height, so it is the height and
+            // nothing else that animates: moving the selection cannot change
+            // this value, so the highlight still lands on the frame the key was
+            // pressed.
+            .animation(Motion.resize, value: height)
             .onChange(of: vm.selectedIndex) { _, index in
                 proxy.scrollTo(index, anchor: .center)
             }
@@ -103,6 +164,8 @@ struct EmojiGridView: View {
     }
 
     /// The six-tone override, opened with ⌥Enter on an Emoji that takes tones.
+    /// `tonePickerHeight` is this: one cell row, its inset, and the divider
+    /// under it.
     private var tonePicker: some View {
         HStack(spacing: 2) {
             ForEach(Array(vm.tonePickerChoices.enumerated()), id: \.offset) { offset, choice in

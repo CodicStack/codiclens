@@ -52,6 +52,8 @@ struct PanelView: View {
         .padding(PanelLayout.margin)
         // Presence only. A Slab arriving and leaving is a surface changing size;
         // what it *contains* hard-cuts, because the user already asked for it.
+        // The Slab growing and shrinking with its content is the same curve,
+        // applied where that height is computed — the Results area's own frame.
         .animation(Motion.resize, value: showsResults)
         .panelEntrance(visible: presentation.visible)
         .coordinateSpace(.named(PanelLayout.coordinateSpace))
@@ -90,12 +92,19 @@ struct PanelView: View {
 
     // MARK: - The Results Slab
 
+    /// The Slab, as tall as what it holds.
+    ///
+    /// No height is imposed here. `ResultsListView` hugs its own content up to
+    /// `PanelLayout.maxResultsHeight`, and the space the Panel reserved for the
+    /// worst case is simply left empty below it — which is why the frame is
+    /// *reported* to `hitRegions` rather than assumed: a click in that empty
+    /// space has to dismiss the Panel, and the region has to shrink with the
+    /// Slab for it to.
     @ViewBuilder
     private var resultsSlab: some View {
         if showsResults {
             ResultsListView(coordinator: coordinator)
                 .frame(width: PanelLayout.cardRowWidth(coordinator.cardCount))
-                .frame(maxHeight: PanelLayout.maxResultsHeight, alignment: .top)
                 .slabSurface()
                 .onGeometryChange(for: CGRect.self) { proxy in
                     proxy.frame(in: .named(PanelLayout.coordinateSpace))

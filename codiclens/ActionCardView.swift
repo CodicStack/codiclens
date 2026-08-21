@@ -73,26 +73,21 @@ struct ActionCardView: View {
         }
     }
 
+    /// Nothing matched, said without repeating the Query.
+    ///
+    /// This Card used to spell the Query out above the message. The Query field
+    /// along the bottom of the Results Slab is now always on screen, so that put
+    /// it there twice — and one Query on screen at a time is the rule. The
+    /// Subject Card's placeholder has always read this way.
     private var placeholder: some View {
         VStack(spacing: 10) {
             Image(systemName: "arrow.right.circle")
                 .font(.system(size: 48, weight: .light))
                 .foregroundStyle(.quaternary)
 
-            if coordinator.actionVM.searchText.isEmpty {
-                Text("Action")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.quaternary)
-            } else {
-                Text(coordinator.actionVM.searchText)
-                    .font(.system(size: 15, weight: .semibold))
-                    .lineLimit(1)
-                    .foregroundStyle(.primary)
-
-                Text("No results")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
+            Text(coordinator.actionVM.searchText.isEmpty ? "Action" : "No results")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.quaternary)
         }
     }
 }
