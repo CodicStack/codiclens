@@ -228,8 +228,14 @@ struct SubjectAction: Identifiable {
                 .init(name: "Open", icon: .sfSymbol("gear"), isFinal: true, handler: .openSettings),
             ]
 
-        case .builtIn(.clipboard):
+        case .builtIn(.clipboard), .builtIn(.emoji):
             return []
+
+        case .emoji:
+            return [
+                .init(name: "Paste", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .paste),
+                .init(name: "Copy", icon: .sfSymbol("doc.on.doc"), isFinal: true, handler: .copy),
+            ]
 
         case .text(let rawText):
             var actions: [SubjectAction] = [

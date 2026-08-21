@@ -6,6 +6,7 @@ class CommandCoordinator {
     enum Phase: Equatable {
         case searchingSubject
         case browsingClipboard
+        case browsingEmoji
         case pickingAction
         case pickingTarget
         case showingResult(String)
@@ -24,6 +25,7 @@ class CommandCoordinator {
     let actionVM = ActionSearchVM()
     let targetVM = TargetSearchVM()
     let clipboardVM: ClipboardSearchVM
+    let emojiVM: EmojiSearchVM
     let queryBuffer = QueryBuffer()
 
     /// Layout only — the card panel resizes when the phase changes.
@@ -32,15 +34,22 @@ class CommandCoordinator {
     private let runner: EffectRunner
     private let history: ClipboardHistory
 
-    init(runner: EffectRunner, history: ClipboardHistory) {
+    /// - Parameter emojiVM: injected so tests get their own Recents and
+    ///   preferences instead of the ones in Application Support.
+    init(
+        runner: EffectRunner,
+        history: ClipboardHistory,
+        emojiVM: EmojiSearchVM = EmojiSearchVM()
+    ) {
         self.runner = runner
         self.history = history
         self.clipboardVM = ClipboardSearchVM(history: history)
+        self.emojiVM = emojiVM
     }
 
     var cardCount: Int {
         switch phase {
-        case .searchingSubject, .browsingClipboard: 1
+        case .searchingSubject, .browsingClipboard, .browsingEmoji: 1
         case .pickingAction, .showingResult: 2
         case .pickingTarget: 3
         }
@@ -50,11 +59,29 @@ class CommandCoordinator {
         phase == .browsingClipboard
     }
 
+    /// Whether the Results Slab should be a grid rather than a list.
+    var isEmojiBrowsing: Bool {
+        phase == .browsingEmoji
+    }
+
     var isTextMode: Bool {
-        let vm = subjectVM
-        guard vm.selectedIndex < vm.results.count else { return false }
-        if case .text = vm.results[vm.selectedIndex].kind { return true }
+        let results = subjectVM.results
+        guard subjectVM.selectedIndex < results.count else { return false }
+        if case .text = results[subjectVM.selectedIndex].kind { return true }
         return false
+    }
+
+    /// The Emoji selection as it would be pasted — the base wearing the tone in
+    /// force, whether that is the persisted default or a one-off override.
+    var currentEmoji: Emoji? {
+        guard phase == .browsingEmoji else { return nil }
+        return emojiVM.resolvedSelection
+    }
+
+    /// The default Skin Tone, for Settings to read and write.
+    var defaultSkinTone: SkinTone {
+        get { emojiVM.preferences.defaultSkinTone }
+        set { emojiVM.preferences.defaultSkinTone = newValue }
     }
 
     var isEditingClipboardItem: Bool = false
@@ -105,6 +132,7 @@ class CommandCoordinator {
         switch phase {
         case .searchingSubject: subjectVM
         case .browsingClipboard: clipboardVM
+        case .browsingEmoji: emojiVM
         case .pickingAction: actionVM
         case .pickingTarget: targetVM
         case .showingResult: nil
@@ -117,7 +145,9 @@ class CommandCoordinator {
     }
 
     var currentResults: [ResultDisplayItem] {
-        currentScope?.displayResults ?? []
+        guard phase == .searchingSubject else { return currentScope?.displayResults ?? [] }
+        // Same visibility gate `SubjectSearchVM` applies to its own results.
+        return subjectVM.isResultsVisible ? subjectVM.results.map { ResultDisplayItem(from: $0) } : []
     }
 
     var currentSelectedIndex: Int {
@@ -167,6 +197,11 @@ class CommandCoordinator {
             return true
         }
 
+        if emojiVM.isTonePickerOpen {
+            emojiVM.closeTonePicker()
+            return true
+        }
+
         switch phase {
         case .pickingTarget:
             retreatPhase()
@@ -175,12 +210,23 @@ class CommandCoordinator {
             subjectVM.reset()
             focusTrigger.toggle()
             return true
-        case .showingResult, .pickingAction, .browsingClipboard, .searchingSubject:
+        // Emoji Mode dismisses outright rather than falling back to Subject
+        // search: it is a Mode the user arrived in on purpose, usually from its
+        // own hotkey, and dropping them into an empty Subject search is not a
+        // step back from it.
+        case .showingResult, .pickingAction, .browsingClipboard, .browsingEmoji, .searchingSubject:
             return false
         }
     }
 
+    /// Up and down move one row. In a list that is one Result; in the Emoji
+    /// grid it is a whole row of cells, which is why the grid's own model owns
+    /// the arithmetic.
     func moveUp() {
+        if phase == .browsingEmoji {
+            emojiVM.moveRow(-1)
+            return
+        }
         if currentSelectedIndex > 0 {
             currentSelectedIndex -= 1
             if phase == .browsingClipboard { selectedSubject = nil }
@@ -188,6 +234,10 @@ class CommandCoordinator {
     }
 
     func moveDown() {
+        if phase == .browsingEmoji {
+            emojiVM.moveRow(1)
+            return
+        }
         let count = currentResults.count
         if currentSelectedIndex < count - 1 {
             currentSelectedIndex += 1
@@ -195,11 +245,52 @@ class CommandCoordinator {
         }
     }
 
+    /// Left and right move one cell, and mean nothing outside a grid.
+    ///
+    /// - Returns: whether the key was consumed, so the field can pass it on to
+    ///   ordinary text editing in every other Mode.
+    @discardableResult
+    func moveLeft() -> Bool {
+        guard phase == .browsingEmoji else { return false }
+        if emojiVM.isTonePickerOpen {
+            emojiVM.moveTone(-1)
+        } else {
+            emojiVM.moveCell(-1)
+        }
+        return true
+    }
+
+    @discardableResult
+    func moveRight() -> Bool {
+        guard phase == .browsingEmoji else { return false }
+        if emojiVM.isTonePickerOpen {
+            emojiVM.moveTone(1)
+        } else {
+            emojiVM.moveCell(1)
+        }
+        return true
+    }
+
+    /// ⌥Enter: the six-tone override for the selected Emoji, where tones apply.
+    ///
+    /// - Returns: whether the key was consumed. It isn't when the Emoji takes
+    ///   no tones, so ⌥Enter falls through to an ordinary submit.
+    @discardableResult
+    func toggleSkinTonePicker() -> Bool {
+        guard phase == .browsingEmoji else { return false }
+        if emojiVM.isTonePickerOpen {
+            emojiVM.closeTonePicker()
+            return true
+        }
+        return emojiVM.openTonePicker()
+    }
+
     func advancePhase() {
         switch phase {
         case .searchingSubject:
-            guard subjectVM.selectedIndex < subjectVM.results.count else { return }
-            let subject = subjectVM.results[subjectVM.selectedIndex]
+            let results = subjectVM.results
+            guard subjectVM.selectedIndex < results.count else { return }
+            let subject = results[subjectVM.selectedIndex]
             selectedSubject = subject
 
             if case .builtIn(.clipboard) = subject.kind {
@@ -209,6 +300,19 @@ class CommandCoordinator {
                 return
             }
 
+            if case .builtIn(.emoji) = subject.kind {
+                enterEmojiMode()
+                return
+            }
+
+            actionVM.loadActions(for: subject)
+            phase = .pickingAction
+            onPhaseChange?()
+
+        case .browsingEmoji:
+            guard let emoji = emojiVM.resolvedSelection else { return }
+            let subject = Subject(emoji: emoji)
+            selectedSubject = subject
             actionVM.loadActions(for: subject)
             phase = .pickingAction
             onPhaseChange?()
@@ -241,12 +345,14 @@ class CommandCoordinator {
         switch phase {
         case .searchingSubject:
             break
-        case .browsingClipboard:
+        case .browsingClipboard, .browsingEmoji:
             phase = .searchingSubject
             onPhaseChange?()
         case .pickingAction:
             if selectedClipboardItem != nil {
                 phase = .browsingClipboard
+            } else if selectedSubject?.emoji != nil {
+                phase = .browsingEmoji
             } else {
                 phase = .searchingSubject
             }
@@ -276,8 +382,9 @@ class CommandCoordinator {
     private func submitEffects() -> [Effect] {
         switch phase {
         case .searchingSubject:
-            guard subjectVM.selectedIndex < subjectVM.results.count else { return [] }
-            let subject = subjectVM.results[subjectVM.selectedIndex]
+            let results = subjectVM.results
+            guard subjectVM.selectedIndex < results.count else { return [] }
+            let subject = results[subjectVM.selectedIndex]
             if case .builtIn(.clipboard) = subject.kind {
                 selectedSubject = subject
                 clipboardVM.load()
@@ -285,6 +392,19 @@ class CommandCoordinator {
                 onPhaseChange?()
                 return []
             }
+            if case .builtIn(.emoji) = subject.kind {
+                selectedSubject = subject
+                enterEmojiMode()
+                return []
+            }
+            return defaultEffects(for: subject)
+
+        case .browsingEmoji:
+            guard let emoji = emojiVM.resolvedSelection else { return [] }
+            emojiVM.recordSelectionUse()
+            emojiVM.closeTonePicker()
+            let subject = Subject(emoji: emoji)
+            selectedSubject = subject
             return defaultEffects(for: subject)
 
         case .browsingClipboard:
@@ -328,6 +448,26 @@ class CommandCoordinator {
         onPhaseChange?()
     }
 
+    /// Asks that the next `reset` open straight into Emoji Mode.
+    ///
+    /// The panel resets itself as it appears, so the hotkey cannot simply set
+    /// the phase first — it would be wiped. It leaves this instead, and reset
+    /// honours it once.
+    func requestEmojiMode() {
+        wantsEmojiMode = true
+    }
+
+    private var wantsEmojiMode = false
+
+    /// Emoji Mode with an empty Query, Recents on top, ready to type.
+    func enterEmojiMode() {
+        selectedSubject = Subject.emojiBuiltIn
+        emojiVM.load()
+        phase = .browsingEmoji
+        syncQueryDisplay()
+        onPhaseChange?()
+    }
+
     func reset() {
         phase = .searchingSubject
         selectedSubject = nil
@@ -338,6 +478,13 @@ class CommandCoordinator {
         actionVM.reset()
         targetVM.reset()
         clipboardVM.reset()
+        emojiVM.reset()
+
+        if wantsEmojiMode {
+            wantsEmojiMode = false
+            enterEmojiMode()
+        }
+
         syncQueryDisplay()
         focusTrigger.toggle()
     }
@@ -380,6 +527,8 @@ class CommandCoordinator {
             return .text(item.content)
         case .text(let rawText):
             return .text(rawText)
+        case .emoji(let emoji):
+            return .text(emoji.string)
         default:
             return subject.url.map { .fileURL($0) }
         }
@@ -390,6 +539,7 @@ class CommandCoordinator {
         switch subject.kind {
         case .clipboard(let item): item.isImage ? nil : item.content
         case .text(let rawText): rawText
+        case .emoji(let emoji): emoji.string
         default: nil
         }
     }
@@ -415,9 +565,13 @@ class CommandCoordinator {
             return effects(for: .init(
                 name: "Paste", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .paste
             ), on: subject)
+        case .emoji(let emoji):
+            // The Clipboard paste path, unchanged: write, dismiss, hand
+            // activation back, then synthesise Cmd+V.
+            return [.paste(.text(emoji.string))]
         case .builtIn(.settings):
             return [.hide, .showSettings]
-        case .builtIn(.clipboard):
+        case .builtIn(.clipboard), .builtIn(.emoji):
             return []
         }
     }

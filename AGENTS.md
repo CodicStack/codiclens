@@ -8,6 +8,22 @@ macOS Spotlight-replacement launcher built with Swift, SwiftUI, and AppKit.
 xcodebuild -project codiclens.xcodeproj -scheme codiclens -configuration Debug build
 ```
 
+## Regenerating the emoji index
+
+`codiclens/emoji-index.json` and `codiclens/emoji-data-license.txt` are generated,
+not hand-edited. Rebuild them from the repository root:
+
+```bash
+swift Scripts/generate-emoji-index.swift
+```
+
+It downloads Unicode `emoji-test.txt` and both CLDR annotation files, joins them,
+and reports the row count. Expect **1,914 rows, 2,030 skin-tone variants across
+330 bases, 0 rows missing keywords** — it exits non-zero if any row comes out
+keyword-less or any variant cannot be filed under a base. `--unicode` and
+`--cldr` bump the versions; `--cache <dir>` reuses downloads. See
+`docs/adr/0005-bundled-emoji-dataset.md`.
+
 ## Project Structure
 
 ```
@@ -159,3 +175,8 @@ User types query → Enter
 | `Subject.swift` | Subject model (app/file/folder/text/builtIn) |
 | `SubjectAction.swift` | Action model, text transforms, action handlers |
 | `FuzzyMatch.swift` | Fuzzy scoring (exact/prefix/substring/subsequence/levenshtein) |
+| `Emoji.swift` | Emoji model, SkinTone, default-tone preference, glyph→NSImage rendering |
+| `EmojiIndex.swift` | Bundled emoji dataset: lookup, grouping, skin-tone variants |
+| `EmojiSearchVM.swift` | Emoji ranking, grid sections, grid keyboard model |
+| `EmojiRecentsStore.swift` | Emoji Recents persistence (Application Support) |
+| `EmojiGridView.swift` | Results Slab in grid Mode |
