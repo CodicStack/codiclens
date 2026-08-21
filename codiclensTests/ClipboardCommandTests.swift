@@ -11,6 +11,7 @@ struct ClipboardCommandTests {
     private func makeCoordinator(
         seededWith texts: [String] = []
     ) -> (CommandCoordinator, RecordingEffectRunner, ClipboardHistory) {
+        useInertAppIndex()
         let runner = RecordingEffectRunner()
         let history = ClipboardHistory(store: InMemoryClipboardStore())
         for text in texts {
