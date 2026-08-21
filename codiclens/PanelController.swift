@@ -16,7 +16,6 @@ class PanelController {
     private(set) var quickLookActive = false
     private var savePanelActive = false
     private let focus = FocusHandoff()
-    private var showResultsWork: DispatchWorkItem?
     private var animatingTargetWidth: CGFloat?
     private var animatingTargetOriginX: CGFloat?
     private var isTornDown = false
@@ -145,23 +144,17 @@ class PanelController {
         let hasContent = !results.isEmpty || hasQuery || isSearching
 
         guard hasContent, cardPanel.isVisible else {
-            showResultsWork?.cancel()
-            showResultsWork = nil
             resultsPanel.orderOut(nil)
             return
         }
 
-        if resultsPanel.isVisible {
-            positionResultsPanel()
-        } else {
-            showResultsWork?.cancel()
-            let work = DispatchWorkItem { [weak self] in
-                guard let self, self.cardPanel.isVisible else { return }
-                self.positionResultsPanel()
-                self.resultsPanel.orderFront(nil)
-            }
-            showResultsWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+        // Positioned and shown in the same turn of the run loop. There was a
+        // 0.25s delay here, which is what made the Panel feel slow to arrive;
+        // it was also a timing hack, which AGENTS.md forbids. Nothing needs
+        // waiting for — the frame is known before the window is ordered in.
+        positionResultsPanel()
+        if !resultsPanel.isVisible {
+            resultsPanel.orderFront(nil)
         }
     }
 
@@ -189,8 +182,8 @@ class PanelController {
         animatingTargetOriginX = newX
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.12
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.duration = Motion.resizeDuration
+            context.timingFunction = Motion.resizeTimingFunction
             self.cardPanel.animator().setFrame(
                 NSRect(x: newX, y: currentFrame.origin.y, width: newWidth, height: self.cardHeight),
                 display: false
@@ -225,8 +218,6 @@ class PanelController {
     /// observers, the observation tracking loop, and the windows themselves.
     /// Called from `applicationWillTerminate`.
     func tearDown() {
-        showResultsWork?.cancel()
-        showResultsWork = nil
         isTornDown = true
         removeObservers()
         quickLookHelper.dismiss()
@@ -276,8 +267,6 @@ class PanelController {
     }
 
     func hidePanel() {
-        showResultsWork?.cancel()
-        showResultsWork = nil
         dismissQuickLook()
         resultsPanel.orderOut(nil)
         cardPanel.orderOut(nil)
@@ -288,8 +277,6 @@ class PanelController {
     /// Dismisses, hands activation back to whatever was frontmost, and only
     /// then fires the paste — otherwise the keystroke lands on codiclens.
     private func pasteAndHide(simulateAction: @escaping () -> Void) {
-        showResultsWork?.cancel()
-        showResultsWork = nil
         dismissQuickLook()
         removeObservers()
         resultsPanel.orderOut(nil)

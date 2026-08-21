@@ -97,15 +97,21 @@ enum Style {
 /// every app icon it sat next to.
 private struct Palette {
 
-    /// Tint mixed into the glass of a Slab or an unfocused Card.
-    let glassTint: Color
+    /// Tint mixed into a Slab's glass, or nil for none.
+    ///
+    /// Kept tiny or absent on purpose. A tint heavy enough to read as a colour
+    /// stops the glass being glass — `.regular.tint(.white.opacity(0.58))` is a
+    /// white wash over a blur, which is what "material" looks like. The blur and
+    /// the specular edge that `.regular` already provides are the effect; a tint
+    /// is only ever a nudge for legibility.
+    let glassTint: Color?
 
     /// An unfocused Card: present, but plainly not where the keyboard is.
     let cardRim: Color
-    let recessedFill: Color
+    let recessedFill: Color?
     /// The focused Card. Brighter than its neighbours and a touch more defined
     /// at the edge — that difference is the whole focus signal.
-    let raisedFill: Color
+    let raisedFill: Color?
     let raisedRim: Color
     /// The Card you are typing into. The least transparent thing in the app,
     /// deliberately: 13pt body text over a wallpaper is unreadable otherwise.
@@ -120,10 +126,10 @@ private struct Palette {
     let chipRim: Color
 
     static let dark = Palette(
-        glassTint: .black.opacity(0.28),
+        glassTint: .black.opacity(0.10),
         cardRim: .white.opacity(0.10),
-        recessedFill: .white.opacity(0.05),
-        raisedFill: .white.opacity(0.13),
+        recessedFill: nil,
+        raisedFill: .white.opacity(0.09),
         raisedRim: .white.opacity(0.22),
         writingFill: .black.opacity(0.52),
         selectionFill: .white.opacity(0.13),
@@ -132,10 +138,10 @@ private struct Palette {
     )
 
     static let light = Palette(
-        glassTint: .white.opacity(0.58),
+        glassTint: .white.opacity(0.14),
         cardRim: .black.opacity(0.08),
-        recessedFill: .white.opacity(0.34),
-        raisedFill: .white.opacity(0.82),
+        recessedFill: nil,
+        raisedFill: .white.opacity(0.30),
         raisedRim: .black.opacity(0.13),
         writingFill: .white.opacity(0.80),
         selectionFill: .black.opacity(0.07),
@@ -150,13 +156,21 @@ private struct Palette {
 
 // MARK: - Tier modifiers
 
+/// `.regular` glass, tinted only if there is a tint. There is no
+/// `.tint(nil)` — passing a clear colour still counts as a tint layer — so the
+/// two cases have to be built separately.
+private func glass(_ tint: Color?) -> Glass {
+    guard let tint else { return .regular }
+    return .regular.tint(tint)
+}
+
 private struct SlabSurface: ViewModifier {
     @Environment(\.colorScheme) private var scheme
 
     func body(content: Content) -> some View {
         let palette = Palette.of(scheme)
         return content
-            .glassEffect(.regular.tint(palette.glassTint), in: Style.slabShape)
+            .glassEffect(glass(palette.glassTint), in: Style.slabShape)
             .clipShape(Style.slabShape)
     }
 }
@@ -178,7 +192,7 @@ private struct CardSurface: ViewModifier {
             : (focused ? palette.raisedFill : palette.recessedFill)
         let rim = focused ? palette.raisedRim : palette.cardRim
         return content
-            .glassEffect(.regular.tint(fill), in: Style.cardShape)
+            .glassEffect(glass(fill), in: Style.cardShape)
             .clipShape(Style.cardShape)
             .overlay {
                 Style.cardShape.strokeBorder(rim, lineWidth: Style.hairline)
