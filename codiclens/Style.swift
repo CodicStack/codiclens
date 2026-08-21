@@ -162,12 +162,17 @@ private struct Palette {
 
     static let dark = Palette(
         tint: .black,
-        // Heavier than light mode's. A black tint over glass that is already
-        // dark barely registers, so a value that reads as "smoked glass" here
-        // has to be roughly double what reads as "frosted" in light.
-        base: 0.34,
+        // Much heavier than light mode's, for a reason that is about contrast
+        // rather than taste. Dark appearance draws primary text in white, and
+        // clear glass passes whatever is behind the Panel straight through — so
+        // over a light document the Slab goes pale and white-on-pale is
+        // unreadable. The tint is what guarantees a dark ground for that text
+        // regardless of what happens to be underneath. Light mode needs far
+        // less, because dark text on a light surface is the same polarity as
+        // whatever it is floating over.
+        base: 0.58,
         highlight: .white.opacity(0.16),
-        writingLift: 0.26,
+        writingLift: 0.22,
         slabRim: .white.opacity(0.10),
         cardRim: .white.opacity(0.12),
         raisedRim: .white.opacity(0.26),
