@@ -10,9 +10,10 @@ import SwiftUI
 ///
 /// - **surface** — a Slab. Liquid Glass, its own hairline rim, its own shadow.
 ///   `slabSurface()`.
-/// - **raised** — the focused Card. An accent-tinted fill and an accent stroke;
-///   the tint *is* the selection signal, so there is no focus ring.
-///   `cardSurface(focused: true)`.
+/// - **raised** — the focused Card. A neutral lift out of the Slab plus an
+///   accent stroke. The stroke is the focus signal; the fill stays neutral,
+///   because accent across a whole Card reads as a coloured box rather than as
+///   a tint. `cardSurface(focused: true)`.
 /// - **recessed** — an unfocused Card, and every Result row or grid cell.
 ///   A neutral well sunk into the Slab. `cardSurface(focused: false)` and
 ///   `resultSurface(selected:)`.
@@ -24,13 +25,25 @@ enum Style {
 
     // MARK: - Geometry
 
-    /// A Slab — the outer glass surface.
-    static let slabRadius: CGFloat = 20
-    /// A Card inside the Card Slab. Deliberately *not* concentric with the
-    /// Slab: outer larger, inner smaller, which is Apple's convention.
-    static let cardRadius: CGFloat = 14
-    /// A Result row or grid cell. Completes the 20 → 14 → 10 ladder.
-    static let resultRadius: CGFloat = 10
+    /// A Slab — the outer glass surface, and the container everything else is
+    /// concentric with.
+    static let slabRadius: CGFloat = 28
+
+    /// A Card inside the Card Slab.
+    ///
+    /// Genuinely concentric: a Card sits `cardInset` in from the Slab's edge, so
+    /// its radius is the Slab's less that inset. Concentric corners are what
+    /// make a nested rounded rectangle look nested rather than merely rounded —
+    /// the two curves stay parallel instead of drifting apart at the corner.
+    static let cardRadius: CGFloat = concentric(inset: cardInset)
+
+    /// A Result row or grid cell.
+    ///
+    /// Deliberately *not* derived. A row lives in the middle of a list, not in
+    /// the Slab's corner, so it has nothing to be concentric with; taking the
+    /// concentric value would give a 46pt row a 22pt radius and turn it into a
+    /// capsule.
+    static let resultRadius: CGFloat = 12
 
     static let padding: CGFloat = 12
     static let gap: CGFloat = 12
@@ -41,8 +54,9 @@ enum Style {
     static let shadowRadius: CGFloat = 24
     static let shadowOffsetY: CGFloat = 8
 
-    /// Breathing room a Card keeps around itself inside the Card Slab.
-    static let cardInset: CGFloat = 4
+    /// A Card's inset from the Card Slab's edge. The Card Slab must pad by this
+    /// much, or `cardRadius` is concentric with nothing.
+    static let cardInset: CGFloat = 10
     /// A Result's own inset from the Slab edge, so its selection fill reads as a
     /// row inside the Slab rather than a band across it.
     static let resultInset: CGFloat = 6
@@ -51,6 +65,17 @@ enum Style {
     static let rowPaddingV: CGFloat = 7
     static let chipPaddingH: CGFloat = 7
     static let chipPaddingV: CGFloat = 3
+
+    /// The radius that keeps a shape inset by `inset` concentric with the Slab.
+    ///
+    /// macOS 26 ships `ConcentricRectangle`, which derives this from the
+    /// enclosing `containerShape` automatically. We do the arithmetic instead
+    /// because `ConcentricRectangle` is a `Shape` but not an `InsettableShape`,
+    /// so it has no `strokeBorder` — and every tier here draws a hairline rim.
+    /// Revisit if it gains the conformance.
+    static func concentric(inset: CGFloat) -> CGFloat {
+        max(inset, slabRadius - inset)
+    }
 
     // MARK: - Shapes
 
@@ -91,6 +116,10 @@ private struct Palette {
     // Card
     let cardRim: Color
     let recessedFill: Color
+    /// The focused Card's fill. Neutral, not accent-tinted: a Card is a large
+    /// surface, and an accent fill across it at any legible alpha stops reading
+    /// as a tint and becomes a coloured box. The accent lives in `raisedRim`
+    /// instead, where it signals focus without painting the Panel.
     let raisedFill: Color
     let raisedRim: Color
     /// The Card you are typing into. The least transparent thing in the app,
@@ -111,8 +140,8 @@ private struct Palette {
         shadow: .black.opacity(0.28),
         cardRim: .white.opacity(0.10),
         recessedFill: .black.opacity(0.22),
-        raisedFill: .accentColor.opacity(0.22),
-        raisedRim: .accentColor.opacity(0.55),
+        raisedFill: .white.opacity(0.10),
+        raisedRim: .accentColor.opacity(0.50),
         writingFill: .black.opacity(0.52),
         selectionFill: .accentColor.opacity(0.28),
         selectionRim: .accentColor.opacity(0.34),
@@ -126,8 +155,8 @@ private struct Palette {
         shadow: .black.opacity(0.18),
         cardRim: .black.opacity(0.10),
         recessedFill: .black.opacity(0.05),
-        raisedFill: .accentColor.opacity(0.14),
-        raisedRim: .accentColor.opacity(0.45),
+        raisedFill: .white.opacity(0.62),
+        raisedRim: .accentColor.opacity(0.40),
         writingFill: .white.opacity(0.72),
         selectionFill: .accentColor.opacity(0.18),
         selectionRim: .accentColor.opacity(0.30),
