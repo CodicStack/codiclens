@@ -44,3 +44,11 @@ extension ClipboardSearchVM: SearchScope {
         filteredItems.map { ResultDisplayItem(from: $0) }
     }
 }
+
+extension EmojiSearchVM: SearchScope {
+    /// Emoji are a grid Mode, so the real rendering is `EmojiGridView` reading
+    /// `sections`. This list form exists because the Results Slab still asks
+    /// every scope for rows, and because whether it is empty is what decides
+    /// the slab is worth showing at all.
+    var displayResults: [ResultDisplayItem] { displayItems }
+}

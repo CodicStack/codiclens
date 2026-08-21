@@ -83,7 +83,8 @@ class SubjectSearchVM {
     private static func makeBuiltIns() -> [Subject] {
         [
             builtIn(name: "Settings", symbol: "gear", kind: .builtIn(.settings)),
-            builtIn(name: "Clipboard", symbol: "clipboard", kind: .builtIn(.clipboard))
+            builtIn(name: "Clipboard", symbol: "clipboard", kind: .builtIn(.clipboard)),
+            Subject.emojiBuiltIn
         ]
     }
 

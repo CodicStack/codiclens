@@ -62,10 +62,19 @@ struct CardContainerView: View {
             coordinator.moveDown()
             return .handled
         }
+        .onKeyPress(.leftArrow) {
+            coordinator.moveLeft() ? .handled : .ignored
+        }
+        .onKeyPress(.rightArrow) {
+            coordinator.moveRight() ? .handled : .ignored
+        }
         .onKeyPress(.escape) {
             coordinator.handleEscape() ? .handled : .ignored
         }
         .onKeyPress { press in
+            if press.key == .return && press.modifiers.contains(.option) {
+                if coordinator.toggleSkinTonePicker() { return .handled }
+            }
             if press.key == .return {
                 coordinator.submit()
                 return .handled

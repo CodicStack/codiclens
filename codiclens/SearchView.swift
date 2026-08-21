@@ -10,7 +10,9 @@ struct ResultsListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !coordinator.currentResults.isEmpty {
+            if coordinator.isEmojiBrowsing {
+                EmojiGridView(coordinator: coordinator)
+            } else if !coordinator.currentResults.isEmpty {
                 header
                 Divider().padding(.horizontal, 10)
                 list
