@@ -69,6 +69,14 @@ class PanelController {
             self?.showSavePanel(data: data, fileName: name, contentType: type)
         }
 
+        // The OCR Text coming back the other way across the seam. Nothing here
+        // is panel-owned — no dismissal, no activation handoff — because the
+        // result lands *in* the Panel; this closure exists only because the
+        // coordinator must not import Vision.
+        runner.onOCRText = { [weak self] text in
+            self?.coordinator.receiveOCRText(text)
+        }
+
         quickLookHelper.onDismiss = { [weak self] in
             self?.quickLookDidClose()
         }

@@ -88,7 +88,7 @@ struct CardContainerView: View {
                 return .handled
             }
             if press.modifiers.contains(.command) && press.characters == "e" {
-                coordinator.toggleClipboardEdit()
+                coordinator.toggleTextSubjectEdit()
                 return .handled
             }
             if press.modifiers.contains(.command) &&
@@ -104,7 +104,7 @@ struct CardContainerView: View {
                let letter = ControlKey.letter(press.characters) {
                 switch letter {
                 case "e":
-                    coordinator.toggleClipboardEdit()
+                    coordinator.toggleTextSubjectEdit()
                     return .handled
                 case "j":
                     coordinator.moveDown()

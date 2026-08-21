@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 enum ActionIcon {
     case sfSymbol(String)
@@ -166,6 +167,19 @@ enum ActionHandler {
     case openFile, openWith, revealInFinder, moveToTrash
     case copyPath, quickLook
 
+    /// Reading the text out of an image Subject.
+    ///
+    /// Final in the sense that it takes no Target, and the one Final Action
+    /// that does not dismiss the Panel: the OCR Text lands in it. See
+    /// `docs/adr/0007-async-action-behind-the-effect-seam.md`.
+    case ocr
+
+    /// Promoting a Target into the Subject, so a thing found while looking for
+    /// something else can be acted on in its own right. Never executes
+    /// anything; always lands on the Action Phase. See
+    /// `docs/adr/0008-a-file-can-be-a-subject.md`.
+    case useAsSubject
+
     // Payloads: text subjects and clipboard entries alike
     case copy, paste, pastePlain, typeText
     case transform(TextTransform)
@@ -192,6 +206,30 @@ struct SubjectAction: Identifiable {
         return result
     }
 
+    /// Reading the text out of an image.
+    ///
+    /// Named for the acronym deliberately, against Apple's "Recognize Text" —
+    /// it is the word the user reaches for. See `CONTEXT.md`.
+    private static let ocr = SubjectAction(
+        name: "OCR",
+        icon: .sfSymbol("text.viewfinder"),
+        isFinal: true,
+        handler: .ocr
+    )
+
+    /// Promoting a Target into the Subject.
+    ///
+    /// Not Final: it needs a Target, and the Target is the whole point. Offered
+    /// wherever the Targets are files or apps — the Finder Subject, whose
+    /// Targets come out of `mdfind`, and a file or folder Subject. Not a Finder
+    /// special case; see `docs/adr/0008-a-file-can-be-a-subject.md`.
+    private static let useAsSubject = SubjectAction(
+        name: "Use as Subject",
+        icon: .sfSymbol("arrow.turn.up.left"),
+        isFinal: false,
+        handler: .useAsSubject
+    )
+
     private static func builtIn(for subject: Subject) -> [SubjectAction] {
         if case .app(let bundleId, _) = subject.kind, bundleId == "com.apple.finder" {
             return [
@@ -200,6 +238,7 @@ struct SubjectAction: Identifiable {
                 .init(name: "Copy Path", icon: .sfSymbol("doc.on.clipboard"), isFinal: false, handler: .copyPath),
                 .init(name: "Quick Look", icon: .sfSymbol("eye"), isFinal: false, handler: .quickLook),
                 .init(name: "Move to Trash", icon: .sfSymbol("trash"), isFinal: false, handler: .moveToTrash),
+                useAsSubject,
             ]
         }
 
@@ -213,15 +252,17 @@ struct SubjectAction: Identifiable {
                 .init(name: "Copy Path", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .copyPath),
             ]
 
-        case .file, .folder:
-            return [
-                .init(name: "Open", icon: .sfSymbol("doc"), isFinal: true, handler: .openFile),
-                .init(name: "Open With…", icon: .sfSymbol("arrow.up.forward.app.fill"), isFinal: false, handler: .openWith),
-                .init(name: "Reveal in Finder", icon: .sfSymbol("folder"), isFinal: true, handler: .revealInFinder),
-                .init(name: "Copy Path", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .copyPath),
-                .init(name: "Move to Trash", icon: .sfSymbol("trash"), isFinal: true, handler: .moveToTrash),
-                .init(name: "Quick Look", icon: .sfSymbol("eye"), isFinal: true, handler: .quickLook),
-            ]
+        // A file's content type decides whether it can be read, not its kind:
+        // an image file has OCR, a `.txt` and a folder do not. PDF
+        // deliberately does not conform to `.image` and is out of scope —
+        // `TargetSearchVM.imageExtensions` files `pdf` and `svg` under images
+        // for *thumbnails*, which is a different question and is not copied
+        // here.
+        case .file(let contentType):
+            return fileActions(includingOCR: contentType.conforms(to: .image))
+
+        case .folder:
+            return fileActions(includingOCR: false)
 
         case .builtIn(.settings):
             return [
@@ -255,6 +296,27 @@ struct SubjectAction: Identifiable {
         }
     }
 
+    /// What a file or a folder can have done to it.
+    ///
+    /// Reachable for the first time: `.file` and `.folder` were dead branches
+    /// until a Path Subject and "Use as Subject" started constructing them —
+    /// see `docs/adr/0008-a-file-can-be-a-subject.md`.
+    private static func fileActions(includingOCR: Bool) -> [SubjectAction] {
+        var actions: [SubjectAction] = [
+            .init(name: "Open", icon: .sfSymbol("doc"), isFinal: true, handler: .openFile),
+        ]
+        if includingOCR { actions.append(ocr) }
+        actions.append(contentsOf: [
+            .init(name: "Open With…", icon: .sfSymbol("arrow.up.forward.app.fill"), isFinal: false, handler: .openWith),
+            .init(name: "Reveal in Finder", icon: .sfSymbol("folder"), isFinal: true, handler: .revealInFinder),
+            .init(name: "Copy Path", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .copyPath),
+            .init(name: "Move to Trash", icon: .sfSymbol("trash"), isFinal: true, handler: .moveToTrash),
+            .init(name: "Quick Look", icon: .sfSymbol("eye"), isFinal: true, handler: .quickLook),
+            useAsSubject,
+        ])
+        return actions
+    }
+
     private static func clipboardActions(for item: ClipboardItem) -> [SubjectAction] {
         var actions: [SubjectAction] = [
             .init(name: "Paste", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .paste),
@@ -263,6 +325,7 @@ struct SubjectAction: Identifiable {
         ]
 
         if item.isImage {
+            actions.append(ocr)
             actions.append(.init(name: "Save Image…", icon: .sfSymbol("square.and.arrow.down"), isFinal: true, handler: .saveAs))
             actions.append(.init(name: "Open in Preview", icon: .sfSymbol("eye"), isFinal: true, handler: .openFile))
             actions.append(.init(name: "Copy Path", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .copyPath))

@@ -90,37 +90,85 @@ class CommandCoordinator {
         set { emojiVM.preferences.defaultSkinTone = newValue }
     }
 
-    var isEditingClipboardItem: Bool = false
-    var clipboardEditText: String = ""
+    // MARK: - Editing a text Subject
 
-    func toggleClipboardEdit() {
-        guard phase == .browsingClipboard else { return }
-        if isEditingClipboardItem {
-            saveClipboardEdit()
+    /// Whether the Subject Card is holding an editor rather than a preview.
+    var isEditingTextSubject: Bool = false
+
+    /// What the editor holds, until `saveTextSubjectEdit` commits it.
+    var textSubjectEditText: String = ""
+
+    /// The text Subject this Phase would edit, and its text.
+    ///
+    /// Editing is a **text Subject** capability, not a Clipboard one: a
+    /// Clipboard Item, OCR Text and a transform's output are all the same thing
+    /// to edit. This used to be gated on `phase == .browsingClipboard`, so only
+    /// the first of the three could be.
+    ///
+    /// While the Clipboard is being browsed the Subject has not been chosen
+    /// yet, so the selected entry stands in for it. An image has no text and is
+    /// refused in both branches.
+    private var editableTextSubject: (subject: Subject, text: String)? {
+        if phase == .browsingClipboard {
+            guard let item = currentClipboardItem, !item.isImage else { return nil }
+            return (Subject(clipboardItem: item), item.content)
+        }
+        guard let subject = selectedSubject else { return nil }
+        switch subject.kind {
+        case .text(let rawText):
+            return (subject, rawText)
+        case .clipboard(let item):
+            return item.isImage ? nil : (subject, item.content)
+        default:
+            return nil
+        }
+    }
+
+    /// Ctrl+E / Cmd+E: opens the editor, or saves the one that is open.
+    func toggleTextSubjectEdit() {
+        if isEditingTextSubject {
+            saveTextSubjectEdit()
             focusTrigger.toggle()
+            return
+        }
+        guard let editable = editableTextSubject else { return }
+        selectedSubject = editable.subject
+        textSubjectEditText = editable.text
+        isEditingTextSubject = true
+    }
+
+    /// Commits the editor. The Subject stays a text Subject, and its Actions
+    /// are reloaded because the text they were built for has changed — "Open
+    /// URL" comes and goes with it.
+    func saveTextSubjectEdit() {
+        guard isEditingTextSubject else { return }
+        isEditingTextSubject = false
+
+        let edited = textSubjectEditText
+        let newSubject: Subject
+
+        // A Clipboard Item is written through to history, because that is where
+        // it lives and Editing must not fork a copy of it. Anything else — OCR
+        // Text, a transform's output — is a text Subject with nowhere else to
+        // be. Clipboard History gains nothing new here: `PasteboardWatcher` is
+        // still its only writer, and OCR Text reaches it only if the user
+        // Copies or Pastes it.
+        if let item = selectedSubject?.clipboardItem ?? currentClipboardItem {
+            history.updateText(for: item, text: edited)
+            clipboardVM.load()
+            newSubject = Subject(clipboardItem: ClipboardItem(content: edited))
         } else {
-            let item = currentClipboardItem
-            guard let item, !item.isImage else { return }
-            selectedSubject = Subject(clipboardItem: item)
-            clipboardEditText = item.content
-            isEditingClipboardItem = true
+            newSubject = Subject(text: edited)
         }
+
+        selectedSubject = newSubject
+        actionVM.loadActions(for: newSubject)
     }
 
-    func saveClipboardEdit() {
-        guard isEditingClipboardItem else { return }
-        if let item = selectedClipboardItem ?? currentClipboardItem {
-            history.updateText(for: item, text: clipboardEditText)
-        }
-        isEditingClipboardItem = false
-        selectedSubject = Subject(clipboardItem: ClipboardItem(content: clipboardEditText))
-        clipboardVM.load()
-    }
-
-    func saveClipboardEditAndAdvance() {
-        saveClipboardEdit()
-        guard let subject = selectedSubject else { return }
-        actionVM.loadActions(for: subject)
+    /// Tab out of the editor: save, then go on to the Actions.
+    func saveTextSubjectEditAndAdvance() {
+        saveTextSubjectEdit()
+        guard selectedSubject != nil else { return }
         phase = .pickingAction
         onPhaseChange?()
     }
@@ -164,6 +212,23 @@ class CommandCoordinator {
         phase == .pickingTarget && targetVM.isSearching
     }
 
+    /// Whether OCR is running.
+    ///
+    /// A sibling of `isSearchInFlight` and deliberately not folded into it:
+    /// that flag belongs to Target search, it means "Searching…", and OCR is
+    /// not a search. This one means "Reading text…", and it is also the gate on
+    /// a second Enter — two OCR runs racing to retarget the same Subject would
+    /// have the loser overwrite the winner. See
+    /// `docs/adr/0007-async-action-behind-the-effect-seam.md`.
+    private(set) var isOCRInFlight = false
+
+    /// Whether the last OCR run found no text at all.
+    ///
+    /// The state the Panel shakes about, the same way it shakes about a Query
+    /// that matched nothing. Cleared as a run starts, so two barren images in a
+    /// row shake twice instead of once.
+    private(set) var ocrFoundNoText = false
+
     /// Whether zero Results means "nothing matched" rather than "not answered
     /// yet".
     ///
@@ -172,9 +237,12 @@ class CommandCoordinator {
     /// delayed. Subject search is the exception — it matches against the app
     /// Index, and until the first scan lands there is nothing to match against
     /// and no honest way to say "No results". Target search is answering out of
-    /// process, so it reports `isSearchInFlight` instead.
+    /// process, so it reports `isSearchInFlight` instead. OCR is not a search
+    /// at all, but while it runs the Slab is showing "Reading text…" and must
+    /// not be able to claim anything about Results either.
     var canReportNoResults: Bool {
         if isSearchInFlight { return false }
+        if isOCRInFlight { return false }
         if phase == .searchingSubject { return subjectVM.isIndexReady }
         return true
     }
@@ -226,8 +294,8 @@ class CommandCoordinator {
     /// Returns true if Escape was consumed (phase retreated or editor closed).
     /// Returns false if caller should dismiss the panel entirely.
     func handleEscape() -> Bool {
-        if isEditingClipboardItem {
-            isEditingClipboardItem = false
+        if isEditingTextSubject {
+            isEditingTextSubject = false
             focusTrigger.toggle()
             return true
         }
@@ -409,6 +477,10 @@ class CommandCoordinator {
     /// The effects are returned too, so tests can assert on them directly.
     @discardableResult
     func submit() -> [Effect] {
+        // A second Enter while OCR is running must do nothing at all. Not a
+        // debounce and not a delay: the run either is or is not in flight, and
+        // while it is, the answer it will bring back owns the Subject.
+        guard !isOCRInFlight else { return [] }
         let effects = submitEffects()
         runner.run(effects)
         return effects
@@ -473,14 +545,45 @@ class CommandCoordinator {
         }
     }
 
-    /// Replaces the subject with transformed text and reloads its actions.
-    private func retarget(at result: String) {
+    /// Replaces the Subject with a text one holding `result` and reloads its
+    /// Actions, staying in the current Phase.
+    ///
+    /// - Parameter writingTheQuery: whether `result` also becomes the Subject
+    ///   Query. A transform's output is the same length as its input, so it
+    ///   survives a one-line bar; OCR Text is a page of prose and
+    ///   `PanelLayout.queryFieldHeight` is a bar, not a row. Split into a
+    ///   parameter rather than written and then cleared, because a Query that
+    ///   is briefly a page long is still a Query that is a page long.
+    private func retarget(at result: String, writingTheQuery: Bool) {
         let newSubject = Subject(text: result)
         selectedSubject = newSubject
-        subjectVM.searchText = result
+        if writingTheQuery { subjectVM.searchText = result }
         actionVM.loadActions(for: newSubject)
         syncQueryDisplay()
         onPhaseChange?()
+    }
+
+    /// The OCR Text, handed back by the runner.
+    ///
+    /// The other half of the Effect seam: `submit` returned `.ocr(url)` and
+    /// nothing else, and this is where the answer arrives. A test calls it
+    /// directly with a canned string, which is why Vision never runs under
+    /// test — see `docs/adr/0007-async-action-behind-the-effect-seam.md`.
+    ///
+    /// An image with no readable text produces **no** OCR Text, so no empty
+    /// text Subject is ever created: the Subject is left exactly as it was —
+    /// a Clipboard Image is still an image, still in history — and the Panel
+    /// shakes instead.
+    func receiveOCRText(_ text: String?) {
+        guard isOCRInFlight else { return }
+        isOCRInFlight = false
+
+        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            ocrFoundNoText = true
+            return
+        }
+
+        retarget(at: text, writingTheQuery: false)
     }
 
     /// Asks that the next `reset` open straight into Emoji Mode.
@@ -507,8 +610,10 @@ class CommandCoordinator {
         phase = .searchingSubject
         selectedSubject = nil
         selectedAction = nil
-        isEditingClipboardItem = false
-        clipboardEditText = ""
+        isEditingTextSubject = false
+        textSubjectEditText = ""
+        isOCRInFlight = false
+        ocrFoundNoText = false
         subjectVM.isSearchCommitted = true
         actionVM.reset()
         targetVM.reset()
@@ -666,6 +771,39 @@ class CommandCoordinator {
                 selectedIndex: 0
             ))]
 
+        // MARK: Images
+
+        case .ocr:
+            // A URL crosses the seam, never image bytes — and `fileURL` already
+            // resolves one for both an image file and a Clipboard Image. No
+            // Vision here, and no `await`: this method returns Effects, and
+            // that is the whole reason it is reachable from a test.
+            guard let url = fileURL(for: subject, target: target) else { return [] }
+            isOCRInFlight = true
+            ocrFoundNoText = false
+            // **No `.hide`.** The OCR Text lands *in* the Panel, so the Panel
+            // has to still be there when it arrives. See
+            // `docs/adr/0007-async-action-behind-the-effect-seam.md`.
+            return [.ocr(url)]
+
+        // MARK: Promotion
+
+        case .useAsSubject:
+            // One rule: any Target with a URL becomes the Subject, and what it
+            // *is* comes from the same resolver a typed path goes through. The
+            // Phase lands on Actions rather than executing anything, and the
+            // Card row goes from three Cards to two — which `cardCount`
+            // already animates.
+            guard let url = target?.url, let promoted = PathSubject.subject(for: url) else {
+                return []
+            }
+            selectedSubject = promoted
+            selectedAction = nil
+            actionVM.loadActions(for: promoted)
+            phase = .pickingAction
+            onPhaseChange?()
+            return []
+
         // MARK: Payloads
 
         case .copy:
@@ -774,6 +912,16 @@ class CommandCoordinator {
     /// Transforming a clipboard entry rewrites it in history and stays in the
     /// browser; transforming a text subject feeds the result back in so
     /// transforms can be chained.
+    ///
+    /// **OCR does not come through here, and must not.** It has the same shape
+    /// — an Action on a Subject that produces text — which is exactly why this
+    /// note is here: the clipboard branch below rewrites the Clipboard Item
+    /// *in place*, and a Clipboard Image rewritten as its own OCR Text is an
+    /// image that is gone. OCR always retargets: the Subject becomes the OCR
+    /// Text and the Clipboard Image stays exactly as it was, in history, still
+    /// an image. That asymmetry is the whole difference between transforming a
+    /// thing and reading something out of it, and it is what someone will try
+    /// to unify.
     private func transformEffects(
         _ transform: TextTransform,
         on subject: Subject,
@@ -782,7 +930,7 @@ class CommandCoordinator {
         let result = transform.apply(text)
 
         guard let item = subject.clipboardItem else {
-            retarget(at: result)
+            retarget(at: result, writingTheQuery: true)
             return []
         }
 

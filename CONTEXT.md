@@ -87,3 +87,36 @@ _Avoid_: focus restore, app switch
 **Motion**:
 The app's animation vocabulary. Only three curves exist, and only Panel appearance, Panel dismissal, and Slab resizing use them. Everything else changes instantly and on purpose.
 _Avoid_: transitions, effects, FX
+
+### Reading text out of images
+
+**OCR**:
+The Action that reads the text out of an image Subject. Named for the acronym
+deliberately, against Apple's "Recognize Text" — it is the word the user reaches
+for. Only an image Subject has it.
+_Avoid_: text recognition, scan, extract, read
+
+**OCR Text**:
+What OCR produces: the recognised characters, as one string, which becomes a
+text Subject in place of the image. An image with no readable text produces no
+OCR Text at all — never empty OCR Text.
+_Avoid_: transcript, recognised text, output
+
+**Use as Subject**:
+The Action that promotes a Target into the Subject, so a thing found while
+looking for something else can be acted on in its own right. Always lands on the
+Action Phase, never executes anything.
+_Avoid_: make subject, promote, pick, choose
+
+**Editing**:
+Changing a text Subject's text in its own Card. Any text Subject can be edited —
+a Clipboard Item, OCR Text, or the output of a transform. Not a Clipboard
+capability; a text Subject capability.
+_Avoid_: inline edit, rename, amend
+
+**Path Subject**:
+A file or folder named by typing its path. A Query beginning `/` or `~` is a
+path and nothing else — it cannot collide with an app name, so it never competes
+with the Index. It resolves to exactly one Subject; a path that does not exist
+resolves to none and the Panel shakes.
+_Avoid_: file subject, browse, navigate, completion

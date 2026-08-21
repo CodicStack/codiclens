@@ -52,6 +52,18 @@ class TargetSearchVM {
         searchText = ""
         isFileSearchMode = false
 
+        // "Use as Subject" finds a file or an app the same way Finder's own
+        // Actions do — the same `mdfind` Target list, reached from a different
+        // Subject. One rule rather than a Finder special case; see
+        // `docs/adr/0008-a-file-can-be-a-subject.md`.
+        if case .useAsSubject = action.handler {
+            isFileSearchMode = true
+            allTargets = []
+            filteredTargets = []
+            selectedIndex = 0
+            return
+        }
+
         if case .app(let bundleId, _) = subject.kind, bundleId == "com.apple.finder" {
             isFileSearchMode = true
             allTargets = []
