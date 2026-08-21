@@ -154,7 +154,7 @@ struct CardContainerView: View {
                     )
             }
         }
-        .animation(.spring(response: 0.15, dampingFraction: 0.8), value: coordinator.cardCount)
+        .animation(Motion.resize, value: coordinator.cardCount)
         .padding(6)
     }
 }

@@ -12,7 +12,6 @@ class PanelController {
     private var clickMonitor: Any?
     private var deactivationObserver: Any?
     private var appSwitchObserver: Any?
-    private var resultsObservation: Any?
     private let quickLookHelper = QuickLookHelper()
     private(set) var quickLookActive = false
     private var savePanelActive = false
@@ -115,8 +114,15 @@ class PanelController {
         CGFloat(count) * cardWidth + 20
     }
 
+    /// Re-arms itself on every change, because `withObservationTracking` fires
+    /// its `onChange` exactly once.
+    ///
+    /// There is nothing to hold on to: `withObservationTracking(_:onChange:)`
+    /// returns the *tracked* closure's value, which here is `Void`. Storing that
+    /// and nilling it in `tearDown()` cancelled nothing and read as if it did.
+    /// `isTornDown` is what actually stops the loop.
     private func observeResults() {
-        resultsObservation = withObservationTracking {
+        withObservationTracking {
             _ = coordinator.currentResults
             _ = coordinator.currentQuery
             _ = coordinator.currentSelectedIndex
@@ -222,7 +228,6 @@ class PanelController {
         showResultsWork?.cancel()
         showResultsWork = nil
         isTornDown = true
-        resultsObservation = nil
         removeObservers()
         quickLookHelper.dismiss()
         resultsPanel.orderOut(nil)

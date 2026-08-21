@@ -16,7 +16,12 @@ class FloatingPanel: NSPanel {
         level = .floating
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
+        // Never true. AppKit derives a window shadow from the content's alpha
+        // mask, and this Panel's content is transparent glass with soft edges.
+        // The result is a ragged wavy contour traced around the content plus a
+        // ghost second outline — see docs/DESIGN-HANDOFF.md. Separation is the
+        // content's job, not the window's.
+        hasShadow = false
         hidesOnDeactivate = false
         becomesKeyOnlyIfNeeded = false
         isMovableByWindowBackground = false
