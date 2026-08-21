@@ -97,25 +97,41 @@ enum Style {
 /// every app icon it sat next to.
 private struct Palette {
 
-    /// Tint mixed into a Slab's glass, or nil for none.
+    /// The one colour every glass surface is tinted with.
     ///
-    /// Kept tiny or absent on purpose. A tint heavy enough to read as a colour
-    /// stops the glass being glass — `.regular.tint(.white.opacity(0.58))` is a
-    /// white wash over a blur, which is what "material" looks like. The blur and
-    /// the specular edge that `.regular` already provides are the effect; a tint
-    /// is only ever a nudge for legibility.
-    let glassTint: Color?
+    /// White in light, black in dark — and **nothing mixes the two**. An earlier
+    /// version tinted a Slab with black 0.16 while tinting a focused Card with
+    /// white 0.09, in the same appearance. Those are not two weights of one
+    /// material, they are two different materials, and the Cards visibly did not
+    /// belong to the Slab.
+    let tint: Color
 
+    /// The tint weight **every** surface shares: Slab, Card, focused or not.
+    ///
+    /// This is the value that makes the app look like one sheet of glass cut
+    /// into pieces rather than a pile of unrelated panes. Every other surface
+    /// weight below is this number plus a small delta — expressed as a delta
+    /// precisely so it cannot drift into a different material again.
+    let base: Double
+
+    /// Added for the focused Card. Small: it only has to be *visibly* brighter
+    /// than its neighbour, and the rim carries the rest of the signal.
+    let focusLift: Double
+
+    /// Added for a Card holding editable body text.
+    ///
+    /// The one genuinely large delta, and the only surface that also swaps to
+    /// `.regular`. 13pt glyphs over a code editor are unreadable through clear
+    /// glass. Even here the tint stays the same *colour* as everything else, so
+    /// the Card reads as a frostier piece of the same sheet rather than a
+    /// different substance — it used to be white 0.80 against a 0.22 Slab.
+    let writingLift: Double
+
+    let slabRim: Color
     /// An unfocused Card: present, but plainly not where the keyboard is.
     let cardRim: Color
-    let recessedFill: Color?
-    /// The focused Card. Brighter than its neighbours and a touch more defined
-    /// at the edge — that difference is the whole focus signal.
-    let raisedFill: Color?
+    /// The focused Card — a touch more defined at the edge.
     let raisedRim: Color
-    /// The Card you are typing into. The least transparent thing in the app,
-    /// deliberately: 13pt body text over a wallpaper is unreadable otherwise.
-    let writingFill: Color
 
     /// The selected Result. A neutral lift, strong enough to find at a glance
     /// and quiet enough to sit under a row of app icons.
@@ -125,25 +141,35 @@ private struct Palette {
     let chipFill: Color
     let chipRim: Color
 
+    // MARK: Derived surface tints
+
+    /// Slab and unfocused Card are deliberately identical. The Slab is not a
+    /// different material from the Cards floating above it.
+    var surfaceTint: Color { tint.opacity(base) }
+    var focusedTint: Color { tint.opacity(base + focusLift) }
+    var writingTint: Color { tint.opacity(base + writingLift) }
+
     static let dark = Palette(
-        glassTint: .black.opacity(0.16),
-        cardRim: .white.opacity(0.14),
-        recessedFill: nil,
-        raisedFill: .white.opacity(0.09),
-        raisedRim: .white.opacity(0.28),
-        writingFill: .black.opacity(0.52),
+        tint: .black,
+        base: 0.16,
+        focusLift: 0.10,
+        writingLift: 0.30,
+        slabRim: .white.opacity(0.10),
+        cardRim: .white.opacity(0.12),
+        raisedRim: .white.opacity(0.26),
         selectionFill: .white.opacity(0.13),
         chipFill: .white.opacity(0.09),
         chipRim: .white.opacity(0.10)
     )
 
     static let light = Palette(
-        glassTint: .white.opacity(0.22),
+        tint: .white,
+        base: 0.24,
+        focusLift: 0.12,
+        writingLift: 0.34,
+        slabRim: .black.opacity(0.08),
         cardRim: .black.opacity(0.10),
-        recessedFill: nil,
-        raisedFill: .white.opacity(0.30),
         raisedRim: .black.opacity(0.16),
-        writingFill: .white.opacity(0.80),
         selectionFill: .black.opacity(0.07),
         chipFill: .white.opacity(0.62),
         chipRim: .black.opacity(0.07)
@@ -156,9 +182,7 @@ private struct Palette {
 
 // MARK: - Tier modifiers
 
-/// Glass, tinted only if there is a tint. There is no `.tint(nil)` — passing a
-/// clear colour still counts as a tint layer — so the two cases have to be built
-/// separately.
+/// Glass at one shared tint.
 ///
 /// **`.clear`, not `.regular`.** `.regular` is the heavily-blurred material; it
 /// obscures what is behind it, which is what made these surfaces read as opaque
@@ -169,9 +193,8 @@ private struct Palette {
 /// `readable` opts back into `.regular`. One case needs it: a Card holding
 /// editable body text, where 13pt glyphs over a wallpaper or a code editor are
 /// genuinely unreadable through clear glass.
-private func glass(_ tint: Color?, readable: Bool = false) -> Glass {
+private func glass(_ tint: Color, readable: Bool = false) -> Glass {
     let base: Glass = readable ? .regular : .clear
-    guard let tint else { return base }
     return base.tint(tint)
 }
 
@@ -181,7 +204,7 @@ private struct SlabSurface: ViewModifier {
     func body(content: Content) -> some View {
         let palette = Palette.of(scheme)
         return content
-            .glassEffect(glass(palette.glassTint), in: Style.slabShape)
+            .glassEffect(glass(palette.surfaceTint), in: Style.slabShape)
             .clipShape(Style.slabShape)
     }
 }
@@ -199,8 +222,8 @@ private struct CardSurface: ViewModifier {
     func body(content: Content) -> some View {
         let palette = Palette.of(scheme)
         let fill = writing
-            ? palette.writingFill
-            : (focused ? palette.raisedFill : palette.recessedFill)
+            ? palette.writingTint
+            : (focused ? palette.focusedTint : palette.surfaceTint)
         let rim = focused ? palette.raisedRim : palette.cardRim
         return content
             .glassEffect(glass(fill, readable: writing), in: Style.cardShape)
