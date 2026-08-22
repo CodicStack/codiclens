@@ -30,6 +30,7 @@ struct TargetCardView: View {
             }
         }
         .cardSurface(focused: isFocused)
+        .cardBeam(focused: isFocused)
         .padding(Style.cardInset)
     }
 

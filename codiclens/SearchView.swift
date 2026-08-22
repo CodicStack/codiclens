@@ -87,25 +87,17 @@ struct ResultsListView: View {
     /// OCR is running: a row, and never a bare spinner. A spinner on its own
     /// does not say what it is waiting for.
     ///
-    /// The spinner is a system `ProgressView` and **not** a fourth curve — see
-    /// the amendment to `docs/adr/0003-motion-budget.md`. The three curves are
-    /// transitions; a spinner loops, and reports progress rather than
-    /// decorating a transition.
-    ///
-    /// Under Reduce Motion it stops entirely, which `Motion.collapsed(_:)`
-    /// cannot express: that turns an `Animation` into a cross-fade, and a loop
-    /// has nothing to cross-fade to. So `Motion.isReduced` is read directly
-    /// here. The text stays either way, because the text is the part that is
-    /// true.
+    /// The spinner is the app's own `LoadingRing` — Decoration, in the sense
+    /// `docs/adr/0003-motion-budget.md` defines, and not a fourth curve. The
+    /// text stays under Reduce Motion because the text is the part that is true;
+    /// the ring's own absence is decided inside it, so this call site and the
+    /// one below are identical.
     ///
     /// It flashes on a fast image, knowingly. The alternative is a threshold
     /// before showing it, which is an `asyncAfter`.
     private var readingTextState: some View {
         HStack(spacing: 8) {
-            if !Motion.isReduced {
-                ProgressView()
-                    .controlSize(.small)
-            }
+            LoadingRing()
             Text("Reading text…")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
@@ -115,10 +107,14 @@ struct ResultsListView: View {
         .frame(minHeight: PanelLayout.messageRowHeight)
     }
 
+    /// A Target search is out of process and has not answered yet.
+    ///
+    /// The same `LoadingRing` as "Reading text…", and this is the case that used
+    /// to have no Reduce Motion guard at all while the other one did. One ring,
+    /// one rule, both states.
     private var searchingState: some View {
         HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
+            LoadingRing()
             Text("Searching…")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)

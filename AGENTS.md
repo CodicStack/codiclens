@@ -48,12 +48,67 @@ needs no `project.pbxproj` edit.
 
 - **`Style.swift` owns every radius, material, tint and rim.** No view outside it holds
   one, and no view outside it branches on `colorScheme`.
-- **`Motion.swift` owns every curve.** Exactly three exist — `entrance`, `resize`,
-  `snappy` — and only the Panel appearing, the Panel dismissing and a surface
-  resizing use them. Phase advances, Card content swaps and selection movement are
+- **`Motion.swift` owns every curve, in two categories.** A **Transition** carries
+  a change the user caused, and there are exactly three — `entrance`, `resize`,
+  `snappy` — used only by the Panel appearing, the Panel dismissing and a surface
+  resizing. Phase advances, Card content swaps and selection movement are
   instant *on purpose*: an animated highlight lags the keypress. A window frame
   change needs `Motion.resizeDuration` / `Motion.resizeTimingFunction`, because
   `NSAnimationContext` cannot take a SwiftUI `Animation`.
+  **Decoration** is the second category — `beamSweep` and `ringSpin` — and it is a
+  category rather than two more curves: the budget was never "three is the number",
+  it was *do not animate information*. A decoration carries nothing learnable,
+  delays nothing, is never given a threshold before it appears, and is **absent**
+  under Reduce Motion rather than collapsed (it reads `Motion.isReduced` directly,
+  because `collapsed(_:)` makes a cross-fade and a loop has nothing to cross-fade
+  to). The next animation that "just needs to show that something is happening" is
+  a transition wearing decoration's clothes and goes through the three curves. See
+  `docs/adr/0003-motion-budget.md`.
+- **The Border Beam belongs to a *Card* and means nothing.** It sweeps around
+  whichever Card takes the keyboard — `cardBeam(focused:)` on all three, applied
+  *between* `.cardSurface(...)` and `.padding(Style.cardInset)`, because the
+  padding sits outside the surface and a beam applied after it draws on the wrong
+  bounds. Exactly one Card is focused at a time and focus moves on every Tab,
+  Shift+Tab, Enter and Escape, so that is one sweep per Phase move with nothing to
+  de-duplicate. `CardBeam` is the policy, `borderBeam(trigger:)` the primitive;
+  keep them apart. It is **not** tied to OCR, to `isOCRInFlight`, to searching, or
+  to any in-flight state; that misreading is the way this feature gets broken.
+  **It was twice wrong before this, and neither was catchable by reading.** It was
+  built on the Slab and triggered by the Slab arriving, which fires once per
+  summon on the first keystroke and so was invisible in use; widening the trigger
+  left the surface wrong. Do not move it back to the Slab, and do not narrow the
+  trigger to arrival. A Card focused across a dismiss-and-resummon sees no
+  false→true edge and no `onAppear`, so it does not sweep on that summon — known,
+  documented on `CardBeam`, not a bug to fix twice.
+  `Style.beamSeamOffset` is now **exact** (0.6195), because every Card is one
+  size — it was a compromise across the Slab's variable proportions. Probe it, do
+  not compute it: the analytic `(1.5h + w) / 2(w + h)` happens to land within
+  0.0002 at radius 22 and that is luck, not a method. It shares one drawing primitive with the
+  Loading Ring — an animated `trim` along a stroked path — and nothing else.
+  Two things it must not become: a rotating **conic gradient**, which sweeps at a
+  constant *angular* rate and so races a wide Slab's long edges and crawls its
+  corners; and a **stroke gradient**, which does not follow a path. The falloff is
+  `Style.beamSegments` flat slices of equal path length. `trim` *is* uniform in
+  path length — verified: `slabShape`'s path starts at the right edge's vertical
+  midpoint and runs clockwise, so the top-left corner lands at
+  `(1.5h + w) / 2(w+h)`, which is 0.55–0.60 across every Slab the app draws.
+  `Style.beamSeamOffset` is the middle of that range, and no single constant can
+  hit the corner at every size.
+- **A stepped falloff needs an eased ramp and `.butt` caps, and it needs a
+  *render* to check.** The Border Beam's tail is `Style.beamSegments` flat slices,
+  and fading them linearly (1/n, 2/n, …) is not a falloff — it multiplies on top
+  of colours that already carry alpha, so the trailing slices land near 0.05
+  effective alpha and only the leading slice survives. `Style.beamFalloff` is the
+  exponent that fixes it and must stay below 1. Round caps bulge half a line width
+  past each slice's own trim range, so the joints composite twice and the beam
+  renders as a row of beads; the caps are `.butt`. Both were found by rasterising
+  the modifier with `ImageRenderer`, because `BorderBeamTests` pinned the trim
+  geometry and passed the whole time the beam was invisible. `BorderBeamRenderTests`
+  is the pixel-level counterpart and the only test here that looks at pixels — a
+  geometry test cannot tell you a thing is on screen.
+- **The Loading Ring is not a progress indicator.** A constant-length 270° arc that
+  turns, in both of the Panel's waiting states. Neither Vision nor `mdfind` reports
+  progress, so a ring that *fills* would be claiming something the app cannot back.
 - **`FloatingPanel.hasShadow` must stay `false`.** AppKit derives a window shadow
   from the content's alpha mask. This Panel's content is transparent glass with soft
   edges, and that derivation traces a ragged wavy contour around it plus a ghost
@@ -357,7 +412,9 @@ User types query → Enter
 | `EmojiRecentsStore.swift` | Emoji Recents persistence (Application Support) |
 | `EmojiGridView.swift` | Results Slab in grid Mode |
 | `Style.swift` | Every radius, material, tint and rim. The only `colorScheme` branch |
-| `Motion.swift` | The three curves, Reduce Motion collapse, entrance/shake/hardCut |
+| `Motion.swift` | The three transition curves, the two decorations, Reduce Motion collapse, entrance/shake/hardCut |
+| `BorderBeam.swift` | A Card's one-lap beam: over-travel geometry, slicing, `CardBeam`'s focus policy |
+| `LoadingRing.swift` | The app's own spinner, in place of a system `ProgressView` |
 | `AppIndex.swift` | The app Index: background scan, atomic swap, lazy icons |
 | `AppDirectoryWatcher.swift` | FSEvents watch over the application directories |
 
@@ -368,6 +425,15 @@ Real, unfixed, none urgent.
 - Signing teams are inconsistent. Both targets override `DEVELOPMENT_TEAM` to
   `L256GR2793`, while the project-level default is `HHNPP7C8GB`. Will bite on a clean
   checkout.
+- **A Subject Card outside a Query Phase shows `selectedSubject`, not
+  `subjectVM.results[selectedIndex]`.** `SubjectCardView.isQueryPhase` is the
+  switch. The two values are only the same while the Query is still the question
+  being asked; once a Subject has been *chosen* they diverge, and reading the
+  results is how "Use as Subject" left Finder on the Card after promoting a file
+  out of it. `retargetedText` solved the same bug for OCR Text and a transform's
+  output and was `.text`-only, so a promoted file fell straight through it. The
+  name is marked up against the Query only in a Query Phase, for the same reason:
+  a chosen Subject's name is not what the Query matched.
 - `SubjectCardView.textSubjectEditor` takes focus from a `.task`, which is the first
   main-actor turn after the editor is inserted. That is ordering, not a delay — but it
   is still the weakest link in the focus story, and if the clipboard editor ever comes

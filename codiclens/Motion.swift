@@ -3,9 +3,12 @@ import SwiftUI
 
 /// The whole motion vocabulary, in one place.
 ///
-/// Three curves exist and nothing else animates — see
+/// There are two categories and nothing else animates — see
 /// `docs/adr/0003-motion-budget.md`. No view outside this file names a spring, a
-/// duration, or an easing:
+/// duration, or an easing.
+///
+/// **Transitions.** Exactly three, and each one carries a change the user
+/// caused. Each starts, finishes and is gone.
 ///
 /// - **`entrance`** — the Panel appearing and dismissing. Also the shake, which
 ///   is a value shaping over this same curve rather than a fourth one.
@@ -20,6 +23,15 @@ import SwiftUI
 ///
 /// Reduce Motion and the user's animations preference collapse all three to a
 /// cross-fade, in `collapsed(_:)` — the single place either switch is read.
+///
+/// **Decoration.** `beamSweep` and `ringSpin`. A decoration carries no
+/// information — nothing about it is learnable — it delays nothing and is never
+/// waited on or given a threshold before it appears, and it is simply **absent**
+/// under Reduce Motion rather than collapsed. It is a separate *category*, not
+/// two more curves: the budget was never "three is the number", it was *do not
+/// animate information*, and a decorative loop touches none of that. The next
+/// animation that "just needs to show that something is happening" is a
+/// transition wearing decoration's clothes and goes through the three curves.
 enum Motion {
 
     // MARK: - The three curves
@@ -62,6 +74,25 @@ enum Motion {
             ? CAMediaTimingFunction(name: .linear)
             : CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.2, 1)
     }
+
+    // MARK: - Decoration
+
+    // Neither of these goes through `collapsed(_:)`, and that is not an
+    // oversight. `collapsed(_:)` turns an `Animation` into a cross-fade, which
+    // is meaningless for a loop and meaningless for a travelling highlight —
+    // there is nothing to cross-fade *to*. So the collapse cannot be delegated
+    // to it: a decoration reads `Motion.isReduced` at the point of use and is
+    // absent. Whatever the surface said without it, it still says.
+
+    /// The Border Beam's one lap. `easeOut` on purpose: perceived speed is set
+    /// by the velocity at the *start* of a motion, so easeOut leaves the mark at
+    /// full speed and reads as fast. easeInOut reads as mass, which is a
+    /// different quality and slower-feeling because it spends its first frames
+    /// accelerating.
+    static let beamSweep: Animation = .easeOut(duration: 0.25)
+
+    /// The Loading Ring's revolution.
+    static let ringSpin: Animation = .linear(duration: 0.85).repeatForever(autoreverses: false)
 
     // MARK: - Collapsing
 
