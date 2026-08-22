@@ -4,7 +4,8 @@ import SwiftUI
 import Testing
 @testable import codiclens
 
-/// Does the Border Beam actually put light on the rim, and only outside it?
+/// Does the Border Beam actually put light on the rim, and only where it is meant
+/// to?
 ///
 /// `BorderBeamTests` pins the *geometry* — where the lit segment is at a given
 /// phase — and it passed happily while the beam was invisible on screen. The
@@ -21,7 +22,7 @@ import Testing
 ///
 /// **Every test in here was added after a version shipped and was rejected on
 /// sight, and each one is the measurement the pass before it had not taken.** That
-/// is the pattern worth knowing about this file, because it has now happened four
+/// is the pattern worth knowing about this file, because it has now happened five
 /// times.
 ///
 /// `theTailSurvivesItsOwnFalloff` and `theRimAloneIsWhatBothEndsOfTheSweepLookLike`
@@ -29,12 +30,16 @@ import Testing
 /// already carrying alpha left 40pt of an intended 336pt on screen while every
 /// geometry test passed.
 ///
-/// `nothingIsLitOutsideTheRim` is the fifth pass's test, and it is the inverse of
-/// the `nothingIsLitInsideTheRim` that stood here for four of them. That test was
-/// enforcing the bug: masking the beam outward meant it never composited against
-/// anything this app draws, only against the user's wallpaper, and in dark
-/// appearance over a white desktop the head measured Δ10/442. The mask is inverted
-/// now and this is the same one-modifier check pointed the other way.
+/// `nothingIsLitDeepInsideTheRim` has been pointed both ways and the history is the
+/// interesting part. For four passes it was `nothingIsLitInsideTheRim`, asserting
+/// that the beam only ever touched pixels *outside* the Card — which is to say
+/// pixels this app does not own, because outside a Card's rim is the gutter, the
+/// Panel's transparent margin and then the user's desktop. It was certifying the
+/// bug. The fifth pass inverted the mask and the test with it. The sixth put the
+/// halo back outside — where the user wants it — and gave the **core** a foot on
+/// both sides, so the claim is neither "nothing inside" nor "nothing outside" any
+/// more: it is that nothing reaches *deep* inside, which is a bound with a number
+/// in it.
 ///
 /// `theHeadHasAHaloAndACrispCore` came from the one-layer comet, whose blur ramped
 /// from exactly 0 at the head: the brightest part of the whole effect was a bare
@@ -53,23 +58,43 @@ import Testing
 /// than over the transparent ground everything else in this file measures. Four
 /// passes measured against synthetic swatches, and a Δ19 against a white one sat
 /// unread in a results table for a whole iteration while the beam was invisible on
-/// the user's screen. A pure-white backdrop is the regression case: if the beam
-/// still reads when the wallpaper contributes nothing, it is drawing on the Card.
+/// the user's screen. A pure-white backdrop is the regression case: white is the
+/// ground that contributes *nothing*, so a beam that still reads over it is a beam
+/// that is not living off somebody's wallpaper. **It is the most important test in
+/// this file and it survived the halo moving back outside**, because the core now
+/// straddles the rim: 1pt of the line is always on Liquid Glass.
 ///
 /// `theCoreIsADesaturatedHighlight` came from the three-part comet, whose core was a
-/// **saturated** blue line where the reference material's is a desaturated
-/// near-white one — the reference's blue is in its Card's *fill*, and two passes
-/// read it as belonging to the light. It is the only test here about a colour, and
-/// it is a bound rather than a target, because "it went saturated blue again" is
-/// now a repeat failure mode rather than a hypothetical one.
+/// **saturated** blue line, and it now bounds the core's saturation from **both**
+/// sides. Above 0.60 is the saturated primary that was rejected twice as "too
+/// dense" and a "blue blob"; below 0.20 is the near-white that was rejected once for
+/// being invisible over a bright wallpaper, which is the failure a Δ cannot see and
+/// this one can.
+///
+/// `theBloomIsElongatedAlongTheRim` is the sixth pass's own test. The nucleus was a
+/// circle, and a circle centred on a line is a dot on that line: "not just a dot
+/// that has a radial glow … but spread it more out". A circle is a shape claim, so
+/// it is checkable as one.
 ///
 /// The through-line: a render can prove light is on screen and cannot say whether
 /// it reads as the thing it is for. What a render *can* be made to catch is a
 /// measurable absence, or a shape claim stated as an inequality — which is what
-/// these two are. And when the complaint is about how something looks, the
-/// closing check is still a picture: the core's flat cap and the per-slice banding
-/// in its blur ramp were both found by writing composited PNGs out of this same
-/// harness and looking at them at 3×, and neither appears in any number above.
+/// these are. And when the complaint is about how something looks, the closing
+/// check is still a picture: the core's flat cap, the per-slice banding in its blur
+/// ramp, and the head reading as a dot were all found by writing composited PNGs
+/// out of this same harness and looking at them at 3×, and none of them appears in
+/// any number above.
+///
+/// **One thing about the harness, found the sixth time round and worth more than
+/// any threshold here: `glassEffect` does not rasterise deterministically under
+/// `ImageRenderer` in Debug.** Two renders of the *same* unlit Card differ by up to
+/// Δ36 on 60% of their pixels — a dither, and it is enough to swamp any composited
+/// measurement taken from a single pair. In Release the same pair is bit-identical.
+/// Every composited number quoted in this file is therefore a mean of several
+/// renders (`composited(progress:dark:)` takes it), which brings the residual under
+/// Δ0.5 at 16 renders and under Δ5 at 8. The older note that the same code measured
+/// Δ87 in Debug and Δ68 in Release is the same phenomenon seen once, without the
+/// cause; with averaging the two configurations now agree to about Δ5.
 @MainActor
 struct BorderBeamRenderTests {
 
@@ -92,11 +117,10 @@ struct BorderBeamRenderTests {
     /// The extra area is transparent, so it contributes no lit pixels and the
     /// baseline does not move with it.
     ///
-    /// **It is now bare space rather than the room the effect lives in**, because
-    /// the beam is masked *inward* and puts nothing outside the rim at all. It is
-    /// kept, and kept this size, for two reasons: `nothingIsLitOutsideTheRim` needs
-    /// somewhere to look, and every coordinate in this file is expressed relative to
-    /// it. Shrinking it would move every sample point and re-measure nothing.
+    /// **It is the room the effect lives in again**, because the halo is masked
+    /// *outward* once more. It clears the measured reach with room over, and every
+    /// coordinate in this file is expressed relative to it — shrinking it would move
+    /// every sample point and re-measure nothing.
     private var pad: CGFloat { Style.cardInset + Style.beamGlowTailBlur }
 
     /// Pixels brighter than the unlit Card, at 2x.
@@ -213,34 +237,27 @@ struct BorderBeamRenderTests {
     /// rejected again for the same reason, and the fourth pass — a steeper glow
     /// ramp, a much fainter glow tail, a dimmer bloom — brought it to **3,782**.
     ///
-    /// **The fifth pass reads 13,835, and that is not the beam getting four times
-    /// brighter — it is a different region of pixels.** Inverting the mask moved the
-    /// whole effect from outside the rim, where it lay over transparent padding and
-    /// a pixel only counted once the beam alone cleared the threshold, to inside it,
-    /// where the Card's own ground already contributes 93 of the 130 and a much
-    /// fainter beam pixel counts. None of the four numbers above is comparable with
-    /// this one; the drawing did not change, the counted set did. A beam reduced to
-    /// its head slice alone, which is the failure mode this test is for, measures
-    /// about 700 here.
+    /// The fifth pass masked the beam inward and read **13,835** — not four times
+    /// brighter, a different region of pixels, since inside the rim the Card's own
+    /// ground already contributes 93 of the 130. The sixth put the halo back outside
+    /// with a bigger, bluer, longer comet and reads **8,591**. None of these numbers
+    /// is comparable with the one before it; the counted set keeps moving.
     ///
-    /// The floor is **9,000** — about two thirds of the measurement, deliberately
-    /// looser than the 79% the old floor sat at, because this is a new metric with
-    /// no track record. It is a floor on the beam *existing*, not a target: three
-    /// of the five numbers above went down on purpose. Re-measure it rather than
-    /// scaling it, both ways.
+    /// The floor is **6,000**, about two thirds of the measurement. It is a floor on
+    /// the beam *existing*, not a target: several of the numbers above went down on
+    /// purpose. Re-measure it rather than scaling it, both ways.
     @Test func theTailSurvivesItsOwnFalloff() {
         let lit = litPixels(progress: 0.5) - baseline
 
         #expect(
-            lit > 9_000,
+            lit > 6_000,
             """
             only \(lit) pixels of rim are lit at mid-sweep. The comet is being \
             deleted by its own falloff — check Style.beamGlowWidth and \
             beamGlowBlur(at:), which are the whole of the halo, \
             Style.beamGlowRamp, which is the only computed opacity ramp in the \
             beam and the one thing here that could delete it again, and \
-            Style.beamWidth/beamStrokeWidth, which is what survives the \
-            inward mask.
+            Style.beamWidth, which is the core straddling the rim.
             """
         )
     }
@@ -257,28 +274,16 @@ struct BorderBeamRenderTests {
     /// blur radius, so one layer could not be crisp and bloomed at once. The glow
     /// is a second layer for that reason and its blur is never 0.
     ///
-    /// **Measured *inward* from the right edge's vertical midpoint since the fifth
-    /// pass, and that is the whole of the change here.** The mask is inverted: the
-    /// halo spills into the Card rather than out over the desktop, so the profile is
-    /// read the other way and every threshold below was re-measured against it
-    /// rather than carried over on trust. The two-layer version read alpha 247 at
-    /// the rim and 96, 92, 78, 60, 22 at 1, 4, 8, 12 and 20 points *out*, reaching
-    /// zero by 34. The third pass read **202, 192, 155, 137, 110, 62**; the fourth,
-    /// which turned the halo down to mist and the core into a near-white highlight,
-    /// read **178, 163, 112, 97, 77, 41**. Inward, at 0, 1, 4, 8, 12, 16 and 28
-    /// points in, the fifth reads **179, 144, 74, 63, 48, 35, 9** in light
-    /// appearance and **194, 167, 107, 92, 73, 54, 15** in dark, gone by 34.
+    /// **Measured *outward* from the right edge's vertical midpoint, which is where
+    /// the halo is again.** It was read inward for one pass, while the whole comet
+    /// was masked to the Card's interior. At 0, 1, 4, 8, 12, 16 and 28 points out it
+    /// reads **182, 167, 115, 96, 76, 58, 19**, gone by 40 — the same profile in both
+    /// appearances now, because the palette no longer differs between them. The
+    /// floors below were re-measured against that and left where they were.
     ///
-    /// The two directions are close enough that no floor had to move, which is the
-    /// mirror-image geometry showing up as arithmetic: a `.stroke` is centred on the
-    /// rim, so inverting which half the mask keeps swaps the halo's side and leaves
-    /// its shape alone. The rim floor has come down twice, 220 → 170 → **155**, and
-    /// both times it was **re-measured rather than scaled**.
-    ///
-    /// The rim's alpha against the alpha 4pt in is **2.4** (179 / 74), up from 1.59
-    /// outward, and that is the line reading as a line: the same glow spread over
-    /// the Card's interior instead of the gutter falls away faster, because the
-    /// corners converge inward and diverge outward.
+    /// The rim's alpha against the alpha 4pt out is **1.53** (176 / 115), which is
+    /// the number that says the line reads as a line rather than as the bright middle
+    /// of a cloud. It must stay above about 1.3.
     @Test func theHeadHasAHaloAndACrispCore() {
         guard let bitmap = beamAlone(progress: Self.headOnTheRightEdge) else {
             Issue.record("the beam layer did not rasterise")
@@ -286,28 +291,28 @@ struct BorderBeamRenderTests {
         }
 
         let y = Int(((pad + size.height / 2) * Self.scale).rounded(.down))
-        /// Points *inward* from the rim, which is where the beam is now.
-        func alpha(_ inward: CGFloat) -> Int {
-            let x = Int(((pad + size.width - inward - 0.25) * Self.scale).rounded(.down))
+        /// Points *outward* from the rim, which is where the halo is.
+        func alpha(_ outward: CGFloat) -> Int {
+            let x = Int(((pad + size.width + outward + 0.25) * Self.scale).rounded(.down))
             return bitmap.alpha(x: x, y: y)
         }
 
         #expect(
             alpha(0) > 155,
-            "the core is not crisp at the rim: alpha \(alpha(0)). Style.beamWidth is what survives the mask."
+            "the core is not crisp at the rim: alpha \(alpha(0)). Style.beamWidth is the core's stroked width."
         )
         #expect(
             alpha(1) > 60 && alpha(4) > 60 && alpha(8) > 40 && alpha(16) > 20,
             """
             the head has no halo: alpha \(alpha(1)) / \(alpha(4)) / \(alpha(8)) / \
-            \(alpha(16)) at 1, 4, 8 and 16 points in. Style.beamGlowHeadBlur must \
+            \(alpha(16)) at 1, 4, 8 and 16 points out. Style.beamGlowHeadBlur must \
             never be 0 and the glow layer must be drawn under the head, not only \
             behind it — a head with no bloom is a line, which is what this test is for.
             """
         )
         #expect(
             alpha(1) > alpha(12) && alpha(12) > alpha(28),
-            "the halo does not fall off inward: \(alpha(1)) / \(alpha(12)) / \(alpha(28))"
+            "the halo does not fall off outward: \(alpha(1)) / \(alpha(12)) / \(alpha(28))"
         )
     }
 
@@ -327,19 +332,14 @@ struct BorderBeamRenderTests {
     /// guard against a *return* to a saturated core, not a target — and it is set
     /// under the rejected value rather than just over the shipping one.
     ///
-    /// **The fifth pass added the polarity, and that is why the name lost the word
-    /// "white".** The beam draws on the Card's own glass now instead of on the
-    /// desktop, and the Card's glass is the one ground this app knows: dark
-    /// appearance's is dark, so its core is white — un-premultiplied
-    /// **(248, 251, 255)**, which is the reference material's rim light. Light
-    /// appearance's is *lighter than any highlight* — the Card measures (247, 247,
-    /// 247) over a white desktop — so a white line there is nothing at all, and
-    /// light appearance's core is a dark cool line, **(58, 68, 82)**, the same
-    /// polarity as `Palette.light.cardRim` and every other edge in that appearance.
-    /// A near-white core measured Δ5/442 against light appearance's own glass over a
-    /// white desktop, against **Δ169** for this one. So the claim this test makes is
-    /// the one that survives both appearances: the core is **desaturated**, and it
-    /// runs in the direction its own ground leaves room for.
+    /// **The sixth pass bounds it from below as well, and dropped the polarity
+    /// split.** The core is one light blue in both appearances — un-premultiplied
+    /// **(128, 171, 255)**, saturation **0.50** — because half of it lands outside
+    /// the rim, on the user's desktop. That is the ground a near-white core vanished
+    /// against (Δ10/442 over a bright hazy sky), so "desaturated" is no longer the
+    /// whole claim: the colour has to be *chromatic enough* to clear a white sky and
+    /// *unsaturated enough* not to be the blue blob that was rejected twice. Hence
+    /// two bounds rather than one.
     ///
     /// **Saturation rather than a Δ against a ground**, because the two appearances
     /// and the four grounds disagree about contrast and agree about this. It is
@@ -358,14 +358,14 @@ struct BorderBeamRenderTests {
             }
             let saturation = bitmap.saturation(x: x, y: y)
             #expect(
-                saturation < 0.60,
+                saturation < 0.60 && saturation > 0.20,
                 """
-                the core has gone saturated again in \(dark ? "dark" : "light") \
-                appearance: saturation \(saturation) at the head's rim, against \
-                0.293 shipping in light and 0.026 in dark. The reference's rim \
-                light is white and its blue is in the Card's *fill* — see \
-                Palette.beamHead. On a light ground the answer to a beam that does \
-                not read is not more blue; it is the other polarity.
+                the core's colour is out of bounds in \(dark ? "dark" : "light") \
+                appearance: saturation \(saturation) at the head's rim, against 0.50 \
+                shipping. Above 0.60 is the saturated primary that was rejected twice \
+                as "too dense" and a "blue blob"; below 0.20 is the near-white that \
+                measured Δ10/442 over a bright wallpaper, because half of the core \
+                composites against the desktop — see Palette.beamHead.
                 """
             )
 
@@ -373,28 +373,16 @@ struct BorderBeamRenderTests {
             let alpha = max(bitmap.alpha(x: x, y: y), 1)
             let brightest = Double(max(colour.r, max(colour.g, colour.b))) / Double(alpha)
             let dimmest = Double(min(colour.r, min(colour.g, colour.b))) / Double(alpha)
-            if dark {
-                #expect(
-                    dimmest > 0.85,
-                    """
-                    dark appearance's core is not a near-white highlight: dimmest \
-                    channel \(dimmest) of full, against 0.97 shipping. Dark \
-                    appearance's Card glass is dark, which is the whole reason the \
-                    beam was moved onto it — see BorderBeam.inward.
-                    """
-                )
-            } else {
-                #expect(
-                    brightest < 0.50,
-                    """
-                    light appearance's core is a highlight on a ground lighter than \
-                    itself: brightest channel \(brightest) of full, against 0.32 \
-                    shipping. Light appearance's Card measures (247, 247, 247) over \
-                    a white desktop, so a near-white line on it is Δ5/442 — see \
-                    Palette.beamHead.
-                    """
-                )
-            }
+            #expect(
+                brightest > 0.85 && dimmest > 0.30,
+                """
+                the core is not a *light* blue in \(dark ? "dark" : "light") \
+                appearance: brightest channel \(brightest), dimmest \(dimmest), \
+                against 1.00 and 0.50 shipping. It has to read as light rather than \
+                as a colour — the same value in both appearances, because the halo \
+                lands on a desktop and not on the Card's tint.
+                """
+            )
         }
     }
 
@@ -435,11 +423,13 @@ struct BorderBeamRenderTests {
     /// requirement plus a 4× head-to-far ratio, which the tube fails on both counts
     /// (its ratio was 1.5 and its first step went the wrong way).
     ///
-    /// **The four points are now 4pt *inside* the rim rather than outside it**,
-    /// because the mask is inverted and there is nothing outside it to profile. The
-    /// same four places read **74 / 39 / 22 / 12** in light appearance and
-    /// **107 / 50 / 24 / 12** in dark, a ratio of 6.2× and 8.9×. The ramp did not
-    /// move; the halo is the same halo on the other side of the rim.
+    /// **They are 4pt outside the rim again**, the mask having spent one pass
+    /// inverted. `Style.beamGlowRamp` came down 2.4 → 1.25 for "spread it more out",
+    /// which lifts the *body* of the tail without touching either end: the same four
+    /// places read 115 / 93 / 22 / 13 at 2.4 and **115 / 96 / 28 / 13** at 1.25, and
+    /// 100pt behind the head 15 → 25. The far end does not move at any exponent,
+    /// because what is visible there is the core's own trailing colour rather than
+    /// the glow. Ratio 8.85×.
     ///
     /// The four points are addressed off straight edges rather than by walking the
     /// path, so no arc-length machinery is needed here: at
@@ -454,7 +444,7 @@ struct BorderBeamRenderTests {
             return
         }
 
-        let inward: CGFloat = 4
+        let outward: CGFloat = 4
         func alpha(x: CGFloat, y: CGFloat) -> Int {
             bitmap.alpha(
                 x: Int(((x + 0.25) * Self.scale).rounded(.down)),
@@ -464,10 +454,10 @@ struct BorderBeamRenderTests {
 
         let right = pad + size.width
         let midY = pad + size.height / 2
-        let head = alpha(x: right - inward, y: midY)
-        let behind = alpha(x: right - inward, y: midY - 60)
-        let far = alpha(x: right - Style.cardRadius - 60, y: pad + inward)
-        let furthest = alpha(x: right - Style.cardRadius - 160, y: pad + inward)
+        let head = alpha(x: right + outward, y: midY)
+        let behind = alpha(x: right + outward, y: midY - 60)
+        let far = alpha(x: right - Style.cardRadius - 60, y: pad - outward)
+        let furthest = alpha(x: right - Style.cardRadius - 160, y: pad - outward)
 
         #expect(
             head > behind && behind > far && far > furthest,
@@ -483,8 +473,8 @@ struct BorderBeamRenderTests {
             """
             the glow's falloff is too shallow to read as a comet: \(head) at the \
             head against \(furthest) 280pt behind it. The version this test was \
-            written for measured 92 against 62; the shipping one measures 74 \
-            against 12.
+            written for measured 92 against 62; the shipping one measures 115 \
+            against 13.
             """
         )
     }
@@ -502,25 +492,16 @@ struct BorderBeamRenderTests {
     /// a point outside the rim, scanned ±24pt around the head, it read **170**
     /// against a mid-segment control of 7. It read **6** against 3 once
     /// `beamCoreHeadBlur` went to 1.5, and **9** against 2 when the glow under the
-    /// head came down to mist. **Read half a point *inside* the rim, which is where
-    /// the beam is since the fifth pass inverted the mask, it is 13 against a
-    /// control of 10** in dark appearance and 17 against 11 in light. All of those
-    /// are steps *along* the beam, and 40 is the bound.
+    /// head came down to mist. Read half a point *outside* the rim, where the halo
+    /// is, it is **9 against a control of 3** in both appearances. All of those are
+    /// steps *along* the beam, and 40 is the bound.
     ///
     /// **The radial step across the rim is a different quantity and it is not what
-    /// this test bounds.** Inverting the mask moved the cut from the inside of the
-    /// rim to the outside of it, and the cut is the same size in both directions:
-    /// the largest step per half point measured across the rim is **178 before and
-    /// 194 after**, in the same place. It is not an artefact for the same reason it
-    /// was not one before — what abuts the boundary is the core at near-full alpha,
-    /// so the eye sees a line's own edge, and that edge is sitting exactly on
-    /// `CardSurface`'s hairline rim. A visible terminus, which is what "you can see
-    /// where the border thing ends" was about, is a step *along* the beam where
-    /// there is no line for it to be the edge of.
-    ///
-    /// `Style.beamGlowHeadBlur` is what would put the tangential step back up:
-    /// raising it 12 → 15 was tried and read 10 while costing the halo everywhere
-    /// else.
+    /// this test bounds.** It was 178 with the halo outside and 194 with it inside,
+    /// and it is **70** now, because the core straddles the rim: the mask's cut has
+    /// the line drawn over it on both sides rather than abutting it on one. A visible
+    /// terminus, which is what "you can see where the border thing ends" was about,
+    /// is a step *along* the beam where there is no line for it to be the edge of.
     ///
     /// The worse one was structural and had nothing to do with caps.
     /// `BorderBeam.trimRange` pins the lit segment's leading end at 1 from phase
@@ -531,10 +512,9 @@ struct BorderBeamRenderTests {
     /// full-brightness terminus sitting at the top-left corner for 0.14s. Peak
     /// alpha across the whole render at phases 0.74, 0.80, 0.86, 0.92 and 0.97
     /// read **249, 249, 248, 249, 248** — a parked head. Measuring `position`
-    /// against the unclamped travel instead read **218, 174, 126, 79, 46**, and
-    /// with the fifth pass's inward mask it reads **188, 108, 67, 42, 30** — the
-    /// mask does not touch this, and the small change is the glow's own alphas
-    /// moving with the palette.
+    /// against the unclamped travel instead read **218, 174, 126, 79, 46**, and it
+    /// reads **190, 137, 94, 57, 34** now — the mask does not touch this, and the
+    /// changes are the palette's and the ramp's.
     ///
     /// **The ratio is in the assertion and the monotonicity alone is not enough**,
     /// which was checked rather than assumed: with the travel-based `position`
@@ -551,8 +531,8 @@ struct BorderBeamRenderTests {
         /// The largest step between vertically adjacent pixels — which is the
         /// step *along* the beam where it runs down the right edge — at a fixed
         /// distance outside the rim, over 48pt centred on `y`.
-        func tangentialStep(_ bitmap: Bitmap, around y: CGFloat, inward: CGFloat) -> Int {
-            let x = Int(((right - inward - 0.25) * Self.scale).rounded(.down))
+        func tangentialStep(_ bitmap: Bitmap, around y: CGFloat, outward: CGFloat) -> Int {
+            let x = Int(((right + outward + 0.25) * Self.scale).rounded(.down))
             let first = Int(((y - 24) * Self.scale).rounded(.down))
             let last = Int(((y + 24) * Self.scale).rounded(.down))
             var worst = 0
@@ -568,15 +548,15 @@ struct BorderBeamRenderTests {
             return
         }
 
-        for inward in [CGFloat(0.5), 1, 2] {
-            let head = tangentialStep(atHead, around: midY, inward: inward)
-            let control = tangentialStep(atHead, around: midY - 70, inward: inward)
-            let tail = tangentialStep(atTail, around: midY, inward: inward)
+        for outward in [CGFloat(0.5), 1, 2] {
+            let head = tangentialStep(atHead, around: midY, outward: outward)
+            let control = tangentialStep(atHead, around: midY - 70, outward: outward)
+            let tail = tangentialStep(atTail, around: midY, outward: outward)
 
             #expect(
                 head < 40,
                 """
-                the head terminates in a hard edge \(inward)pt in: a step of \
+                the head terminates in a hard edge \(outward)pt out: a step of \
                 \(head), against \(control) along the beam's middle. \
                 Style.beamCoreHeadBlur must not be 0 — a `.butt` cap on an \
                 unblurred 1pt core is a visible flat end.
@@ -584,7 +564,7 @@ struct BorderBeamRenderTests {
             )
             #expect(
                 tail < 40,
-                "the tail terminates in a hard edge \(inward)pt in: a step of \(tail)."
+                "the tail terminates in a hard edge \(outward)pt out: a step of \(tail)."
             )
         }
 
@@ -651,47 +631,42 @@ struct BorderBeamRenderTests {
         #expect(middle > late)
     }
 
-    /// **Nothing the beam draws lands outside the rim, and this test is the
-    /// inverse of the one that stood here for four passes.**
+    /// **Nothing the beam draws reaches deep into the Card, and this test has been
+    /// pointed both ways.**
     ///
-    /// `nothingIsLitInsideTheRim` asserted the opposite, and it was enforcing the
-    /// bug. Masking the beam to the region *outside* `Style.cardShape` sounded like
-    /// the obviously right rule — a blur spreads inward as much as outward, so cut
-    /// the inward half and nothing washes over the Card's icon, name and chips. What
-    /// it actually did was exclude the one ground this app draws. Outside a Card's
-    /// rim is `Style.cardInset`'s gutter and then the Panel's own transparent
-    /// margin, and the Panel is a borderless non-activating `NSPanel`: outside the
-    /// rim is **the user's desktop**. Measured on the Card as `cardSurface(focused:)`
-    /// actually draws it, the head read **Δ10/442** in dark appearance over a white
-    /// desktop and Δ270 over a near-black one — a factor of twenty-seven decided by
-    /// somebody's wallpaper. Four passes of careful measurement never took that one,
-    /// because they all measured against synthetic swatches.
+    /// For four passes it was `nothingIsLitInsideTheRim`, and it was enforcing a bug:
+    /// masking the whole comet *outside* `Style.cardShape` sounded like the obviously
+    /// right rule — a blur spreads inward as much as outward, so cut the inward half
+    /// and nothing washes over the Card's icon, name and chips — but outside a Card's
+    /// rim is `Style.cardInset`'s gutter and then the Panel's own transparent margin,
+    /// and the Panel is a borderless non-activating `NSPanel`. Outside the rim is
+    /// **the user's desktop**, so the beam never composited against anything this app
+    /// draws. Measured on the real composite, a near-white head read **Δ10/442** in
+    /// dark appearance over a white desktop against Δ270 over a near-black one: a
+    /// factor of twenty-seven decided by somebody's wallpaper. The fifth pass
+    /// inverted the mask and this test with it; the sixth put the halo back outside,
+    /// where it was asked for, and made the light **blue** — which is the thing that
+    /// makes an unknown ground survivable.
     ///
-    /// So the check is the same single-modifier check pointed the other way, and it
-    /// is still worth having: `BorderBeam.inward` is one modifier, and deleting it
-    /// would put the halo back over the wallpaper while every geometry test in
-    /// `BorderBeamTests` went on passing.
-    ///
-    /// The region tested is the Card's own shape grown by a point, which clears the
-    /// mask edge's own antialiasing and no more. The beam is drawn on a transparent
-    /// ground, so a mask that leaked would show up as alpha and there is nothing
-    /// else here that could put any there. Probed at five phases: zero every time.
-    ///
-    /// **There is deliberately no outward spill to make room for**, and that was a
-    /// choice rather than the lazy inverse. A `.stroke` is centred on its path, so
-    /// the inner half of `Style.beamStrokeWidth` is exactly the band
-    /// `CardSurface`'s own `strokeBorder` hairline occupies: the beam overwrites the
-    /// Card's rim for the length of the sweep, which is what the reference material
-    /// looks like. A spill of a point or two would have put the core's outer half
-    /// back on the wallpaper and made the line's *width* depend on the desktop.
-    @Test func nothingIsLitOutsideTheRim() {
-        let outset: CGFloat = 1
-        let outer = RoundedRectangle(cornerRadius: Style.cardRadius + outset, style: .continuous)
-            .path(in: CGRect(
-                x: pad - outset, y: pad - outset,
-                width: size.width + outset * 2, height: size.height + outset * 2
-            ))
-            .cgPath
+    /// So the claim is neither "nothing inside" nor "nothing outside" any more. The
+    /// glow and the bloom are masked outward; the **core** is unmasked and straddles
+    /// the rim, so half of `Style.beamWidth` is deliberately inside, blurred by up to
+    /// `beamCoreTailBlur`. Measured, any alpha at all stops by **13.3pt** in and
+    /// nothing past 10pt in exceeds alpha **4** — the icon, the name and the whole
+    /// middle of the Card are untouched. The bound below is that, loosely: it still
+    /// fails outright if `BorderBeam.outward` is deleted, which is the one-modifier
+    /// mistake worth catching.
+    @Test func nothingIsLitDeepInsideTheRim() {
+        /// Signed distance from the rim, positive outside: the standard rounded-rect
+        /// SDF, exact for an axis-aligned one.
+        func distanceFromTheRim(x: Int, y: Int) -> CGFloat {
+            let px = (CGFloat(x) + 0.5) / Self.scale - pad
+            let py = (CGFloat(y) + 0.5) / Self.scale - pad
+            let qx = abs(px - size.width / 2) - size.width / 2 + Style.cardRadius
+            let qy = abs(py - size.height / 2) - size.height / 2 + Style.cardRadius
+            let mx = max(qx, 0), my = max(qy, 0)
+            return (mx * mx + my * my).squareRoot() + min(max(qx, qy), 0) - Style.cardRadius
+        }
 
         for phase in [0.15, 0.3, 0.5, 0.7, 0.85] {
             guard let bitmap = beamAlone(progress: phase) else {
@@ -699,25 +674,25 @@ struct BorderBeamRenderTests {
                 return
             }
 
-            var worst = 0
+            var worstPast10 = 0
+            var worstPast16 = 0
             for y in 0..<bitmap.height {
                 for x in 0..<bitmap.width {
-                    let point = CGPoint(
-                        x: (CGFloat(x) + 0.5) / Self.scale,
-                        y: (CGFloat(y) + 0.5) / Self.scale
-                    )
-                    guard !outer.contains(point) else { continue }
-                    worst = max(worst, bitmap.alpha(x: x, y: y))
+                    let alpha = bitmap.alpha(x: x, y: y)
+                    guard alpha > 0 else { continue }
+                    let d = distanceFromTheRim(x: x, y: y)
+                    if d < -10 { worstPast10 = max(worstPast10, alpha) }
+                    if d < -16 { worstPast16 = max(worstPast16, alpha) }
                 }
             }
 
             #expect(
-                worst == 0,
+                worstPast10 < 20 && worstPast16 == 0,
                 """
-                the beam put alpha \(worst) outside the rim at phase \(phase). \
-                BorderBeam's inward mask is gone or wrong, and the comet is back \
-                to compositing against the user's wallpaper instead of against the \
-                Card — which is the bug that cost four passes.
+                the beam put alpha \(worstPast10) more than 10pt inside the rim and \
+                \(worstPast16) more than 16pt in, at phase \(phase). The glow and \
+                the bloom must stay under BorderBeam.outward — only the core's own \
+                inner half belongs inside the Card, and it dies by 13pt.
                 """
             )
         }
@@ -741,16 +716,27 @@ struct BorderBeamRenderTests {
     /// case rather than an unusual one — it is the ground that contributes nothing,
     /// so whatever is left is the Card doing the work.
     ///
-    /// Measured, peak perceptual distance across the rim band: **Δ87 in dark
-    /// appearance and Δ169 in light**, where the outward-masked version measured
-    /// Δ17 and Δ89 at the same place. The floor is 50, which the pre-inversion dark
-    /// build fails by a factor of three.
+    /// **It survived the halo moving back outside, which is the single most
+    /// important fact in this pass**, and it survived it for a reason with a
+    /// mechanism: the core is no longer masked to one side, it *straddles* the rim,
+    /// so half of the line always lands on Liquid Glass whatever the wallpaper is.
+    /// Measured, peak perceptual distance across the rim band: **Δ83 in dark
+    /// appearance and Δ86 in light**, against Δ74 and Δ174 with the whole comet
+    /// masked inward and Δ17 and Δ89 with the whole comet masked outward and
+    /// near-white. The floor is 50, which the near-white outward build fails by a
+    /// factor of three. Of those numbers, the ones that cannot be taken away by a
+    /// wallpaper are the *inward* halves — Δ46 and Δ49 — because that is the part
+    /// drawn on the Card.
     ///
-    /// `.regular` glass transmits, so this is not perfect independence — the Card's
-    /// own luminance still moves with what is behind it, dark appearance's between
-    /// (22, 22, 22) over a near-black desktop and (166, 166, 166) over a white one.
-    /// What changed is that the floor is now a *material* rather than a photograph:
-    /// Δ10 → Δ87 on the worst ground either appearance has.
+    /// The band is sampled 8pt *outside* the rim to 16pt inside it, because the light
+    /// is on both sides now.
+    ///
+    /// **The renders are averaged, and that is not fussiness.** `glassEffect` does not
+    /// rasterise deterministically under `ImageRenderer` in Debug: two renders of the
+    /// same unlit Card differ by up to Δ36 on most of their pixels, which is most of
+    /// this test's own floor. Six renders bring the residual under Δ5. In Release the
+    /// same pair is bit-identical and the measurement lands within Δ5 of the Debug
+    /// one.
     @Test func theBeamReadsAgainstAWhiteDesktop() {
         for dark in [false, true] {
             guard let lit = composited(progress: Self.headOnTheRightEdge, dark: dark),
@@ -761,13 +747,12 @@ struct BorderBeamRenderTests {
 
             let y = Int(((pad + size.height / 2) * Self.scale).rounded(.down))
             var best = 0.0
-            for inward in stride(from: CGFloat(0), through: 16, by: 0.5) {
-                let x = Int(((pad + size.width - inward - 0.25) * Self.scale).rounded(.down))
+            for offset in stride(from: CGFloat(-8), through: 16, by: 0.5) {
+                let x = Int(((pad + size.width - offset - 0.25) * Self.scale).rounded(.down))
                 let a = lit.rgb(x: x, y: y)
                 let b = unlit.rgb(x: x, y: y)
-                let d = (Double(a.r - b.r) * Double(a.r - b.r)
-                    + Double(a.g - b.g) * Double(a.g - b.g)
-                    + Double(a.b - b.b) * Double(a.b - b.b)).squareRoot()
+                let d = ((a.r - b.r) * (a.r - b.r) + (a.g - b.g) * (a.g - b.g)
+                    + (a.b - b.b) * (a.b - b.b)).squareRoot()
                 best = max(best, d)
             }
 
@@ -776,22 +761,29 @@ struct BorderBeamRenderTests {
                 """
                 the beam is invisible on a Card over a white desktop in \
                 \(dark ? "dark" : "light") appearance: peak Δ\(Int(best))/442 \
-                across the rim band, against 87 and 169 shipping. This is the \
-                architectural failure, not a tuning one: if the beam is masked \
-                outward again it composites against the wallpaper and this number \
-                collapses to 17. See BorderBeam.inward.
+                across the rim band, against 83 and 86 shipping. This is the \
+                architectural failure, not a tuning one: with the core masked \
+                entirely outward and near-white it collapses to 17, because outside \
+                the rim is the user's desktop. See BorderBeam.outward.
                 """
             )
         }
     }
 
     /// The Card as the app draws it, over a pure white desktop, with the beam over
-    /// the top — or without it, when `progress` is `nil`.
+    /// the top — or without it, when `progress` is `nil`, and averaged over
+    /// `Self.composites` renders.
     ///
     /// The one place in this file that renders `cardSurface`. Everything else
     /// measures the beam alone, because a falloff is a property of the beam; this
     /// measures the composite, because legibility is a property of the pair.
-    private func composited(progress: Double?, dark: Bool) -> Bitmap? {
+    ///
+    /// **The averaging is load-bearing in Debug.** `glassEffect` under
+    /// `ImageRenderer` dithers: two renders of the same unlit Card differ by up to
+    /// Δ36 per pixel, which would be most of this test's floor arriving as noise.
+    /// Six renders bring the residual under Δ5; sixteen bring it under Δ0.5. Release
+    /// is deterministic and needs none of it.
+    private func composited(progress: Double?, dark: Bool) -> Field? {
         let card = Color.clear
             .frame(width: size.width, height: size.height)
             .cardSurface(focused: true)
@@ -808,18 +800,49 @@ struct BorderBeamRenderTests {
         .frame(width: size.width + pad * 2, height: size.height + pad * 2)
         .environment(\.colorScheme, dark ? .dark : .light)
 
-        let renderer = ImageRenderer(content: view)
-        renderer.scale = Self.scale
-        guard let cg = renderer.cgImage else { return nil }
-        var buf = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
-        guard let ctx = CGContext(
-            data: &buf, width: cg.width, height: cg.height,
-            bitsPerComponent: 8, bytesPerRow: cg.width * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
-        return Bitmap(width: cg.width, height: cg.height, pixels: buf)
+        var mean: [Double] = []
+        var width = 0, height = 0
+        for _ in 0..<Self.composites {
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = Self.scale
+            guard let cg = renderer.cgImage else { return nil }
+            var buf = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+            guard let ctx = CGContext(
+                data: &buf, width: cg.width, height: cg.height,
+                bitsPerComponent: 8, bytesPerRow: cg.width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return nil }
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+            if mean.isEmpty {
+                width = cg.width
+                height = cg.height
+                mean = [Double](repeating: 0, count: width * height * 3)
+            }
+            for i in 0..<(width * height) {
+                mean[i * 3] += Double(buf[i * 4])
+                mean[i * 3 + 1] += Double(buf[i * 4 + 1])
+                mean[i * 3 + 2] += Double(buf[i * 4 + 2])
+            }
+        }
+        for i in 0..<mean.count { mean[i] /= Double(Self.composites) }
+        return Field(width: width, height: height, rgb: mean)
+    }
+
+    /// How many renders one composited measurement averages. See `composited`.
+    private static let composites = 6
+
+    /// Mean RGB per pixel over several renders, which is what a noisy rasteriser
+    /// leaves you able to measure.
+    private struct Field {
+        let width: Int
+        let height: Int
+        let rgb: [Double]
+
+        func rgb(x: Int, y: Int) -> (r: Double, g: Double, b: Double) {
+            let i = (y * width + x) * 3
+            return (rgb[i], rgb[i + 1], rgb[i + 2])
+        }
     }
 
     /// The beam with no Card under it, so any alpha inside the rim is the beam's.

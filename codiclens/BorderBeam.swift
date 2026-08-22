@@ -27,26 +27,30 @@ import UniformTypeIdentifiers
 /// and it is the glow's alone.
 ///
 /// **A lit line is not a light source, however carefully it is ramped**, so the
-/// head is a `RadialGradient` disc — `BeamBloom`, placed by `bloom` below on the
-/// rim point the head currently occupies. A disc has no edges in any direction,
-/// which is both what "a single area/point that a radial blue goes out from" asks
-/// for and what makes the head's terminus stop existing rather than merely soften.
+/// head is a gradient fill — `BeamBloom`, placed by `bloom` below on the rim point
+/// the head currently occupies. A gradient has no edges in any direction, which is
+/// both what "a single area/point that a radial blue goes out from" asks for and
+/// what makes the head's terminus stop existing rather than merely soften. It was a
+/// *circle* for two passes, and a circle centred on a line is a **dot** on that
+/// line: it is an ellipse now, long axis along the rim, turned onto the rim's own
+/// tangent — "spread it more out kinda like the image".
 ///
-/// **The light is white, and the blue in the reference belongs to its Card's
-/// fill.** The core was a saturated blue for two passes because that blue was read
-/// as belonging to the light; it is now a desaturated near-white highlight, and the
-/// halo is mist rather than a cloud. `Style.swift` and
-/// `docs/adr/0003-motion-budget.md` carry the numbers, including what light
-/// appearance can and cannot do against a light ground.
+/// **The light is a light blue, in both appearances, and that is not a paint
+/// preference — it is what makes the halo's position viable.** It was a saturated
+/// blue for two passes (the reference's blue is in its Card's *fill*, and it was
+/// read as belonging to the light), then a near-white for two more. Near-white is
+/// the one that cost a whole pass: masked outward it composited against the user's
+/// wallpaper, and near-white light on a bright hazy sky measured **Δ10/442**. Only a
+/// chromatic colour has distance from a white sky *and* a near-black desktop.
 ///
-/// **The light is on the Card, not outside it, and that is the fifth correction —
-/// the only one that was not about paint.** All three parts used to be masked to
-/// the region *outside* the rim, so that nothing washed over the Card's content.
-/// Outside the rim is the gutter and then the Panel's transparent margin, which is
-/// to say the user's desktop: the beam was compositing against a wallpaper, and its
-/// visibility was staked on a ground the app does not own. In dark appearance over
-/// a white desktop the head measured Δ10/442. `inward` is the inverted mask, and the
-/// full finding is written up on it.
+/// **The halo is outside the rim and the core straddles it, and that split is the
+/// sixth correction.** All three parts were masked *outward* for four passes — so
+/// the whole effect composited against a desktop the app does not own — then all
+/// three *inward*, which fixed the ground and put the halo over the Card's own
+/// content, which was rejected on sight. Now: glow and bloom masked outward, core
+/// unmasked and centred on the rim, so 1pt of the line always lands on Liquid Glass
+/// whatever the wallpaper is. `outward` carries the full finding and
+/// `Style.beamWidth` carries the straddle.
 ///
 /// **It means nothing.** It belongs to a Card *as a surface*: it fires when that
 /// Card becomes about something new and that is the whole of it. It is not tied
@@ -204,13 +208,24 @@ struct BorderBeam: ViewModifier, Animatable {
                     // stroke at all. `Style.beamDrawsGlow` is Reduce
                     // Transparency's answer, and it covers the bloom as well:
                     // the halo goes whole, the crisp sweep stays.
+                    //
+                    // **The halo is masked and the core is not, and that split is
+                    // this modifier's central decision.** The glow and the bloom
+                    // are cut to the region *outside* the rim, so nothing washes
+                    // over the Card's icon, name and chips. The core straddles the
+                    // rim — half on the Card's own glass, half outside — so its
+                    // visibility can never be staked on a wallpaper, which is
+                    // exactly what a fully outward core did for four passes. See
+                    // `outward` and `Style.beamWidth`.
                     if Style.beamDrawsGlow {
-                        layer(.glow)
-                        bloom
+                        ZStack {
+                            layer(.glow)
+                            bloom
+                        }
+                        .mask { Self.outward }
                     }
                     layer(.core)
                 }
-                .mask { Self.inward }
                 // The beam is light on the rim, not a hit target. The Card row's
                 // own frame is what `hitRegions.cards` reports.
                 .allowsHitTesting(false)
@@ -231,28 +246,36 @@ struct BorderBeam: ViewModifier, Animatable {
 
     // MARK: - The nucleus
 
-    /// The radial bloom, placed on the rim wherever the head currently is.
+    /// The bloom, placed on the rim wherever the head currently is and turned to
+    /// face along it.
     ///
     /// **Part of the glow, not a third layer.** It is drawn inside the same
-    /// `Style.beamDrawsGlow` gate and under the same `inward` mask, so Reduce
+    /// `Style.beamDrawsGlow` gate and under the same `outward` mask, so Reduce
     /// Transparency takes the bloom away with the halo and leaves the crisp core
     /// sweeping — which is what that switch has always meant here.
     ///
+    /// **The rotation is the difference between a streak and a dot**, and it is why
+    /// `head(in:at:)` returns an angle as well as a point. `BeamBloom` is an ellipse
+    /// whose long axis is horizontal in its own space; turning it by the rim's
+    /// tangent at the head puts that axis along the rim, so the nucleus reads as
+    /// light smeared along an edge rather than as a spot placed on one. A circle
+    /// needed no angle, which is exactly why a circle read as a dot.
+    ///
     /// The `GeometryReader` is how the bloom learns the Card's size; everything
     /// else in this modifier is shape-relative and needs none. It costs the one
-    /// path build and the one `trimmedPath` in `headPoint(in:at:)` per frame, and
+    /// path build and the one `trimmedPath` in `head(in:at:)` per frame, and
     /// nothing per slice.
     private var bloom: some View {
         GeometryReader { proxy in
             let tail = max(Style.beamTailFraction, 0.0001)
             let range = Self.trimRange(phase: phase, tail: tail)
             if range.to > range.from,
-               let head = Self.headPoint(
+               let head = Self.head(
                    in: CGRect(origin: .zero, size: proxy.size),
                    at: seam(range.to)
                ) {
                 BeamBloom()
-                    .frame(width: Style.beamBloomDiameter, height: Style.beamBloomDiameter)
+                    .rotationEffect(.radians(head.angle))
                     // How much of the comet is on the path: `span / tail` is 0 at
                     // both ends of the sweep and 1 whenever the segment is fully
                     // extended. Without it the bloom would appear at full size and
@@ -263,13 +286,12 @@ struct BorderBeam: ViewModifier, Animatable {
                     // for the strokes. One expression covers both ends, because
                     // during the drain-out `span / tail` *is* `1 - (u - 1) / tail`.
                     .opacity(min(Double((range.to - range.from) / tail), 1))
-                    .position(head)
+                    .position(head.point)
             }
         }
     }
 
-    /// Where on the rim the head is, at a fraction of `Style.cardShape`'s own
-    /// path.
+    /// Where on the rim the head is, and which way the rim runs there.
     ///
     /// **Read the *first* point of a short trimmed sub-path.** `currentPoint` on
     /// `trimmedPath(from: 0, to: f)` returns the sub-path's *end* and is `nil` at
@@ -278,92 +300,114 @@ struct BorderBeam: ViewModifier, Animatable {
     /// case is the one that fires; the others are there so a future change to the
     /// shape cannot make this silently return `nil`.
     ///
-    /// Approximate on purpose. `beamSeamOffset` had to be exact to a
-    /// ten-thousandth because it decides *where the beam enters the rim* and an
-    /// error there is a visible discontinuity every lap. A bloom is a soft disc
-    /// `Style.beamBloomDiameter` across; being a point or two along the rim from
-    /// the core's tip is
-    /// invisible, so `epsilon` is a plain small number and there is no refinement
-    /// loop. One path build and one trim per frame is affordable; forty would not
-    /// be.
-    static func headPoint(in rect: CGRect, at fraction: CGFloat) -> CGPoint? {
+    /// The **angle** comes out of the same sub-path for free: the last point of the
+    /// trim is `epsilon` of perimeter ahead of the first, so the vector between them
+    /// is the rim's direction at the head to within the corner's own curvature. One
+    /// `Path` build and one `trimmedPath` per frame either way — the tangent costs a
+    /// second point out of a path that was already being walked, and nothing else.
+    /// Doing it as two calls to a point function would have cost two of each, which
+    /// is the version this replaced.
+    ///
+    /// `epsilon` is a plain small number and there is no refinement loop, and it is
+    /// bigger than it was — 0.008 of the perimeter, about 7pt — because it is now
+    /// answering a direction as well as a position. A 7pt chord through a 22pt corner
+    /// reports the corner's average direction rather than its exact tangent, which is
+    /// invisible on a soft ellipse. The *position* is unaffected by any of this: it is
+    /// the first point of the trim, which is exact at any epsilon.
+    ///
+    /// Approximate on purpose, in other words. `beamSeamOffset` had to be exact to a
+    /// ten-thousandth because it decides *where the beam enters the rim* and an error
+    /// there is a visible discontinuity every lap. A bloom is a soft ellipse
+    /// `Style.beamBloomLength` long; being a point or two along the rim from the
+    /// core's tip, or a degree or two off its tangent, is invisible.
+    static func head(in rect: CGRect, at fraction: CGFloat) -> (point: CGPoint, angle: Double)? {
         guard rect.width > 0, rect.height > 0 else { return nil }
-        let epsilon: CGFloat = 0.002
+        let epsilon: CGFloat = 0.008
         let f = min(max(fraction, 0), 1 - epsilon)
         let sub = Style.cardShape.path(in: rect).trimmedPath(from: f, to: f + epsilon)
 
-        var found: CGPoint?
+        var first: CGPoint?
+        var last: CGPoint?
         sub.forEach { element in
-            guard found == nil else { return }
-            switch element {
-            case .move(let point): found = point
-            case .line(let point): found = point
-            case .curve(_, let control1, _): found = control1
-            case .quadCurve(_, let control): found = control
-            case .closeSubpath: break
+            let point: CGPoint? = switch element {
+            case .move(let point): point
+            case .line(let point): point
+            case .curve(_, let control1, _): control1
+            case .quadCurve(_, let control): control
+            case .closeSubpath: nil
             }
+            guard let point else { return }
+            if first == nil { first = point }
+            last = point
         }
-        return found
+
+        guard let first else { return nil }
+        guard let last, last != first else { return (first, 0) }
+        return (first, atan2(Double(last.y - first.y), Double(last.x - first.x)))
     }
 
-    // MARK: - Inward only
+    // MARK: - Outward, except the core
 
-    /// Everything inside the Card's rim, and nothing outside it.
+    /// Everything outside the Card's rim, and nothing inside it — the mask over the
+    /// **glow and the bloom only**.
     ///
-    /// **This mask used to be the exact opposite, and inverting it is the fifth
-    /// pass's whole change. Read this before touching it.** For four passes the
-    /// beam was masked to the region *outside* `Style.cardShape`, on a rule that
-    /// read as obviously right — a blur spreads both ways, so cut the inward half
-    /// and nothing washes over the Card's icon, name and chips. What that rule
-    /// actually did was exclude the one ground this app controls. Outside a Card's
-    /// rim there is `Style.cardInset`'s gutter and then the Panel's own transparent
-    /// margin, and the Panel is a borderless non-activating `NSPanel`: outside the
-    /// rim **is the user's desktop**. So the beam never composited against
-    /// anything the app draws. It composited against a wallpaper.
+    /// **This has been inverted twice and the history is the reason to read it
+    /// before touching it.** For four passes the *whole* comet was masked outward,
+    /// on a rule that reads as obviously right: a blur spreads both ways, so cut the
+    /// inward half and nothing washes over the Card's icon, name and chips. What that
+    /// rule also did was stake the effect's visibility on a ground the app does not
+    /// own. Outside a Card's rim there is `Style.cardInset`'s gutter and then the
+    /// Panel's own transparent margin, and the Panel is a borderless non-activating
+    /// `NSPanel`: outside the rim **is the user's desktop**. Measured on the Card as
+    /// `cardSurface(focused:)` actually draws it, dark appearance's near-white head
+    /// over a *white* desktop read **Δ10/442** — invisible — against Δ270 over a
+    /// near-black one. A factor of twenty-seven decided by somebody's wallpaper, and
+    /// **"dark appearance" does not mean "dark ground"**: the appearance sets the
+    /// Card's tint and has nothing to do with what is behind the Panel.
     ///
-    /// Measured, on the Card as `cardSurface(focused:)` actually draws it: in dark
-    /// appearance over a *white* desktop the head measured **Δ10/442** half a point
-    /// outside the rim — invisible — against Δ270 over a near-black one. That is a
-    /// factor of twenty-seven decided by somebody's wallpaper, and it is why four
-    /// carefully-measured passes were each rejected on sight. **"Dark appearance"
-    /// does not mean "dark ground"**: the appearance sets the Card's tint, and the
-    /// desktop the beam was drawing on has nothing to do with the appearance.
+    /// The fifth pass answered that by masking everything *inward*, which fixed the
+    /// number (Δ87 over a white desktop) and put the halo over the Card's own
+    /// content. That was rejected on sight — "it shouldn't be inside because that
+    /// looks ass" — with the halo wanted outside, bigger, and the rim line kept.
     ///
-    /// Masked inward, the same head measures **Δ55 over a white desktop** and
-    /// Δ58 / Δ108 / Δ164 over a hazy grey-white one, a photograph and a near-black
-    /// one, because it is now drawing on Liquid Glass with a known tint rather than
-    /// on an unknown backdrop. It is not perfectly wallpaper-independent —
-    /// `.regular` glass transmits, so the Card's own luminance still moves with what
-    /// is behind it — but the floor goes 10 → 55 and that is the fix.
+    /// **So the halo is outward and the core is unmasked, and the Δ10 finding is why
+    /// the colour had to change first.** A straddling core keeps 1pt of itself on
+    /// Liquid Glass, whose polarity is known, so the *line* cannot vanish into a
+    /// wallpaper; and the halo is a light blue rather than a near-white, so it has
+    /// real distance from a bright sky as well as from a dark desktop. An outward
+    /// halo is only viable because of that colour — see `Palette.beamHead`. Get the
+    /// colour wrong again and this mask is the Δ10 bug again.
     ///
-    /// **The clip is `Style.cardShape` exactly, with no outward spill, and that is
-    /// a positive choice rather than the lazy inverse.** A `.stroke` is centred on
-    /// its path, so the inner half of a `beamStrokeWidth` stroke is `beamWidth` of
-    /// core lying in `[rim - 1, rim]` — which is *precisely* the band
-    /// `CardSurface`'s own `strokeBorder` hairline occupies. The beam therefore
-    /// overwrites the Card's own rim for the length of the sweep, which is what the
-    /// reference material looks like: not a second line drawn inside the border,
-    /// the border itself lit. A spill of a point or two would have put the core's
-    /// outer half back on the wallpaper and made the line's *width* depend on the
-    /// desktop — 2pt over a dark one, 1pt over a bright one.
+    /// **A `Rectangle` with the shape punched out, grown by `Style.beamMaskOutset`.**
+    /// The growth is not tidiness: an overlay's mask is laid out at the *content's*
+    /// size, and the halo is drawn tens of points beyond it, so a mask stopping at
+    /// the bounds clips the glow and the bloom into a hard square edge along all four
+    /// sides. That artefact is documented from the second pass. `beamMaskOutset` was
+    /// correctly deleted while the mask was `cardShape` itself — a region entirely
+    /// inside the bounds has no boundary to overrun — and it comes back with the
+    /// inversion.
     ///
-    /// The cut this leaves is at the rim, radially, and it is the same cut the
-    /// outward mask left — measured as the largest step per half point across the
-    /// rim, **178 before and 178 after**, in the same place. It is not an artefact
-    /// for the same reason it was not one before: what abuts the boundary is the
-    /// core at near-full alpha, so what the eye sees is a line's own edge, sitting
-    /// on the Card's real hairline rim. The metric that has to stay bounded is the
-    /// *tangential* step — a terminus along the beam, which is what "you can see
-    /// where the border thing ends" was about — and `BorderBeamRenderTests` pins
-    /// that at both termini.
-    ///
-    /// No outset, and there is nothing to derive one from any more. `beamMaskOutset`
-    /// existed because the mask was a `Rectangle` grown past the layer's bounds and
-    /// a mask stopping at the bounds would clip the halo to a hard square edge. A
-    /// shape *is* the region now, entirely inside the bounds, so there is no
-    /// boundary to overrun and the constant is deleted rather than kept at zero.
-    private static var inward: some View {
-        Style.cardShape
+    /// The cut this leaves is at the rim, radially, and it is not an artefact for the
+    /// same reason it never was: what abuts the boundary is the **core** at near-full
+    /// alpha, and the core now straddles it, so the eye sees a line's own edge on the
+    /// Card's real hairline rim rather than the sheared-off face of a bloom. The
+    /// metric that has to stay bounded is the *tangential* step — a terminus along
+    /// the beam, which is what "you can see where the border thing ends" was about —
+    /// and `BorderBeamRenderTests` pins that at both termini.
+    private static var outward: some View {
+        Rectangle()
+            // The negative padding goes on the *rectangle*, before the overlay,
+            // which is the only order that works: a view's overlay is laid out at
+            // that view's own layout size, so punching the hole after the growth
+            // punches a `cardShape` the size of the Card, in the right place, out of
+            // a rectangle that is `beamMaskOutset` bigger in every direction.
+            // Growing the composed view instead would grow the hole with it.
+            .padding(-Style.beamMaskOutset)
+            .overlay {
+                Style.cardShape
+                    .blendMode(.destinationOut)
+            }
+            .compositingGroup()
     }
 }
 

@@ -175,18 +175,25 @@ it, and the crisp core on top of both. Then the light went **white** rather than
 blue and the halo became mist rather than a cloud. It is still those three parts,
 still that paint.
 
-**The fifth change is not paint, and it is the only structural correction the beam
-has had.** It was masked to the region *outside* the rim through all four of those
-steps, so it never composited against anything this app draws — outside a Card's
-rim is the gutter and then the Panel's transparent margin, which is the user's
-desktop. It is masked **inward** now: the core sits just inside the rim on the
-Card's own glass and the mist spills into the Card. Every measurement in the four
-sections below was taken against a synthetic swatch and is therefore a measurement
-of the beam and not of the effect. They are kept because their *shape* arguments —
-a coma not a tube, a bloom not a lit line, `.butt` caps, the travel-based position —
-all still hold and were all still correct. The sections below record all five steps,
-because each is a correction of the one before and the corrections are the
-valuable part.
+**The fifth and sixth changes are the only structural ones, and they are one
+argument in two halves.** Through all four paint steps the beam was masked to the
+region *outside* the rim, so it never composited against anything this app draws —
+outside a Card's rim is the gutter and then the Panel's transparent margin, which is
+the user's desktop. The fifth pass inverted the mask entirely: everything inward,
+onto the Card's own glass. That fixed the ground and was rejected on sight, because
+the halo was then over the Card's content.
+
+**The sixth pass is where it landed: the halo outward, the crisp core *straddling*
+the rim, and the light a light blue.** That last part is not a paint preference — it
+is the enabling condition. Half the core and all of the halo composite against a
+desktop the app does not own, and the fifth pass's own measurement is why that is
+survivable only for a chromatic colour: a **near-white** beam over a bright hazy
+wallpaper measured Δ10/442, where a light blue is 152 from white, 135 from mid-grey
+and 307 from near-black. The half of the core on the glass is the floor no wallpaper
+can take away. Every measurement in the four sections below was taken against a
+synthetic swatch and is therefore a measurement of the beam and not of the effect;
+they are kept because their *shape* arguments — a coma not a tube, a bloom not a lit
+line, `.butt` caps, the travel-based position — all still hold.
 
 **Nothing in the decision above moved, through any step.** Same `trim`, same
 over-travel geometry, same `Animatable` drive with no clock, same one lap, same
@@ -199,7 +206,7 @@ beam.
 measured carefully, reported true numbers, and were rejected on sight — and the
 fifth found out why: every one of them measured the light against a synthetic
 rectangle, and the surface it was actually landing on was not in the app at all. See
-"The inward comet" at the end of this section; if you read one thing here, read
+"The inward comet, and the blue one after it" at the end of this section; if you read one thing here, read
 that. The first
 profiled the falloff *along* the beam and never across it, and shipped a head
 with no halo at all while reporting a monotone falloff. The second profiled it
@@ -413,7 +420,7 @@ Card's rim there is nothing of this app's at all: `Style.cardInset`'s gutter, th
 the only ground the app owns, and four passes of colour work were tuned against a
 wallpaper nobody had rendered. The mask is inverted; the "densest at the border"
 reading survives the inversion unchanged, because the cut is at the rim either way
-and the core is what abuts it either way. See "The inward comet" below.
+and the core is what abuts it either way. See the last sub-section below.
 
 **The gutter grew twice, and the second time the Panel grew with it.**
 `Style.cardInset` went 6 → 12 → 24, so the visible gap between two Card surfaces
@@ -757,7 +764,7 @@ while the measurement fell to 3,782 — it is a floor on the beam *existing*, an
 is now the tightest it has ever been, so a fifth pass that takes the mist down
 again has to re-measure it rather than assume there is room.
 
-#### The inward comet — the step that found the beam was drawing on the desktop
+#### The inward comet, and the blue one after it — the steps that found the beam was drawing on the desktop
 
 The answer to the white comet, on screen, was that **nothing showed up at all** —
 summoning, Tab, typing, no beam. And the user is in **dark** appearance, where every
@@ -799,47 +806,63 @@ first table it printed:
 The floor across all eight went **10 → 40**, and the floor in the appearance the user
 is actually in went **10 → 87**.
 
+**And then the halo went back outside, which is the sixth pass, because the inward
+version was rejected on sight** — "it shouldn't be inside because that looks ass",
+with the glow wanted outside, bigger, blue and spread out, and the rim line kept.
+What makes that possible rather than a return to Δ10 is two changes taken together:
+the core **straddles** the rim, so half of it is always on Liquid Glass, and the
+light is a **light blue** rather than a near-white, so the other half and the whole
+halo have real distance from a bright wallpaper as well as a dark one. Re-measured
+the same way, over the same four backdrops (means of several renders, see the
+harness note below): dark **83 / 61 / 111 / 227**, light **86 / 62 / 110 / 227**.
+The floor across all eight went 40 → **61**, and the part of it no wallpaper can
+touch — the core's inward half by itself — is Δ46/49.
+
 **The reference does the same thing, and that is why it reads in every frame.** Tuna
 for Mac's rim highlight is bright against its Card's own dark blue **fill** — it is lit
 from the inside edge. Codiclens's was lit from the outside edge, into thin air.
 
-##### What "inward" is, exactly
+##### Where the light sits, exactly — and the two inversions it took
 
-`BorderBeam.outward` became `BorderBeam.inward`, which is `Style.cardShape` and
-nothing else. Three consequences, all of them things that could have gone wrong:
+`BorderBeam.outward` became `BorderBeam.inward` (`Style.cardShape` and nothing
+else), and then came back as `outward` with the **core left unmasked**. What is drawn
+now: the glow and the bloom masked to the region outside the rim, and a
+`Style.beamWidth` (2) stroke centred on the rim, so 1pt lands in `[rim - 1, rim]` —
+precisely the band `CardSurface`'s `strokeBorder` occupies, which is what lights the
+*border* rather than drawing a second line — and 1pt lands outside. `beamStrokeWidth`
+is deleted; the glow still doubles, because the glow is still masked.
 
-**The core lands on the Card's own hairline rim, and that is not a coincidence to be
-tidied away.** A `.stroke` is centred on its path, so inverting which half the mask
-keeps leaves `Style.beamWidth` of core in the band `[rim - 1, rim]` — precisely where
-`CardSurface`'s `strokeBorder` draws. The beam therefore *lights the Card's border*
-for the length of the sweep, instead of drawing a second line inside it. That is the
-reference's character exactly, and it is the argument for **no outward spill**: a
-hairline of spill would look like a lit edge in isolation and would put the core's
-outer half back on the wallpaper, making the line's *width* depend on the desktop —
-2pt over a dark one, 1pt over a bright one. Zero spill; `nothingIsLitOutsideTheRim`
-reads 0 at a 1pt outset at five phases.
+**The "no outward spill" argument is deleted rather than qualified.** It said a spill
+would make the line's *width* wallpaper-dependent, 2pt over a dark desktop and 1pt
+over a bright one. That is true of a near-white line and false of a chromatic one,
+which reads against a white sky as well as a dark one — so the objection was really
+an argument about the colour. Composited peak Δ across the rim band over four
+backdrops: dark **83 / 61 / 111 / 227**, light **86 / 62 / 110 / 227**, against
+74 / 100 / 180 / 257 and 174 / 155 / 95 / 40 masked inward. The floor across all
+eight went 40 → **61**, and the wallpaper-independent part of it — the inward half of
+the core, alone — is Δ46/49. `theBeamReadsAgainstAWhiteDesktop` still passes with the
+halo outside, which is the single most important fact in the pass.
 
-**The inverted clip does not introduce a hard edge, because the cut is the same cut
-in the other direction.** `Style.beamMaskOutset` existed for a real reason — the old
-mask was a `Rectangle` grown past the layer's bounds, and a mask stopping at the
-bounds would clip the halo into a hard square edge — and it is **deleted**, because a
-shape entirely inside the bounds has no boundary to overrun. What remains is the
-radial cut at the rim, measured as the largest alpha step per half point across it:
-**178 before, 194 after**, same place. Not an artefact for the same reason it was not
-one before — what abuts the boundary is the core at near-full alpha, so the eye sees a
-line's own edge, on the Card's real rim. The metric that has to stay bounded is the
-*tangential* step, which is a terminus with no line to be the edge of, and it reads 13
-against a control of 10 at half a point in, against a threshold of 40.
+**`Style.beamMaskOutset` is back, and it was right to delete it and right to restore
+it.** It exists because an overlay's mask is laid out at the *content's* size while
+the halo is drawn tens of points beyond it, so a mask stopping at the bounds clips
+the glow and the bloom into a hard square edge. While the mask was `cardShape` — a
+region entirely inside the bounds — there was no boundary to overrun. It is derived,
+`max(beamGlowTailBlur * 3 + beamGlowStrokeWidth, beamBloomLength)`, so raising a blur
+or the bloom cannot start clipping.
 
-**The mist reaches the Card's content, a little, and that was priced.** Reach is
-**33pt inward** on a 236 × 216 surface, so the glow dies at 30% of the way to the
-centre and nothing more than 36pt in ever sees alpha above **5** — the icon, the name
-in a normal case, and the whole middle of the Card are untouched. What it does cross is
-the bottom-trailing `KeyHintChip`, which sits `Style.padding` (12) from two rims and
-takes up to alpha **77** as the head goes past, and a long app name, inset the same 12
-horizontally. That is accepted rather than overlooked; the reference's rim light spills
-over content near its own rim too, and the alternative is a glow that stops before it
-starts.
+The radial cut at the rim is not an artefact, for a better reason than before: the
+core straddles it, so the boundary has a line drawn over it on both sides. The step
+per half point across the rim reads **70**, against 178 outward and 194 inward. The
+metric that has to stay bounded is the *tangential* step — a terminus with no line to
+be the edge of — and it reads 9 against a control of 3 at half a point out, against a
+threshold of 40.
+
+**Inward, only the core's own half reaches anything.** Alpha stops entirely by 13pt
+in and nothing past 10pt in exceeds 4, so the icon, the name and the middle of the
+Card are untouched — `nothingIsLitDeepInsideTheRim` bounds that, now that neither
+"nothing inside" nor "nothing outside" is a true claim. Outward the reach is **37pt**
+against the 48pt gutter, so `cardInset` stays 24.
 
 ##### The polarity, and the one thing light appearance cannot have
 
@@ -881,63 +904,78 @@ same `trimRange`, same travel-based `position`, same `.butt` caps, same
 0.55s — **the fifth time that duration has been left alone**, and for a new reason:
 which side of the rim the light falls on is not a distance.
 
-The alphas came down where the new ground made them read stronger. Dark's `beamBloom`
-0.48 → **0.44** and its glow head and tail neutralised to (0.92, 0.96, 1.00) and
-(0.80, 0.88, 1.00). Light's glow went 0.52 → **0.34** and 0.16 → **0.10** and its
-bloom 0.48 → **0.28**: a *darkening* spread over 30pt of a light Card is a grey wash
-where the same thing in dark appearance is a mist, and rendered at 3× it was competing
-with the line it is supposed to sit under.
+**The palette is one light blue in both appearances now**, which is simpler than
+what it replaced and is what was asked for ("a light blue for both white and black").
+`beamHead` (0.50, 0.68, 1.00)@1.0, `beamTail` (0.68, 0.82, 1.00)@0.42, `beamGlowHead`
+(0.62, 0.78, 1.00)@0.52, `beamGlowTail` (0.74, 0.86, 1.00)@0.18, `beamBloom`
+(0.66, 0.81, 1.00)@0.46 — each wider element less saturated than the one inside it.
+The **per-appearance polarity** the fifth pass introduced (a dark cool line in light
+appearance, because a light Card is lighter than any highlight) is deleted with the
+inward mask that required it: outside the rim there is no such ceiling, and a light
+blue is far from a light desktop as well as a dark one. Own-colour saturation is 0.50,
+bounded from *both* sides by `theCoreIsADesaturatedHighlight` — above 0.60 is the blue
+blob rejected twice, below 0.20 is the near-white that measured Δ10.
 
-`Style.cardInset` is now **24 for nothing**. It went 6 → 12 → 24 to give the outward
-halo a gutter it must not cross, and there is no outward halo. Going back to 12 is a
-real gain — holding `PanelLayout.cardWidth`/`cardHeight` at 284 × 264 it would grow the
-drawn surface 236 × 216 → **260 × 240**, handing back 24pt of Card content in each
-direction; holding the surface instead would take the Panel from 968 × 732 to
-**872 × 708**. It is **not applied**: the surface size is what `beamSeamOffset` is a
-function of, and moving it obliges a re-probe of a constant that has to be exact to a
-ten-thousandth. A separate change with its own verification, not a side effect of a
-paint fix.
+**The stretch is two dials.** `beamGlowRamp` 2.4 → **1.25** lifts the body of the
+tail — 4pt out, at the head and 15/30/60/90pt behind it, 112/80/62/48/35 → 115/96/79/
+54/42, and 100pt behind 15 → 25 — while leaving both ends alone, because the far end
+is the core's own trailing colour rather than the glow at any exponent. And the bloom
+is an **ellipse along the rim** instead of a circle: `beamBloomLength` 168 by
+`beamBloomThickness` 96, rotated onto the rim's tangent, extent 56pt along its long
+axis against 32 across in isolation and 63pt of lit rim ahead of the head in situ.
+All the growth went along the rim because the gutter bounds only the across axis.
+`beamGlowHeadBlur` 12 → **14** and `beamGlowTailBlur` 22 → **24** are the rest of
+"bigger"; the 15 that was tried and reverted once was reverted because it cost the
+halo the contrast the *line* needed, and the straddling core pays for that separately
+now.
 
-Cost: **nothing, and it deleted a compositing group.** Measured in one run with the
-mask flipped between them, inward reads **0.97–1.00 ms Release / 1.10 ms Debug**
-against outward's **0.97–1.00 / 1.11–1.13** — identical inside the noise, which is the
-expected answer, since `Style.cardShape` on its own replaces a `Rectangle`, a
-`.blendMode(.destinationOut)` shape and a `.compositingGroup()`. Those absolutes are a
-third harness and comparable with neither set above; measure before and after in one
-run and ignore the number.
+`Style.cardInset` stays **24**, and the fifth pass's written-up proposal to take it
+back to 12 — on the grounds that an inward halo needs no gutter — is deleted. The
+halo is outward again, the gutter is the room it falls off in, and the measured reach
+is 37pt against 48. The drawn surface is still 236 × 216, so `beamSeamOffset` needed
+no re-probe.
+
+Cost: the split mask is about **15%** dearer. Same paint, measured in one run: the
+halo masked outward with the core drawn unmasked outside it reads **2.67–2.85 ms
+Debug / 1.77 ms Release** against **2.34 ms Debug** with everything under one
+`cardShape` mask — the `Rectangle`, the `.blendMode(.destinationOut)` and the
+`.compositingGroup()` coming back, plus one more layer outside the mask. Absolutes are
+a fourth harness and comparable with none of the sets above; measure before and after
+in one run and ignore the number.
+
+**A harness finding worth more than the cost figure: `glassEffect` does not
+rasterise deterministically under `ImageRenderer` in Debug.** Two renders of the same
+unlit Card differ by up to Δ36 on most of their pixels — a dither — which is most of
+`theBeamReadsAgainstAWhiteDesktop`'s own floor arriving as noise. In Release the same
+pair is bit-identical. That is what the earlier "Δ87 in Debug and Δ68 in Release for
+the same code" note was seeing without the cause. Every composited Δ quoted here is
+a mean of several renders; the test averages six, which puts the residual under Δ5,
+and Debug and Release then agree to about Δ5.
 
 ##### What the renders look like
 
 Rendered with `ImageRenderer` at 3× and looked at, per appearance and per backdrop —
-the standing instruction for this feature, and the only reason the last three artefacts
-were ever found.
+the standing instruction for this feature, and the only reason the last three
+artefacts were ever found.
 
-**Dark appearance over the user's own wallpaper** is the result the whole thing was
-for: a thin crisp white line hugging the rim, brightest at the head, with a soft
-inward mist a few tens of points deep that fades into the Card and a small bloom at the
-nucleus. The Card's glass reads the cityscape through it and the line reads *on* the
-glass — it is unmistakably the Card's border being lit, which is the reference's
-character. **Over the hazy grey-white sky**, where the old beam was Δ27 and invisible,
-the line and the mist both read clearly against the grey Card. **Over a pure white
-desktop** — the ground that contributes nothing — dark appearance's Card renders 166
-and the beam reads as a distinctly brighter edge with the bloom visible at the head:
-quiet, and present, where it used to be absent.
-
-**Light appearance over white** reads as a dark cool line on the rim with a soft
-shading spilling inward and a darker bloom at the head. It is visibly a shadow rather
-than a light, and that is what a highlight becomes on a ground lighter than itself. It
-is the mirror of the reference rather than the reference, it is the appearance the user
-is not in, and it is the honest alternative to invisible.
+**Over the user's own wallpaper** the head is a blue vertical streak outside the rim,
+soft on both sides, with a thin light line on the rim running through it and the halo
+trailing away behind. It reads as light coming *off* the edge, which is what was
+asked for, and the streak is unmistakably longer along the rim than it is thick —
+the circle read as a dot and this does not. **Over a white desktop**, in both
+appearances, the halo is a pale blue wash outside the rim with the line visible
+through it; quiet, and present, where the near-white version was absent. **In light
+appearance** the halo is the same blue rather than the shadow the inward version drew,
+and the line is the quietest thing in any of these renders — the halo carries the
+effect there.
 
 ##### The one number that is a risk
 
-Light appearance over a **dark** wallpaper: Δ40. That is the weakest ground either
-appearance has and it is the one this pass made worse (204 → 40). It is above the
-per-appearance arithmetic floor of ~46 only by rounding, it is deliberate, and the
-alternative — a near-white light core — measures Δ5 over the white desktop that is far
-more common in that appearance. If it ever needs closing, the levers are the same two
-that are already closed: saturation is the withdrawn blue, and a static lit rim is the
-fixed lamp.
+The floor is Δ**61**, on a hazy grey-white sky in dark appearance. That is a bright
+ground under a mid-grey Card and it is the ground the halo has least distance from.
+It is six times the Δ10 that was invisible, and the levers if it ever needs closing
+are the two that stay closed: saturation is the withdrawn blue, and a static lit rim
+is the fixed lamp.
 
 ### What is not in this budget
 

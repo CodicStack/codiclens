@@ -111,18 +111,18 @@ enum Motion {
     /// glow behind it needs long enough for the tail to be seen as a tail rather
     /// than as a flash.
     ///
-    /// **It stayed 0.55 through all four later changes**, and that was decided
+    /// **It stayed 0.55 through all five later changes**, and that was decided
     /// rather than skipped each time. The glow got wider — 34pt of reach where
     /// there had been 11 — then quieter and more concentrated at the head, then
-    /// quieter again and white rather than blue, and then it changed *sides*: the
-    /// fifth pass masks the whole comet inward, so the halo spills onto the Card's
-    /// own glass instead of onto the desktop. None of that changed anything along
-    /// the rim: the lit segment is still `Style.beamTailFraction` of the perimeter,
-    /// so there is exactly as much rim to travel and exactly as much of it stroked
-    /// at once. Duration answers segment length and perimeter, and neither moved. A
-    /// bigger halo is easier to see, not slower to read; a shorter *visible* comet
-    /// is not a shorter journey; and which side of the rim the light falls on is not
-    /// a distance at all.
+    /// quieter again and white rather than blue; then it changed *sides* twice, and
+    /// it is now a light blue halo outside the rim with the crisp core straddling
+    /// it, longer along the rim than it has ever been. None of that changed anything
+    /// about the *journey*: the lit segment is still `Style.beamTailFraction` of the
+    /// perimeter, so there is exactly as much rim to travel and exactly as much of
+    /// it stroked at once. Duration answers segment length and perimeter, and
+    /// neither moved. A bigger halo is easier to see, not slower to read; a longer
+    /// *visible* comet is not a longer journey; and which side of the rim the light
+    /// falls on is not a distance at all.
     static let beamSweep: Animation = .easeOut(duration: 0.55)
 
     /// The Loading Ring's revolution.
