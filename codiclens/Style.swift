@@ -805,10 +805,10 @@ private struct Palette {
         // future pass that has to split them again should not have to move them
         // back in first.
         beamHead: Color(red: 0.50, green: 0.68, blue: 1.0).opacity(1.0),
-        beamTail: Color(red: 0.68, green: 0.82, blue: 1.0).opacity(0.42),
-        beamGlowHead: Color(red: 0.62, green: 0.78, blue: 1.0).opacity(0.52),
-        beamGlowTail: Color(red: 0.74, green: 0.86, blue: 1.0).opacity(0.18),
-        beamBloom: Color(red: 0.66, green: 0.81, blue: 1.0).opacity(0.46)
+        beamTail: Color(red: 0.68, green: 0.82, blue: 1.0).opacity(0.58),
+        beamGlowHead: Color(red: 0.62, green: 0.78, blue: 1.0).opacity(0.70),
+        beamGlowTail: Color(red: 0.74, green: 0.86, blue: 1.0).opacity(0.30),
+        beamBloom: Color(red: 0.66, green: 0.81, blue: 1.0).opacity(0.64)
     )
 
     static let light = Palette(
@@ -829,10 +829,10 @@ private struct Palette {
         // it. Outside the rim there is no such ceiling, and a light blue is far from
         // a light desktop as well as a dark one.
         beamHead: Color(red: 0.50, green: 0.68, blue: 1.0).opacity(1.0),
-        beamTail: Color(red: 0.68, green: 0.82, blue: 1.0).opacity(0.42),
-        beamGlowHead: Color(red: 0.62, green: 0.78, blue: 1.0).opacity(0.52),
-        beamGlowTail: Color(red: 0.74, green: 0.86, blue: 1.0).opacity(0.18),
-        beamBloom: Color(red: 0.66, green: 0.81, blue: 1.0).opacity(0.46)
+        beamTail: Color(red: 0.68, green: 0.82, blue: 1.0).opacity(0.58),
+        beamGlowHead: Color(red: 0.62, green: 0.78, blue: 1.0).opacity(0.70),
+        beamGlowTail: Color(red: 0.74, green: 0.86, blue: 1.0).opacity(0.30),
+        beamBloom: Color(red: 0.66, green: 0.81, blue: 1.0).opacity(0.64)
     )
 
     static func of(_ scheme: ColorScheme) -> Palette {
