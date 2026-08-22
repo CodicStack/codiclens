@@ -267,12 +267,30 @@ enum Style {
     /// see. And it is measured across the beam as well as along it, which is the
     /// measurement the first pass never took.
     ///
-    /// 2.2, off the render. At 1.6 the tail still reads as a band; at 3.0 the coma
-    /// is a dot with no trail behind it. Intensity by position: 1.0 at the head,
-    /// 0.53 a quarter back, 0.22 half way, 0.046 three quarters back, and 0.006 at
-    /// the trailing slice — so about the last 45pt of the segment is dark and the
-    /// visible comet is roughly 200pt of the 303 that is stroked.
-    static let beamGlowRamp: Double = 1.4
+    /// **2.4, raised from 1.4 for "the opacity of the start should be less so that
+    /// it just looks more misty".** At 1.4 the near-rim alpha 4pt out read
+    /// 155 / 111 / 85 / 75 / 58 at the head and 15, 30, 60 and 90 points behind it
+    /// — a falloff, but a slow one, so the first third of the tail was still a band
+    /// of paint. At 2.4 the same five places read **112 / 80 / 62 / 48 / 35**: the
+    /// head against 90pt behind it goes from 2.7× to 3.2×, and the ratio to the far
+    /// end of the segment from 7.4× to 8.6×.
+    ///
+    /// Intensity by position: 1.0 at the head, 0.19 a quarter back, 0.038 half way,
+    /// 0.004 three quarters back — so more than half the stroked segment is
+    /// effectively unlit glow and the visible comet is roughly 150pt of the 303
+    /// that is stroked. That is the point rather than an accident; the crisp core
+    /// still runs the whole length, which is what stops this being `beamFalloff`
+    /// again.
+    ///
+    /// **The exponent is not the whole of the mist, and moving it alone would have
+    /// been the wrong half.** The trailing end of the *glow* is already zero at any
+    /// exponent — `position^ramp` is 0 at position 0 — so what is actually visible
+    /// at the start of the beam is the **core**'s trailing colour, blurred by
+    /// `beamCoreTailBlur`. Measured at the trailing terminus, alpha 1pt out went
+    /// 22 → **14** only when `beamTail`'s own alpha came down 0.70 → 0.42. Raising
+    /// this exponent thins the *body* of the tail; lowering `beamTail` thins its
+    /// end.
+    static let beamGlowRamp: Double = 2.4
 
     /// The glow's opacity multiplier for a slice at `position`.
     ///
@@ -315,6 +333,19 @@ enum Style {
     /// halo eight points out measures Δ108 on white against Δ68 for the version
     /// this replaced, while total lit energy is down 46%. That pair is the whole
     /// brief: less light, further out.
+    ///
+    /// **Its alpha came down 0.76 → 0.48 with the fourth pass, and the diameter did
+    /// not move.** The disc was the *densest* thing on screen in light appearance —
+    /// rasterised over white it was a blue blob with the core's line lost inside it
+    /// — and "no dense coloured halo anywhere" is the half of the reference the
+    /// bloom was failing. Lowering the alpha rather than the diameter is deliberate:
+    /// the diameter is what makes it have no edge, and 96 → 80 would have given back
+    /// a findable rim. Turning the disc down and leaving it wide is what "misty"
+    /// means here. Raising `beamGlowHeadBlur` 12 → 15 was tried in the same pass and
+    /// reverted: it does lift the core's contrast against its own halo (rim / 4pt-out
+    /// alpha 1.59 → 1.73) but it costs the halo everywhere — Δ at 4pt out on white
+    /// fell 60 → 50 and the head's rim Δ 103 → 96 — and light appearance has none to
+    /// spare.
     ///
     /// Half the disc is thrown away by the outward mask, which is correct — the
     /// light comes off the border outward — and it is why the bloom's alpha is
@@ -558,24 +589,49 @@ private struct Palette {
     /// dark desktop. Light cannot: a beam lives *outside* the Card, over the
     /// wallpaper, and there is no colour brighter than a light wallpaper.
     ///
-    /// **Light's pair used to be a pale blue and was measurably inverted; it is
-    /// now saturated, and the lever was saturation rather than lightness.**
-    /// Against a white ground the old `beamHead` (0.62, 0.78, 1.00) measured
-    /// Δ78/442 of perceptual distance and −74/765 of luminance — a wash. The new
-    /// one (0.20, 0.45, 1.00) measures **Δ207** and −260. The reason a single
-    /// colour can now do what the old comment said no single colour could is that
-    /// the old attempts were all reaching for *brightness*: a pale colour is near
-    /// white and invisible on white, a deep one is near black and invisible on
-    /// black. A mid-luminance **saturated** blue is far from both — 247 units from
-    /// white and 255 from black, in the same RGB metric — so it reads against
-    /// every backdrop the Panel can float over. Measured on white, mid-grey and
-    /// near-black: Δ207 / Δ149 / Δ250 at the head.
+    /// **The line is a desaturated near-white highlight, and reading the reference
+    /// image's blue as belonging to the *light* is what sent two passes wrong.**
+    /// The reference — Tuna for Mac, in dark appearance — has a pale, crisp,
+    /// near-white rim highlight and a Card whose **fill** is blue. The blue is in
+    /// the fill. Measured off the crop, its Card's rim highlight sits around
+    /// (150–185, 190–215, 225–248) over a Card fill of roughly (70, 120, 170), and
+    /// its outer slab's rim around (165–180, 168–182, 172–188) — a light warm grey.
+    /// Both are essentially white light; the Card's one only looks blue because of
+    /// what is under it. Codiclens's Cards are not blue, so the light has nothing
+    /// to borrow and must be neutral on its own.
     ///
-    /// On a light ground the beam's luminance delta is **negative** — it darkens.
-    /// That is not a bug and it is the only thing available: nothing is brighter
-    /// than a white wallpaper, so light appearance's glow is a saturated colour
-    /// halo rather than a bright one. It reads as blue light on white, the way any
-    /// light-mode focus bloom does.
+    /// So the core is now **near-white and desaturated in both appearances**.
+    /// Rasterised at the head's rim pixel, the beam's own colour saturation went
+    /// **0.738 → 0.477 in light** and **0.158 → 0.056 in dark**. Composited, dark
+    /// over near-black reads **(172, 178, 183)** — dead centre of the reference's
+    /// slab-rim band — and light over white reads **(169, 198, 253)**, inside its
+    /// Card-rim band on every channel but a hair over on blue.
+    ///
+    /// **What this cost, exactly, and why the previous comment's reasoning is
+    /// gone.** That comment argued for a *saturated* light head on the grounds that
+    /// "the lever was saturation, not lightness", because every pale candidate it
+    /// tried was a wash on white. The premise was right and the conclusion
+    /// over-reached: the beam's contrast against a ground is `0.7 × dist(colour,
+    /// ground)` — the 0.7 is the coverage a 1pt core keeps through the mask and its
+    /// head blur — so the number that matters is the *worst* of the three grounds,
+    /// and for a saturated blue that ground is mid-grey rather than white. Old
+    /// (0.20, 0.45, 1.00): Δ178 on white, **Δ112** on mid-grey, Δ213 on near-black.
+    /// New (0.50, 0.65, 0.98): Δ103, **Δ92**, Δ214. Worst case 112 → 92, a 18% loss,
+    /// for a saturation cut of 35%. The high blue channel is what buys mid-grey
+    /// back, which is why it stays at 0.98 while red and green come up.
+    ///
+    /// **What light appearance still cannot do, measured rather than hoped.** On a
+    /// ground lighter than the light, the luminance delta is negative — the beam
+    /// darkens, by 145/765 at the head over white — and no colour fixes that,
+    /// because nothing is brighter than a white wallpaper. Worse, over a
+    /// *light-grey* wallpaper (0.86, which is where a lot of light desktops sit) the
+    /// new core measures about Δ60/442; the pale blue this project once shipped and
+    /// withdrew measured Δ30 there, so the margin over "invisible" is a factor of
+    /// two and not ten. Rendered and looked at: over white the line is present but
+    /// quiet, and what carries the effect is the mist. **1:1 with the reference is
+    /// a dark-appearance result.** Do not close the gap by saturating this again —
+    /// that is the loop this comment is here to break — and do not close it by
+    /// drawing a static lit rim, which has been declined.
     let beamHead: Color
     let beamTail: Color
 
@@ -585,12 +641,18 @@ private struct Palette {
     /// glow is a wider band and wants less saturation and less weight per pixel
     /// than the line at its centre.
     ///
-    /// **Both alphas came down, because the answer on screen was "the blue is too
-    /// dense".** They were 0.80 → 0.55 and they are now 0.46 → 0.34, and the
-    /// saturation came down with them: light's head went (0.28, 0.52, 1.00) →
-    /// (0.38, 0.60, 1.00). The energy the effect lost there is bought back as
-    /// *spread* by `beamBloom`, which is the axis the complaint was actually
-    /// about — less light, further out, coming from somewhere.
+    /// **Both alphas have come down twice, because "too dense" was said twice.**
+    /// 0.80 → 0.55, then 0.72 → 0.46, and they are now **0.52 → 0.16**. The tail's
+    /// is the one that moved furthest, on purpose: "the opacity of the start should
+    /// be less so that it just looks more misty" is a statement about the trailing
+    /// end, and the head's halo is the part that has to stay — it is the only thing
+    /// in light appearance carrying the effect at all.
+    ///
+    /// The saturation came down with them, twice as well: light's glow head went
+    /// (0.28, 0.52, 1.00) → (0.38, 0.60, 1.00) → **(0.58, 0.72, 1.00)**, and dark's
+    /// to (0.88, 0.94, 1.00), which is white with a hint. The reference has no dense
+    /// coloured halo anywhere in it; a halo is where a colour is most obvious,
+    /// because it covers the most pixels.
     ///
     /// A ramp *is* multiplied over these now, and only over these:
     /// `Style.beamGlowIntensity(at:)`. That is a deliberate reversal of the "no
@@ -609,8 +671,14 @@ private struct Palette {
     /// this is the widest, softest thing the beam draws, and a saturated wash
     /// across 38pt is the blue *paint* the last version was rejected for. In light
     /// appearance it still has to be a colour rather than a brightness — nothing
-    /// is brighter than a white wallpaper — so it stays blue and simply carries
-    /// less of it per pixel.
+    /// is brighter than a white wallpaper — so it stays faintly blue and simply
+    /// carries less of it per pixel.
+    ///
+    /// **0.76 → 0.48, and it is the single biggest reason the head stopped being a
+    /// blob.** At 0.76 the disc was brighter than the core it sits under, so the
+    /// crisp line was *inside* the brightest thing on screen and could not be seen
+    /// as a line. The rim's alpha against the alpha 4pt out went 1.30 → **1.59**
+    /// across this pass, which is the number that says the line reads.
     let beamBloom: Color
 
     // MARK: Derived surface tints
@@ -643,11 +711,11 @@ private struct Palette {
         chipFill: .white.opacity(0.09),
         chipRim: .white.opacity(0.10),
         shadow: .black.opacity(0.44),
-        beamHead: .white.opacity(0.95),
-        beamTail: Color(red: 0.45, green: 0.65, blue: 1.0).opacity(0.70),
-        beamGlowHead: Color(red: 0.78, green: 0.89, blue: 1.0).opacity(0.72),
-        beamGlowTail: Color(red: 0.48, green: 0.67, blue: 1.0).opacity(0.46),
-        beamBloom: Color(red: 0.62, green: 0.80, blue: 1.0).opacity(0.76)
+        beamHead: .white.opacity(1.0),
+        beamTail: Color(red: 0.74, green: 0.85, blue: 1.0).opacity(0.42),
+        beamGlowHead: Color(red: 0.88, green: 0.94, blue: 1.0).opacity(0.52),
+        beamGlowTail: Color(red: 0.72, green: 0.84, blue: 1.0).opacity(0.16),
+        beamBloom: Color(red: 0.82, green: 0.91, blue: 1.0).opacity(0.48)
     )
 
     static let light = Palette(
@@ -662,11 +730,11 @@ private struct Palette {
         chipFill: .white.opacity(0.62),
         chipRim: .black.opacity(0.07),
         shadow: .black.opacity(0.20),
-        beamHead: Color(red: 0.20, green: 0.45, blue: 1.0).opacity(0.95),
-        beamTail: Color(red: 0.10, green: 0.30, blue: 0.86).opacity(0.70),
-        beamGlowHead: Color(red: 0.38, green: 0.60, blue: 1.0).opacity(0.72),
-        beamGlowTail: Color(red: 0.24, green: 0.46, blue: 0.96).opacity(0.46),
-        beamBloom: Color(red: 0.32, green: 0.56, blue: 1.0).opacity(0.76)
+        beamHead: Color(red: 0.50, green: 0.65, blue: 0.98).opacity(1.0),
+        beamTail: Color(red: 0.38, green: 0.54, blue: 0.90).opacity(0.42),
+        beamGlowHead: Color(red: 0.58, green: 0.72, blue: 1.0).opacity(0.52),
+        beamGlowTail: Color(red: 0.46, green: 0.62, blue: 0.94).opacity(0.16),
+        beamBloom: Color(red: 0.54, green: 0.70, blue: 1.0).opacity(0.48)
     )
 
     static func of(_ scheme: ColorScheme) -> Palette {
@@ -780,7 +848,9 @@ enum BeamLayer {
     /// The bloom. Wide, always blurred, present along the whole lit segment
     /// including under the head.
     case glow
-    /// The crisp line at the centre of the light. 1pt, and unblurred at the head.
+    /// The crisp line at the centre of the light. 1pt visible, and *barely*
+    /// blurred at the head rather than unblurred — see `Style.beamCoreHeadBlur`,
+    /// where 0 was the visible hard end three times over.
     case core
 }
 
@@ -794,14 +864,17 @@ enum BeamLayer {
 /// is the modifier's business; which blue a slice is drawn in is this file's, the
 /// same as every other colour in the app.
 ///
-/// **No computed opacity ramp, in either layer.** The blur is the falloff. There
-/// used to be a ramp — `Style.beamFalloff`, an exponent on `position` — and
-/// stacking one on top of the blur is the exact double-multiplication that
-/// exponent existed to undo: a linear opacity ramp over colours that already
-/// carry alpha put the trailing slices near 0.05 effective alpha and left a 40pt
-/// sliver of an intended 336pt of lit rim. The head-to-tail colour *mix* below is
-/// not that ramp; it is two named colours and an interpolation between them, and
-/// it is what the beam has always done.
+/// **Exactly one computed opacity ramp, and it is the glow's.**
+/// `Style.beamGlowIntensity(at:)` multiplies `position^beamGlowRamp` into the
+/// glow's colour and nothing else's. The core has none and must not get one: the
+/// core *is* the beam, and the reason a ramp is safe on the glow is that
+/// something else is carrying visibility. The deleted `Style.beamFalloff` was a
+/// ramp on the **only layer there was**, over colours that already carried alpha,
+/// and it put the trailing slices near 0.05 effective alpha and left a 40pt sliver
+/// of an intended 336pt of lit rim — see `Style.beamGlowRamp` for the full
+/// distinction. The head-to-tail colour *mix* below is neither of those; it is two
+/// named colours and an interpolation between them, and it is what the beam has
+/// always done.
 struct BeamSlice: View {
     @Environment(\.colorScheme) private var scheme
 

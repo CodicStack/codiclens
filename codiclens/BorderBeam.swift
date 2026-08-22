@@ -9,7 +9,7 @@ import UniformTypeIdentifiers
 /// It was a 3.5pt bright bar, then a single sliced stroke whose blur ramped from
 /// 0 at the head, then two sliced strokes at constant opacity, and the drive has
 /// never changed — same `trim`, same over-travel, same `Animatable`, same one lap,
-/// same meaning of nothing. What has moved three times is the paint, and each
+/// same meaning of nothing. What has moved four times is the paint, and each
 /// correction fixed a thing the previous one could not have known:
 ///
 /// **One layer cannot be crisp and bloomed at once**, because a slice has exactly
@@ -31,6 +31,13 @@ import UniformTypeIdentifiers
 /// rim point the head currently occupies. A disc has no edges in any direction,
 /// which is both what "a single area/point that a radial blue goes out from" asks
 /// for and what makes the head's terminus stop existing rather than merely soften.
+///
+/// **The light is white, and the blue in the reference belongs to its Card's
+/// fill.** The core was a saturated blue for two passes because that blue was read
+/// as belonging to the light; it is now a desaturated near-white highlight, and the
+/// halo is mist rather than a cloud. `Style.swift` and
+/// `docs/adr/0003-motion-budget.md` carry the numbers, including what light
+/// appearance can and cannot do against a light ground.
 ///
 /// All three are masked together to the region outside the rim, so no part of any
 /// of them washes over the Card's content. The bloom needs that most: a disc

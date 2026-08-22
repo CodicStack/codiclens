@@ -166,9 +166,10 @@ needs no `project.pbxproj` edit.
   near-rim alpha *rose* behind the head and then went flat for 200pt. Nothing
   peaked anywhere, so there was no point for the light to be coming from, and the
   answer was "it should be more like a single area/point that a radial blue kinda
-  goes out from … less dense". `Style.beamGlowRamp` (1.4) is a per-slice opacity
-  ramp, `position^ramp`, and it is **the glow's alone**. It now reads
-  **155 / 75 / 43 / 21** at the same four places.
+  goes out from … less dense". `Style.beamGlowRamp` (**2.4**) is a per-slice opacity
+  ramp, `position^ramp`, and it is **the glow's alone**. It read
+  **155 / 75 / 43 / 21** at the same four places at 1.4 and reads
+  **112 / 48 / 24 / 13** at 2.4.
   **A lit line is not a light source, however carefully it is ramped.** The head
   is `BeamBloom`, a `RadialGradient` disc `Style.beamBloomDiameter` (96) across,
   placed by `BorderBeam.bloom` on the rim point the head currently occupies. A
@@ -195,8 +196,9 @@ needs no `project.pbxproj` edit.
   **0 at the head was the visible hard end**, and it took a 3× zoom of a render
   to find: an unblurred 1pt `.butt` cap is a 1pt square of alpha 250 with nothing
   beyond it, and as the largest alpha step per half-point of arc half a point
-  outside the rim it measured **170** against a mid-segment control of 7. It now
-  measures **6** against 3. Starting the blur ramp above 0 also flattens the
+  outside the rim it measured **170** against a mid-segment control of 7. It measured
+  **6** against 3 at that blur, and **9** against 2 once the glow beneath the head
+  came down to mist. Starting the blur ramp above 0 also flattens the
   per-slice banding, which was visible as ~15pt bright/dim steps down the core:
   the steps nearest blur 0 are the ones the eye can see, because the alpha a 1pt
   line keeps falls off fastest there.
@@ -269,46 +271,85 @@ needs no `project.pbxproj` edit.
   `position` reverted but this pass's blur left in, the drain-out is still monotone
   — 218, 203, 186, 166, 149 — and monotone-only would have passed a terminus three
   times too bright.
-  **This is the third pass, and all three measured something true and
+  **This is the fourth pass, and the first three each measured something true and
   irrelevant.** The first profiled the falloff *along* the beam and never across
   it, and shipped a head with no halo while reporting a monotone falloff. The
   second profiled it *across* and never along, and shipped a halo of constant
   opacity — a tube — while reporting a real halo at every distance. The third took
   both profiles *and* rendered PNGs and looked at them at 3×, which is what found
   the core's cap and the per-slice banding; neither is visible in any number the
-  first two passes were taking. **A render test proving light is on screen cannot
+  first two passes were taking. The fourth measured the core's **absolute colour
+  and its saturation** rather than a Δ, which is the measurement a delta hides: a
+  saturated blue and a desaturated near-white can measure the same contrast against
+  the same ground and are not the same thing at all. **A render test proving light is on screen cannot
   say whether it reads as the thing it is for.** The lesson is not "measure more",
   it is *choose the measurement that corresponds to the complaint* — a visible
   terminus is a large local gradient, and nobody had measured a local gradient.
-- **The beam's light-appearance colours are saturated but no longer dense, and
-  both halves of that are measured.** Light's `beamHead` was (0.62, 0.78, 1.00)
-  and measured Δ43/765 of luminance against a white Card while `beamTail` measured
-  Δ127 — the head a third the contrast of the tail it was supposed to lead. The
-  **core** is now **(0.20, 0.45, 1.00)@0.95** and has not moved since: **the lever
-  was saturation, not lightness**, and the previous pass's conclusion that "no
-  single opaque colour reads against both a white and a mid-grey backdrop" was
-  true of every candidate it tried and false of the space, because it was varying
-  lightness — the axis the two grounds disagree on. A mid-luminance saturated blue
-  is 247 units from white and 255 from black.
-  **What over-corrected was the glow, not the core.** At (0.28, 0.52, 1.00)@0.80 →
-  (0.14, 0.36, 0.92)@0.55 across a flat 303pt band it read as a smear of blue
-  paint, and the answer was "the blue color is too dense … less 'dense' the blur
-  thing". `beamGlowHead`/`beamGlowTail` are now **(0.38, 0.60, 1.00)@0.72** and
-  **(0.24, 0.46, 0.96)@0.46** — lighter, less saturated, lower alpha — and
-  `beamBloom` is **(0.32, 0.56, 1.00)@0.76**, less saturated again because it is
-  the widest, softest thing the beam draws. Dark's glow moved the same way:
-  (0.78, 0.89, 1.00)@0.72, (0.48, 0.67, 1.00)@0.46, bloom
-  (0.62, 0.80, 1.00)@0.76.
-  Measured at mid-sweep, light appearance over white: total perceptual energy
-  **534,554 → 290,850** (−46%), lit pixels over the Card's own rim
-  **8,115 → 5,197** (−36%), peak per-pixel saturation **0.776 → 0.643**. Over the
-  same change the *head's* halo went **up**: Δ68 → Δ108 at 8pt out, Δ19 → Δ49 at
-  20pt, Δ3 → Δ20 at 28pt. **Less total light, further out, from a point** is the
-  whole of what this pass did, and either number alone would mislead.
-  On a light ground the beam's luminance delta is **negative** — it darkens. That
-  is not a defect and no amount of tuning changes it: nothing is brighter than a
-  white wallpaper, so light appearance's halo is a coloured one rather than a
-  luminous one. The user is in light appearance. Do not chase it.
+- **The rim light is WHITE. The reference's blue is in its Card's *fill*, and
+  reading it as belonging to the light is what sent two passes to a saturated
+  core.** The reference material — Tuna for Mac, in **dark** appearance over a
+  dark wallpaper — has a thin, crisp, desaturated near-white rim highlight, a very
+  faint diffuse mist around it, and no dense coloured halo anywhere. Measured off
+  the crop: its Card's rim highlight around (150–185, 190–215, 225–248) over a
+  Card fill of roughly (70, 120, 170), its outer slab's rim around
+  (165–180, 168–182, 172–188). Both are white light; one of them sits on blue.
+  Codiclens's Cards are not blue, so the light has nothing to borrow.
+  **The core is therefore near-white and desaturated in both appearances**, and
+  the previous entry's argument for a *saturated* light `beamHead` is deleted
+  rather than qualified. Own-colour saturation at the head's rim went
+  **0.738 → 0.477 in light** and **0.158 → 0.056 in dark**. Composited, dark over
+  near-black reads **(172, 178, 183)** — the middle of the reference's slab-rim
+  band — and light over white reads **(169, 198, 253)**, inside its Card-rim band
+  on red and green and a hair over on blue. `beamHead` is
+  **(0.50, 0.65, 0.98)@1.0** in light and **white@1.0** in dark; `beamTail`
+  **(0.38, 0.54, 0.90)@0.42** and **(0.74, 0.85, 1.00)@0.42**.
+  **The saturation argument was half right and its conclusion over-reached.** The
+  beam's contrast against a ground is `0.7 × dist(colour, ground)` — 0.7 being the
+  coverage a 1pt core keeps through the mask and its head blur — so what matters is
+  the *worst* of the three grounds, and for a saturated blue that ground is
+  mid-grey, not white. Old (0.20, 0.45, 1.00): Δ178 / **Δ112** / Δ213 on white,
+  mid-grey, near-black. New: Δ103 / **Δ92** / Δ214. **Worst case 112 → 92, an 18%
+  loss for a 35% cut in saturation** — a far cheaper trade than "no pale colour
+  reads on white" implied, and the high blue channel is what buys mid-grey back,
+  which is why it stays at 0.98 while red and green come up.
+  **What light appearance cannot do, and nobody should try to fix again.** On a
+  ground lighter than the light the luminance delta is negative — it *darkens*, by
+  145/765 at the head over white — and nothing is brighter than a white wallpaper.
+  Over a light-*grey* wallpaper (0.86, where many light desktops sit) the new core
+  measures about Δ60/442; the pale blue this project shipped and withdrew measured
+  Δ30 there, so the margin over invisible is a factor of two, not ten. Rendered
+  and looked at: over white the line is present but quiet and the **mist** is what
+  carries the effect. **1:1 with the reference is a dark-appearance result**, and
+  the user is in light appearance. Do not close that gap by saturating the core
+  again, and do not close it with a static lit rim — that is the fixed lamp, and it
+  has been declined.
+- **"Less opacity at the start, more misty" is two dials, and the exponent alone is
+  the wrong half.** `Style.beamGlowRamp` 1.4 → **2.4** thins the *body* of the
+  tail: near-rim alpha 4pt out at the head and 15/30/60/90pt behind it went
+  155/111/85/75/58 → **112/80/62/48/35**, and head-to-far 7.4× → **8.6×**. But
+  `position^ramp` is already 0 at position 0, so the glow contributes *nothing* at
+  the trailing end at any exponent — what is actually visible there is the
+  **core**'s trailing colour, blurred by `beamCoreTailBlur`. The trailing
+  terminus's alpha 1pt out only moved 22 → **14** when `beamTail`'s own alpha came
+  down 0.70 → **0.42**. Glow alphas are now **0.52 → 0.16** (they were 0.80 → 0.55,
+  then 0.72 → 0.46) and `beamBloom` **0.48** (was 0.76). The bloom's *diameter* did
+  not move: 96 is what makes it have no findable edge, and turning it down while
+  leaving it wide is what "misty" means. `beamGlowHeadBlur` 12 → 15 was tried in
+  the same pass and reverted — it lifts the core's contrast against its own halo
+  (rim/4pt alpha 1.59 → 1.73) and costs the halo everywhere, which light
+  appearance cannot afford.
+  Measured at mid-sweep, light over white: total perceptual energy
+  **534,554 → 290,850 → (this pass) −64% again**, lit pixels over the Card's rim
+  **8,115 → 5,197 → 3,782**, peak per-pixel saturation **0.776 → 0.643 → 0.361**.
+  Reach is **34pt**, unchanged, against the 48pt gutter — so `cardInset`,
+  `PanelLayout.cardWidth`/`cardHeight` and `beamSeamOffset` all stay where they
+  are. The hard-edge step at the head went 6 → **9** against a control of 2 and a
+  threshold of 40: a brighter line inside a fainter halo has a steeper edge by
+  construction, and that is the price of the line reading as a line.
+  **The line reading as a line is one number**: the rim's alpha against the alpha
+  4pt out, **1.30 → 1.59**. Before this pass the bloom was brighter than the core
+  it sat under, so the crisp line was inside the brightest thing on screen and
+  could not be seen as a line at all.
 - **The Card's own black shadow does not eat the glow, and this was measured before
   being left alone.** `Style.shadowRadius` 16 of black falloff sits in exactly the
   band the glow lives in, which looks like a problem and is not. Head contrast on a
@@ -692,6 +733,12 @@ Real, unfixed, none urgent.
   on-screen compositing should be cheaper. The remedy if it is ever needed is
   measured and deliberately not applied: `Style.beamSegments` 20 → 12 costs about
   22% less and coarsens the falloff without breaking it.
+  **The fourth pass moved no geometry and cost nothing**: the same harness reads
+  **1.59 ms Release** and **2.40–2.49 ms Debug** before and after, because a colour
+  and an exponent are free — 20 `pow` calls per frame — and `beamGlowHeadBlur` went
+  back to 12 after being tried at 15. Those absolutes are again not comparable with
+  the figures above; the *lit-pixel* count out of the same file reproduced the old
+  5,197 exactly, which is how the harness was checked rather than assumed.
 - **Release-configuration tests fail and have nothing to do with the Panel.** Run
   with `-configuration Release SWIFT_ENABLE_TESTABILITY=YES` (Release lacks
   testability, so `@testable import` will not resolve without it), the

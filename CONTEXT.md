@@ -103,7 +103,15 @@ is the mistake this entry exists to prevent. OCR Text sweeps the Subject Card
 because the *Subject changed*, not because OCR finished. It never marks a
 selection moving — that stays instant. All three Cards have one; the Slab does
 not. Shares a drawing primitive with the Loading Ring and nothing else.
-_Avoid_: glow, edge blur, border glow, loading animation, spinner, focus ring
+The light is **white**: a thin desaturated near-white line with a faint diffuse
+mist around it. The reference material's blue belongs to its Card's *fill*, not to
+its rim light, and reading it the other way is what made this a saturated blue line
+twice. Dark appearance is where that reads 1:1; in light appearance the beam
+*darkens* whatever it crosses, because nothing is brighter than a light wallpaper,
+so the line is quiet there and the mist carries it. A permanently lit rim would be
+the **fixed lamp**, which is a different thing and has been declined.
+_Avoid_: glow, edge blur, border glow, loading animation, spinner, focus ring,
+blue beam, accent
 
 **Loading Ring**:
 The app's own spinner: a constant-length arc, rotating, beside the text in each
