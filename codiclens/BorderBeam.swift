@@ -2,17 +2,20 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// A comet travelling once around a Card's rim: a crisp 1pt head with a tail
-/// that blurs out and dissolves behind it.
+/// A comet travelling once around a Card's rim: a crisp 1pt core inside a soft
+/// glow, both dissolving toward the tail.
 ///
-/// It was a 3.5pt bright bar with a stepped opacity falloff before, and the
-/// change is paint rather than idea — same `trim`, same over-travel, same
-/// `Animatable` drive, same one lap, same meaning of nothing. What moved: the
-/// core is 1pt, each of `Style.beamSegments` slices carries its own blur radius
-/// (which is the only way a blur can vary along a path), the opacity across the
-/// slices is flat because the blur is already the falloff, and the whole layer is
-/// masked to the region *outside* the rim so no part of it washes over the Card's
-/// content.
+/// It was a 3.5pt bright bar, then a single sliced stroke whose blur ramped from
+/// 0 at the head, and the drive has never changed — same `trim`, same
+/// over-travel, same `Animatable`, same one lap, same meaning of nothing. What
+/// moved twice is the paint. **Two layers now, and the reason is worth the two
+/// lines it takes:** a slice has exactly one blur radius, so one sliced stroke
+/// cannot be a crisp line and a bloom at the same time, and choosing crisp at the
+/// head meant the brightest part of the whole effect had literally no halo — zero
+/// light more than 1pt out from the rim, measured. So the glow is its own layer,
+/// underneath, wide and blurred along the *entire* lit segment including under the
+/// head, and the core is the layer on top. Both are masked together to the region
+/// outside the rim so no part of either washes over the Card's content.
 ///
 /// **It means nothing.** It belongs to a Card *as a surface*: it fires when that
 /// Card becomes about something new and that is the whole of it. It is not tied
@@ -92,6 +95,10 @@ struct BorderBeam: ViewModifier, Animatable {
     /// along a path. A slice that crosses the seam comes back as two pieces,
     /// because `trim` does not wrap — and both pieces carry the same `position`,
     /// so they carry the same blur radius and the join is invisible.
+    ///
+    /// One list, drawn twice — once per layer. The two layers are the same
+    /// geometry at different widths and blurs, so there is nothing here that knows
+    /// which layer it is for.
     private var slices: [Slice] {
         let range = Self.trimRange(phase: phase, tail: Style.beamTailFraction)
         guard range.to > range.from else { return [] }
@@ -134,9 +141,15 @@ struct BorderBeam: ViewModifier, Animatable {
             // cannot express its collapse.
             if !reduced {
                 ZStack {
-                    ForEach(slices) { slice in
-                        BeamSlice(from: slice.from, to: slice.to, position: slice.position)
+                    // Glow underneath, core on top. Both are the same slices of
+                    // the same trim range; only the stroke width, the colour and
+                    // the blur radius differ, which is the whole of what two
+                    // layers buys. `Style.beamDrawsGlow` is Reduce Transparency's
+                    // answer: the halo goes, the sweep stays.
+                    if Style.beamDrawsGlow {
+                        layer(.glow)
                     }
+                    layer(.core)
                 }
                 .mask { Self.outward }
                 // The beam is light on the rim, not a hit target. The Card row's
@@ -146,31 +159,50 @@ struct BorderBeam: ViewModifier, Animatable {
         }
     }
 
+    private func layer(_ which: BeamLayer) -> some View {
+        ZStack {
+            ForEach(slices) { slice in
+                BeamSlice(
+                    from: slice.from, to: slice.to,
+                    position: slice.position, layer: which
+                )
+            }
+        }
+    }
+
     // MARK: - Outward only
 
     /// Everything outside the Card's rim, and nothing inside it.
     ///
-    /// **The comet's tail is a blur, and a blur spreads both ways.** Unmasked, the
-    /// far tail would wash inward across the Card's icon, name and chips — which
-    /// is the one thing the effect must not do. So the whole beam layer is masked
-    /// to the region outside `Style.cardShape`, applied *after* the blur so it cuts
-    /// the halo rather than the source.
+    /// **The comet is mostly blur, and a blur spreads both ways.** Unmasked, the
+    /// glow would wash inward across the Card's icon, name and chips — which is
+    /// the one thing the effect must not do, and it matters far more now that the
+    /// glow is a 20pt stroke blurred by up to 20 rather than a 2pt one blurred by
+    /// 8. So both layers are masked together to the region outside
+    /// `Style.cardShape`, applied *after* the blur so it cuts the halo rather than
+    /// the source.
     ///
-    /// The hard inner edge that leaves, sitting exactly on the rim, is not a
-    /// compromise: it *is* the "densest at the border" reading the comet is for.
-    /// What it costs is half the stroke — a `.stroke` is centred on its path — and
-    /// `Style.beamStrokeWidth` is the measured answer to that.
+    /// The hard inner edge that leaves sits exactly on the rim, and the crisp core
+    /// sits on top of it — which is why a much brighter glow did not turn that cut
+    /// into an artefact. Rasterised, the pixel row immediately outside the rim is
+    /// the core at near-full alpha in both appearances, so what abuts the Card's
+    /// own edge is a line, not the sheared-off face of a bloom. The "densest at
+    /// the border" reading is still what the cut gives, and it is still not a
+    /// compromise. What it costs is half of each stroke — a `.stroke` is centred
+    /// on its path — which is what `Style.beamStrokeWidth` and
+    /// `beamGlowStrokeWidth` both double for.
     ///
     /// The `Rectangle` is grown by a negative padding rather than left at the
     /// layer's bounds, because the overlay is exactly the Card's size and the
-    /// outward blur draws past it into `Style.cardInset`'s gutter. A mask that
+    /// glow draws well past it into `Style.cardInset`'s gutter. A mask that
     /// stopped at the bounds would clip the halo to a hard square edge — the same
     /// class of artefact as "no `.shadow()` on a view that fills its window", one
-    /// layer in.
+    /// layer in. `Style.beamMaskOutset` is derived from the widest blur so that
+    /// raising the glow cannot quietly start clipping it.
     private static var outward: some View {
         ZStack {
             Rectangle()
-                .padding(-Style.beamTailBlur * 2)
+                .padding(-Style.beamMaskOutset)
             Style.cardShape
                 .blendMode(.destinationOut)
         }

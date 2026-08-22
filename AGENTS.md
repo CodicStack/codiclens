@@ -70,12 +70,14 @@ needs no `project.pbxproj` edit.
   `isTransparencyReduced` is Reduce Transparency, which is a claim about
   legibility rather than about movement — Apple asks for opaque content over
   semi-transparent, and a blur is semi-transparent — and its answer is that the
-  Border Beam **drops its blur and keeps sweeping**. Do not fold the second into
-  the first or give `isReduced` a second meaning: with Reduce Motion on there is
-  no beam at all, with only Reduce Transparency on there is a beam with no halo,
-  and neither switch implies the other. `Style.beamBlur(at:)` consults
+  Border Beam **drops its glow layer and keeps sweeping**. Do not fold the second
+  into the first or give `isReduced` a second meaning: with Reduce Motion on there
+  is no beam at all, with only Reduce Transparency on there is a beam with no halo,
+  and neither switch implies the other. `Style.beamDrawsGlow` consults
   `Motion.isTransparencyReduced` rather than reading `NSWorkspace` itself, so both
-  reads stay in the one file.
+  reads stay in the one file. The layer goes **whole**, not un-blurred — that was
+  the answer while the beam was one layer, and un-blurring a `beamGlowWidth`-wide
+  band is a flat 10pt bar travelling the rim rather than a quieter halo.
 - **The Border Beam belongs to a *Card* and means nothing.** It sweeps around
   a Card that becomes about something new — `cardBeam(identity:)` on all three,
   applied *between* `.cardSurface(...)` and `.padding(Style.cardInset)`, because
@@ -116,12 +118,16 @@ needs no `project.pbxproj` edit.
   not compute it: the analytic `(1.5h + w) / 2(w + h)` happens to land within
   0.00025 at radius 22 and that is luck, not a method — it also landed within
   0.0002 at the *previous* surface size, and neither agreement was predictable.
-  **Change `cardRadius`, `cardWidth`, `cardHeight` or `cardInset` and re-probe
-  it**, by sweeping `trim` and taking the fraction whose point is nearest the
-  rect's top-left; at 236 × 216 that is 0.619221, landing at (6.41, 6.41), the 45°
-  midpoint of the corner's own curve. Read the *first* point of
-  `trimmedPath(from: f, to: f + ε)` — `currentPoint` on `trimmedPath(from: 0, to: f)`
-  gives the sub-path's end and is `nil` at f = 0.
+  It is a function of the **drawn surface**, not of the Card's cell: it did not
+  move when `cardInset` went 12 → 24, because `PanelLayout.cardWidth` and
+  `cardHeight` went up by the same amount and the surface stayed 236 × 216.
+  **Re-probe it whenever `cardRadius` moves, or whenever a change to `cardWidth`,
+  `cardHeight` or `cardInset` moves `cardWidth - cardInset * 2` or
+  `cardHeight - cardInset * 2`** — by sweeping `trim` and taking the fraction whose
+  point is nearest the rect's top-left; at 236 × 216 that is 0.619221, landing at
+  (6.41, 6.41), the 45° midpoint of the corner's own curve. Read the *first* point
+  of `trimmedPath(from: f, to: f + ε)` — `currentPoint` on
+  `trimmedPath(from: 0, to: f)` gives the sub-path's end and is `nil` at f = 0.
   It shares one drawing primitive with the
   Loading Ring — an animated `trim` along a stroked path — and nothing else.
   Two things it must not become: a rotating **conic gradient**, which sweeps at a
@@ -130,49 +136,107 @@ needs no `project.pbxproj` edit.
   uniform in path length — verified: `cardShape`'s path starts at the right edge's
   vertical midpoint and runs clockwise, which is why the top-left corner falls a
   little past 0.5.
-- **The beam is a *comet*: a crisp 1pt head and a tail that blurs out and
-  dissolves. One layer, one ramp, masked outward.** `Style.beamWidth` is 1 and is
-  the *visible* width; `beamStrokeWidth` is `beamWidth * 2`, because a `.stroke` is
-  centred on its path and `BorderBeam.outward` masks the whole layer to the region
-  outside `Style.cardShape` so nothing washes over the Card's content. A 2.0pt
-  stroke measures exactly 1.00pt outward at full alpha — probed, on the assumption
-  the mask's antialiasing would eat some of it; it does not, because the mask edge
-  and the stroke's inner edge are the same curve. The hard inner edge on the rim
-  *is* the "densest at the border" reading, not a compromise.
-  **The falloff is a per-slice blur and the opacity across the slices is flat.**
-  `Style.beamSegments` is still 20 equal slices of path length, but each carries its
-  own `blur(radius:)` — linear from 0 at the head to `beamTailBlur` (8) behind it —
-  because there is **no API that makes a gradient or a blur follow a path's arc
-  length**, and per-slice blur out of the one arc-length-uniform primitive (`trim`)
-  is the only way to vary one. `Style.beamFalloff` is **deleted, not retuned**:
-  blur already dims by spreading the same alpha over more pixels, and stacking an
-  opacity ramp on top is the exact double-multiplication that exponent existed to
-  undo — it once left 40pt of an intended 336pt on screen. One ramp, one cause. The
-  head's blur is exactly 0; that contrast is what the comet lives on. Round caps
-  still bulge half a line width past each slice's trim range, so nineteen joints
-  composite twice and the beam renders as a row of beads: the caps stay `.butt`.
-  `beamTailBlur` is bounded by `Style.cardInset` — the tail reaches about 11.5pt
-  past the rim, which is why the inset went 6 → 12 and the drawn Card surface went
-  248 × 228 → **236 × 216**. `PanelLayout.cardWidth`/`cardHeight` and the Panel's
-  own size did not move; the Panel does not resize for a decoration.
+- **The beam is a *comet* in TWO layers: a crisp 1pt core inside a soft glow, both
+  masked outward.** This is the shape of the thing and the part most likely to be
+  "simplified" back into a bug. **One layer cannot do it**, because a slice has one
+  blur radius, so a crisp line and a bloom around it are two strokes or they are
+  nothing. It shipped as one layer once, with the core's blur "exactly 0 at the
+  head, because the crisp leading edge against a dissolving tail is the entire
+  contrast the comet lives on" — a sentence that reads like taste and was
+  architecture. Measured on the real modifier, that version put **zero** light more
+  than 1pt outside the rim at the head. The head had no halo; it was a line. Do not
+  merge the layers.
+  **The glow is not the "fixed lamp" arriving by the back door, and the lamp is
+  still declined.** The reference material — a Card whose whole rim carries a soft
+  permanent light — *is* a static gradient rim, and satisfying it by drawing one has
+  been explicitly turned down ("comet only, no fixed lamp"). The glow is lit only
+  while a sweep runs, it travels, and it is gone in 0.55s. A still frame cannot tell
+  the two apart, which is exactly why this keeps coming up.
+  **Core:** `Style.beamWidth` 1 (the *visible* width), `beamStrokeWidth` doubled
+  because a `.stroke` is centred on its path and the mask keeps the outer half; a
+  2.0pt stroke measures exactly 1.00pt outward at full alpha — probed, on the
+  assumption the mask's antialiasing would eat some of it; it does not, because the
+  mask edge and the stroke's inner edge are the same curve. Blur ramps 0 →
+  `beamCoreTailBlur` (6), and 0 at the head is still right *now that there is a
+  glow under it*.
+  **Glow:** `beamGlowWidth` 10 before blurring, `beamGlowStrokeWidth` doubled for
+  the same mask, blur ramping `beamGlowHeadBlur` (10) **under the head** *up* to
+  `beamGlowTailBlur` (20) at the tail, and **never 0 anywhere the beam is lit**.
+  The band is wide on purpose: brightness at the rim comes from the band's width
+  and reach comes from the radius, so a hairline source cannot buy brightness with
+  radius — turning up the old 1pt line's blur made it wider *and fainter*.
+  Both layers are `Style.beamSegments` (20) equal slices of path length, one slice
+  list drawn twice, one `BorderBeam.outward` mask over both, because there is **no
+  API that makes a gradient or a blur follow a path's arc length** and per-slice
+  blur out of the one arc-length-uniform primitive (`trim`) is the only way to vary
+  one. `Style.beamFalloff` stays **deleted**: blur already dims by spreading the
+  same alpha over more pixels, and stacking a computed opacity ramp on top is the
+  double-multiplication that exponent existed to undo — it once left 40pt of an
+  intended 336pt on screen. The head-to-tail *colour mix* is not that ramp; two
+  named colours with different alphas is what `BeamSlice` has always done.
+  Round caps bulge half a line width past each slice's trim range, so nineteen
+  joints composite twice and the beam renders as a row of beads: the caps stay
+  `.butt`, and it matters twenty times more on the glow.
+  **The ceiling on the glow is the gutter, `cardInset * 2`** — it must not reach a
+  neighbouring Card's rim. Measured reach is **34pt** against a 48pt gutter, which
+  is why `cardInset` went 12 → 24. `PanelLayout.cardWidth`/`cardHeight` went
+  260 → **284** / 240 → **264** *with* it, so the drawn surface is still 236 × 216:
+  the previous inset bump took its growth out of the surface, which cost Card
+  content, and this one takes it out of the Panel's declared size, which costs
+  nothing. The Panel is still fixed and still never resizes. `PanelLayout.margin`
+  did **not** move and was checked rather than assumed — every rim has more than
+  34pt of clearance, the tightest being 36pt from the bottom rim to the Results
+  Slab.
+  **Normal compositing, never additive.** `.plusLighter` was measured and rejected:
+  over a white ground it saturates every covered pixel, so the profile at the head
+  and at three points down the tail come back *identical* and the falloff stops
+  existing. In light appearance it has nowhere to go at all — nothing is brighter
+  than a light wallpaper.
   `Motion.beamSweep` is 0.55s and stays `easeOut` — the visible *end* of a sweep is
-  the tail draining through the seam, and easeOut spends its last frames there.
+  the tail draining through the seam, and easeOut spends its last frames there. It
+  did **not** change for the glow: the glow got wider outward, not longer along the
+  rim, and the lit segment is still `beamTailFraction` of the same perimeter.
   **All of it was found by rasterising with `ImageRenderer`**, because
   `BorderBeamTests` pins the trim geometry and passed the whole time the beam was
   invisible. `BorderBeamRenderTests` is the pixel-level counterpart and the only
-  test here that looks at pixels — a geometry test cannot tell you a thing is on
-  screen. It now pads what it rasterises (the beam is outside the Card's bounds and
+  test here that looks at pixels. It pads what it rasterises by
+  `cardInset + beamGlowTailBlur` (the beam is outside the Card's bounds and
   `ImageRenderer` renders a view at its own size, so an unpadded render crops the
-  effect: 327 lit pixels against 1,039) and it asserts **zero beam pixels inside the
-  rim**, which is the one rule taste cannot catch — deleting the mask leaves every
-  geometry test passing.
-  **Known and open: the beam is near-invisible in light appearance over a light
-  backdrop, and it is inverted.** Measured, against a white Card: light `beamHead`
-  is Δ43/765 of luminance and light `beamTail` Δ127/765, so the head is a third the
-  contrast of the tail it should be leading. Over mid-grey they swap (Δ182 / Δ15).
-  Retuning `beamTail`, the obvious lever, makes it worse. The fix is `beamHead` in
-  light going darker and more saturated, and it needs a real screen, because no
-  single opaque colour reads on both a white and a mid-grey backdrop.
+  effect: 327 lit pixels against 1,039 back when the halo reached 11.5pt), it
+  asserts **zero beam pixels inside the rim**, and it asserts **the head has a halo
+  and a crisp core** — floors on the alpha 1, 4, 8 and 16 points out at the head's
+  own phase, which on the shipped one-layer version were 0, 0, 0, 0. That third
+  assertion is the one worth having: it is the only one that would have caught what
+  the user actually rejected.
+  **`BorderBeamRenderTests` passing is not the same as the beam reading right.**
+  A render can prove light is on screen and cannot say whether there is enough of
+  it. That is why the numbers below are here rather than only in a test.
+  Two things it must not become: a rotating **conic gradient** and a **stroke
+  gradient** — see the bullet above for why.
+- **The beam's light-appearance colours are saturated, not pale, and that is the
+  fix for a real measured inversion.** Light's `beamHead` was (0.62, 0.78, 1.00)
+  and measured Δ43/765 of luminance against a white Card while `beamTail` measured
+  Δ127 — the head a third the contrast of the tail it was supposed to lead. It is
+  now **(0.20, 0.45, 1.00)** and measures Δ207/442 of perceptual distance on white,
+  Δ149 on mid-grey and Δ250 on near-black. **The lever was saturation, not
+  lightness**, and the previous pass's conclusion that "no single opaque colour
+  reads against both a white and a mid-grey backdrop" was true of every candidate
+  it tried and false of the space: it was varying lightness, which is the axis the
+  two grounds disagree on. A mid-luminance saturated blue is 247 units from white
+  and 255 from black. On a light ground the beam's luminance delta is **negative** —
+  it darkens — and that is the only option available, because nothing is brighter
+  than a white wallpaper. Light appearance's glow is a coloured halo, not a bright
+  one.
+- **The Card's own black shadow does not eat the glow, and this was measured before
+  being left alone.** `Style.shadowRadius` 16 of black falloff sits in exactly the
+  band the glow lives in, which looks like a problem and is not. Head contrast on a
+  white ground: Δ239 with no shadow, Δ207 at the shipping 0.20, Δ174 at 0.44 — so
+  the shadow costs about 13% there. Everywhere else it *helps*: on mid-grey it goes
+  the other way (Δ144 → Δ149 → Δ158), on near-black it is noise, and dark
+  appearance's white head over a *light* backdrop measures Δ1 with no shadow
+  against Δ91 with it, which makes the shadow load-bearing rather than harmful.
+  Do not suppress a Card's shadow while its beam sweeps; the numbers do not support
+  it and it would couple `Style` to a decoration's state.
 - **The Loading Ring is not a progress indicator.** A constant-length 270° arc that
   turns, in both of the Panel's waiting states. Neither Vision nor `mdfind` reports
   progress, so a ring that *fills* would be claiming something the app cannot back.
@@ -493,9 +557,9 @@ User types query → Enter
 | `EmojiSearchVM.swift` | Emoji ranking, grid sections, grid keyboard model |
 | `EmojiRecentsStore.swift` | Emoji Recents persistence (Application Support) |
 | `EmojiGridView.swift` | Results Slab in grid Mode |
-| `Style.swift` | Every radius, material, tint and rim. The only `colorScheme` branch |
+| `Style.swift` | Every radius, material, tint and rim, and both of the Border Beam's layers. The only `colorScheme` branch |
 | `Motion.swift` | The three transition curves, the two decorations, the Reduce Motion and Reduce Transparency reads, entrance/shake/hardCut |
-| `BorderBeam.swift` | A Card's one-lap comet: over-travel geometry, slicing, the outward mask, `CardBeam`'s identity policy |
+| `BorderBeam.swift` | A Card's one-lap comet: over-travel geometry, slicing, the two layers, the outward mask, `CardBeam`'s identity policy |
 | `LoadingRing.swift` | The app's own spinner, in place of a system `ProgressView` |
 | `AppIndex.swift` | The app Index: background scan, atomic swap, lazy icons |
 | `AppDirectoryWatcher.swift` | FSEvents watch over the application directories |
@@ -532,14 +596,15 @@ Real, unfixed, none urgent.
   pair per call — the dataset is already lowercase — or to move ranking off the main
   thread. Do not "optimise" it by loosening the scoring: `FuzzyMatchTests` pins the
   tiers, and app search shares the function.
-- **The Border Beam's comet is near-invisible in light appearance over a light
-  backdrop, and inverted.** Measured against a white Card: light `beamHead` is
-  Δ43/765 of luminance, light `beamTail` Δ127/765 — the head has a third the
-  contrast of the tail it should be leading. Over mid-grey the two swap (Δ182 /
-  Δ15). It predates the comet; the comet made it more noticeable by putting 1pt of
-  visible rim behind it instead of 3.5pt. The lever is `Palette.light.beamHead`,
-  not `beamTail`, and it needs an eye: a candidate measuring Δ236 on white measured
-  Δ1 on mid-grey, so no one opaque colour reads on both.
+- **The Border Beam costs 1.4 ms per frame per Card in Release and 2.6 ms
+  unoptimised**, up from 1.0 / 2.3 when the glow layer was absent — measured with
+  `ImageRenderer` over a 34-frame sweep, so the glow's own share is about 0.4 ms
+  and it is the wider radii rather than the extra slices. Tab sweeps two Cards at
+  once, which is the worst realistic case and still inside a 16.6 ms frame.
+  `ImageRenderer` is a CPU rasteriser with a bitmap allocation per frame, so
+  on-screen compositing should be cheaper. The remedy if it is ever needed is
+  measured and deliberately not applied: `Style.beamSegments` 20 → 12 costs
+  1.11 ms instead of 1.43 and coarsens the falloff without breaking it.
 - **Release-configuration tests fail and have nothing to do with the Panel.** Run
   with `-configuration Release SWIFT_ENABLE_TESTABILITY=YES` (Release lacks
   testability, so `@testable import` will not resolve without it), the

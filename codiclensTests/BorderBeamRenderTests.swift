@@ -24,9 +24,17 @@ import Testing
 /// opacity ramp is the same double-multiplication that deleted the beam the
 /// first time. What the tests below guard is unchanged in kind: that the tail
 /// survives whatever the current falloff is, and that both ends of the sweep are
-/// bare rim. One rule is new and belongs to the comet: **nothing lands inside
-/// the rim.** A blur spreads both ways, and the mask that keeps the halo out of
-/// the Card's content is one modifier away from being silently absent.
+/// bare rim. Two rules are newer. **Nothing lands inside the rim** — a blur
+/// spreads both ways, and the mask that keeps the halo out of the Card's content
+/// is one modifier away from being silently absent. And **the head has a halo as
+/// well as a core**, which is the regression that actually shipped: the beam was
+/// one sliced stroke whose blur ramped from exactly 0 at the head, so the
+/// brightest, most visible part of the whole effect was a bare 1pt line with
+/// literally zero light more than one point outside the rim. Every geometry test
+/// passed, this file's tail test passed, and the answer on screen was "there is
+/// not enough spread at all and it should be more clear that there even is a
+/// glow". A test that would have caught that is worth more than another one
+/// pinning what already worked.
 @MainActor
 struct BorderBeamRenderTests {
 
@@ -38,6 +46,17 @@ struct BorderBeamRenderTests {
         width: PanelLayout.cardWidth - Style.cardInset * 2,
         height: PanelLayout.cardHeight - Style.cardInset * 2
     )
+
+    /// How much bare space is rasterised around the Card.
+    ///
+    /// `ImageRenderer` renders a view at its own size, and the beam lives
+    /// entirely *outside* the Card's bounds — so this is not decoration, it is
+    /// the difference between measuring the effect and measuring a crop of it.
+    /// One `cardInset` is the gutter the glow was given; `beamGlowTailBlur`
+    /// beyond that clears the reach, which is measured at 34pt and gone by 40.
+    /// The extra area is transparent, so it contributes no lit pixels and the
+    /// baseline does not move with it.
+    private var pad: CGFloat { Style.cardInset + Style.beamGlowTailBlur }
 
     /// Pixels brighter than the unlit Card, at 2x.
     private func litPixels(progress: Double) -> Int {
@@ -85,16 +104,15 @@ struct BorderBeamRenderTests {
     /// `cardRim`. It only has to be a plausible floor for "brighter than the
     /// rim"; the beam is what is under test.
     ///
-    /// **The `.padding(Style.cardInset)` is load-bearing and was added with the
-    /// comet.** The beam is now masked to the region *outside* `Style.cardShape`,
-    /// which is to say entirely outside the Card's own bounds, and its blurred
-    /// halo reaches about 11.5pt past the rim into the gutter. `ImageRenderer`
-    /// renders a view at its own size, so without the padding the whole effect
-    /// falls outside the bitmap and is cropped away: the same render measured
-    /// 1,039 lit pixels padded and 327 unpadded, and the 327 were only the
-    /// mask edge's own antialiasing bleeding onto the boundary row. An unpadded
-    /// render here would have failed for a reason that has nothing to do with the
-    /// beam.
+    /// **The padding is load-bearing.** The beam is masked to the region
+    /// *outside* `Style.cardShape`, which is to say entirely outside the Card's
+    /// own bounds. `ImageRenderer` renders a view at its own size, so without the
+    /// padding the whole effect falls outside the bitmap and is cropped away: back
+    /// when the halo reached 11.5pt the same render measured 1,039 lit pixels
+    /// padded and 327 unpadded, and the 327 were only the mask edge's own
+    /// antialiasing bleeding onto the boundary row. An unpadded render here would
+    /// have failed for a reason that has nothing to do with the beam. See `pad`
+    /// for why it is more than one `cardInset` now.
     private func card(progress: Double) -> some View {
         ZStack {
             Color(white: 0.12)
@@ -102,7 +120,7 @@ struct BorderBeamRenderTests {
         }
         .frame(width: size.width, height: size.height)
         .modifier(BorderBeam(progress: progress, target: 1, reduced: false))
-        .padding(Style.cardInset)
+        .padding(pad)
     }
 
     /// The rim on its own, with no beam lit. Both ends of the sweep must come
@@ -118,30 +136,91 @@ struct BorderBeamRenderTests {
     /// pixels over a 280 × 200 Slab's baseline and was invisible; the eased one
     /// scored over 1,500 there, and 1,447 over a Card.
     ///
-    /// **The threshold came down with the comet, and it was re-measured rather
-    /// than scaled.** The head is 1pt of visible rim where the old bar was 3.5pt,
-    /// so less light reaches the screen by construction; the blurred tail spreads
-    /// what is left over more pixels at lower alpha, and some of those pixels
-    /// fall under the 130 floor. The comet measures **1,039** over a baseline of
-    /// 3,468 at mid-sweep. A beam reduced to its head slice alone — the failure
-    /// mode this test is for — would be about 60 pixels, since the head is one
-    /// twentieth of a 303pt comet at 1pt wide. So 500 is half of a working comet
-    /// and eight times a deleted one, which is the same shape of margin the old
-    /// 600 had.
+    /// **The threshold has been re-measured twice and scaled neither time.** The
+    /// one-layer comet measured 1,039 over a baseline of 3,468 at mid-sweep — the
+    /// head was 1pt of visible rim where the old bar had been 3.5, and the blurred
+    /// tail spread what was left over more pixels at lower alpha, with many of
+    /// them under the 130 floor. Adding the glow layer takes the same render to
+    /// **8,115** over the same baseline, because a 10pt band blurred by 10–20
+    /// puts real alpha across the whole gutter instead of a hairline against the
+    /// rim. A beam reduced to its head slice alone — the failure mode this test is
+    /// for — would still be about 60 pixels. So 4,000 is half of a working comet
+    /// and sixty times a deleted one.
     @Test func theTailSurvivesItsOwnFalloff() {
         let lit = litPixels(progress: 0.5) - baseline
 
         #expect(
-            lit > 500,
+            lit > 4_000,
             """
-            only \(lit) pixels of rim are lit at mid-sweep. The comet's tail is \
-            being deleted by its own falloff — check Style.beamTailBlur, which \
-            dims by spreading alpha and must not be stacked on an opacity ramp, \
-            and Style.beamWidth/beamStrokeWidth, which is what survives the \
-            outward mask.
+            only \(lit) pixels of rim are lit at mid-sweep. The comet is being \
+            deleted by its own falloff — check Style.beamGlowWidth and \
+            beamGlowBlur(at:), which are the whole of the halo, and \
+            Style.beamWidth/beamStrokeWidth, which is what survives the \
+            outward mask. Blur dims by spreading alpha and must not be stacked \
+            on an opacity ramp.
             """
         )
     }
+
+    /// **The head is a bright core inside a soft halo, not a bare line.**
+    ///
+    /// This is the regression that shipped, and it shipped past every other test
+    /// in this file. The beam was a single sliced stroke whose blur ramped from
+    /// exactly 0 at the head — a deliberate decision, on the grounds that a crisp
+    /// leading edge against a dissolving tail was the contrast the comet lived on
+    /// — and the consequence is the row of zeroes below: measured on the real
+    /// modifier, that version put alpha 247 one pixel outside the rim and **0**
+    /// everywhere beyond, at every distance, in both appearances. A slice has one
+    /// blur radius, so one layer could not be crisp and bloomed at once. The glow
+    /// is a second layer for that reason and its blur is never 0.
+    ///
+    /// Measured outward from the right edge's vertical midpoint, at the phase that
+    /// puts the head slice there: alpha 247 at the rim, then 96, 92, 78, 60, 22
+    /// at 1, 4, 8, 12 and 20 points out, reaching zero by 34. The floors below are
+    /// well under those and well over nothing.
+    @Test func theHeadHasAHaloAndACrispCore() {
+        guard let bitmap = beamAlone(progress: Self.headOnTheRightEdge) else {
+            Issue.record("the beam layer did not rasterise")
+            return
+        }
+
+        let y = Int(((pad + size.height / 2) * Self.scale).rounded(.down))
+        func alpha(_ outward: CGFloat) -> Int {
+            let x = Int(((pad + size.width + outward + 0.25) * Self.scale).rounded(.down))
+            return bitmap.alpha(x: x, y: y)
+        }
+
+        #expect(
+            alpha(0) > 220,
+            "the core is not crisp at the rim: alpha \(alpha(0)). Style.beamWidth is what survives the mask."
+        )
+        #expect(
+            alpha(1) > 60 && alpha(4) > 60 && alpha(8) > 40 && alpha(16) > 20,
+            """
+            the head has no halo: alpha \(alpha(1)) / \(alpha(4)) / \(alpha(8)) / \
+            \(alpha(16)) at 1, 4, 8 and 16 points out. Style.beamGlowHeadBlur must \
+            never be 0 and the glow layer must be drawn under the head, not only \
+            behind it — a head with no bloom is a line, which is what this test is for.
+            """
+        )
+        #expect(
+            alpha(1) > alpha(12) && alpha(12) > alpha(28),
+            "the halo does not fall off outward: \(alpha(1)) / \(alpha(12)) / \(alpha(28))"
+        )
+    }
+
+    /// The sweep phase that puts the head slice on the right edge's vertical
+    /// midpoint, where "outward" is +x and a profile can be read along one row of
+    /// pixels. Derived from the seam and the over-travel rather than guessed:
+    /// `Style.beamSeamOffset` puts trim fraction 0 at the top-left corner, so the
+    /// right edge's midpoint is `1 - beamSeamOffset` along the beam's own
+    /// parameter, and the phase that lands the *middle* of the head slice there
+    /// backs off half a slice.
+    private static let headOnTheRightEdge: Double = {
+        let midpoint = 1 - Double(Style.beamSeamOffset)
+        let halfSlice = Double(Style.beamTailFraction) / Double(Style.beamSegments) / 2
+        return (midpoint + halfSlice) / (1 + Double(Style.beamTailFraction))
+    }()
 
     /// The lit length grows in through the seam and drains back out through it,
     /// so the middle of the sweep is the brightest moment and neither end is.
@@ -158,12 +237,14 @@ struct BorderBeamRenderTests {
 
     /// **Nothing the beam draws lands inside the rim.**
     ///
-    /// This is the comet's one new rule and the only one taste cannot catch: a
-    /// blur spreads inward as much as outward, so an unmasked tail would wash
-    /// across the Card's icon, name and chips — faintly, at the far end, over a
-    /// glass surface, which is exactly the kind of wrong that survives a look.
-    /// `BorderBeam.outward` is the mask that stops it and it is one modifier;
-    /// delete it and every geometry test in `BorderBeamTests` still passes.
+    /// This is the one rule taste cannot catch: a blur spreads inward as much as
+    /// outward, so an unmasked beam would wash across the Card's icon, name and
+    /// chips — faintly, at the far end, over a glass surface, which is exactly the
+    /// kind of wrong that survives a look. It matters more since the glow layer
+    /// arrived: the thing being masked is a 20pt stroke blurred by up to 20, not a
+    /// 2pt one blurred by 8. `BorderBeam.outward` is the mask that stops it and it
+    /// is one modifier; delete it and every geometry test in `BorderBeamTests`
+    /// still passes.
     ///
     /// The region tested is the Card's own shape shrunk by a point, which is
     /// enough to clear the mask edge's own antialiasing and no more — the beam is
@@ -174,7 +255,7 @@ struct BorderBeamRenderTests {
         let inset: CGFloat = 1
         let inner = RoundedRectangle(cornerRadius: Style.cardRadius - inset, style: .continuous)
             .path(in: CGRect(
-                x: Style.cardInset + inset, y: Style.cardInset + inset,
+                x: pad + inset, y: pad + inset,
                 width: size.width - inset * 2, height: size.height - inset * 2
             ))
             .cgPath
@@ -213,7 +294,7 @@ struct BorderBeamRenderTests {
         let view = Color.clear
             .frame(width: size.width, height: size.height)
             .modifier(BorderBeam(progress: progress, target: 1, reduced: false))
-            .padding(Style.cardInset)
+            .padding(pad)
 
         let renderer = ImageRenderer(content: view)
         renderer.scale = Self.scale
