@@ -60,24 +60,21 @@ enum Style {
     /// Card's drawn surface: two adjacent Cards contribute one each, so the
     /// visible gutter is twice this.
     ///
-    /// **24, and the Border Beam's glow used to be why. It is now 24 for nothing,
-    /// and that is written down rather than acted on.** The beam's glow blurred
-    /// *outward* from the rim for four passes, and the gutter was the room it had to
-    /// fall off in: it must not reach a neighbouring Card's rim, which is
-    /// `cardInset * 2` away, and the measured reach was **34pt** against 48pt of
-    /// gutter. It went 6 → 12 → 24 for that.
+    /// **24, and the Border Beam's glow is why — again.** The beam's halo blurs
+    /// *outward* from the rim, and the gutter is the room it has to fall off in: it
+    /// must not reach a neighbouring Card's rim, which is `cardInset * 2` away, and
+    /// the measured reach is **40pt** against 48pt of gutter. It went 6 → 12 → 24
+    /// for that.
     ///
-    /// The fifth pass inverted the mask — see `BorderBeam.inward` — so the beam puts
-    /// **zero** alpha outside the rim and needs no gutter at all. Going back to 12
-    /// is therefore available and is a real gain: with `PanelLayout.cardWidth` and
-    /// `cardHeight` held at 284 × 264 the drawn surface would grow 236 × 216 →
-    /// **260 × 240**, which is 24pt of Card content in each direction handed back;
-    /// alternatively, holding the surface and shrinking the cell would take the Panel
-    /// from 968 × 732 to **872 × 708**. It is **not applied**, for one reason: the
-    /// surface size is what `beamSeamOffset` is a function of, and moving
-    /// `cardWidth - cardInset * 2` obliges a re-probe of a constant that has to be
-    /// exact to a ten-thousandth. That is a separate change with its own
-    /// verification, not a side effect of a paint fix.
+    /// The fifth pass inverted the mask, which briefly made this 24 for nothing and
+    /// put a written-up proposal here to take it back to 12. **The sixth pass put the
+    /// halo back outside and that proposal is deleted rather than left lying** —
+    /// there is no version of this where a beam that blooms outward has 24pt of
+    /// clearance to spare. Two things still hold from the argument that proposal was
+    /// making, and they are the reason it was never applied: the surface size is what
+    /// `beamSeamOffset` is a function of, so moving `cardWidth - cardInset * 2`
+    /// obliges a re-probe of a constant that has to be exact to a ten-thousandth;
+    /// and the drawn surface is 236 × 216 in both directions of that arithmetic.
     ///
     /// The history is worth keeping because the *second* step was the instructive
     /// one. It took its growth out of the **drawn surface**: the cell stayed
@@ -116,47 +113,42 @@ enum Style {
 
     // MARK: - Border Beam
 
-    /// How wide the comet's **core** is: the crisp line at the centre of the
-    /// light, measured inward from the rim.
+    /// The comet's **core**: the crisp line at the centre of the light, stroked
+    /// *centred on the rim* so half of it lands on the Card's glass and half of it
+    /// outside.
     ///
-    /// **1pt, and it is a *visible* width rather than a stroke width.** The whole
-    /// beam layer is masked to the region *inside* `cardShape` — see
-    /// `BorderBeam.inward`, which is where the fifth pass's finding is written up —
-    /// so the light lands on the Card's own glass rather than on the desktop. A
-    /// `.stroke` is centred on the path it follows, so that mask takes the **outer**
-    /// half away: what is stroked has to be wider than what is seen.
-    /// `beamStrokeWidth` is the wider number, and it was probed rather than assumed.
+    /// **2pt, and it is now the stroke width itself — `beamStrokeWidth` is deleted
+    /// rather than kept at a doubling.** The whole beam used to be masked to one
+    /// side of the rim, so a `.stroke` had to be twice as wide as the line anybody
+    /// would see. The core is **unmasked** now, and that is the sixth pass's
+    /// central decision: 1pt of it lies in `[rim - 1, rim]`, which is precisely the
+    /// band `CardSurface`'s own `strokeBorder` hairline occupies, and 1pt of it lies
+    /// in `[rim, rim + 1]`, outside.
     ///
-    /// What survives is the band `[rim - 1, rim]`, which is exactly where
-    /// `CardSurface`'s own `strokeBorder` hairline sits. That coincidence is the
-    /// effect: the beam does not draw a second line inside the border, it lights the
-    /// border.
+    /// **Why straddling rather than one side or the other**, which is the choice the
+    /// last two passes each got half right. Masked *outward* the core's visibility
+    /// was staked entirely on the desktop, and in dark appearance over a white
+    /// wallpaper it measured Δ10/442 — the bug that cost four passes. Masked
+    /// *inward* it read Δ87 there but the halo had nowhere to go except over the
+    /// Card's own content, which is the version the user rejected on sight ("it
+    /// shouldn't be inside because that looks ass"). Centred on the rim, the inner
+    /// half always composites against Liquid Glass with a known polarity, so the
+    /// **line cannot disappear whatever the wallpaper is**, and the outer half is
+    /// free light on top of that. The floor is the inward figure by construction:
+    /// the inward pixel row is the same pixel row it was.
     ///
-    /// It was 3.5 when the beam was a bar. A comet is a light *source* travelling
-    /// the rim, and a 3.5pt core with a blurred tail behind it reads as a fat
-    /// smear; the crisp core is what keeps the glow behind it from being a smudge.
-    static let beamWidth: CGFloat = 1
-
-    /// What is actually handed to `StrokeStyle`, so that `beamWidth` survives the
-    /// inward mask.
+    /// The old objection to spill — that it makes the line's *width* wallpaper-
+    /// dependent, 2pt over a dark desktop and 1pt over a bright one — is what the
+    /// **colour** answers, and that link is the load-bearing sentence of this pass.
+    /// A near-white core over a near-white sky has no outer half. A light blue has
+    /// distance from every ground there is: Δ152 from white, Δ135 from mid-grey,
+    /// Δ307 from near-black. See `Palette.beamHead`.
     ///
-    /// Double, because a `.stroke` is centred on its path and the mask keeps the
-    /// inner half. **The doubling is the arithmetic and it was still probed**, on
-    /// the assumption that the mask's own antialiased edge would eat part of the
-    /// innermost pixel row and 2.0 would come back measuring less than 1pt. It
-    /// does not: rasterised at 2x, a 2.0pt stroke measures exactly 1.00pt of
-    /// coverage on the kept side and 1.00pt of it at full alpha, because the mask
-    /// edge and the stroke's far edge are the same curve and cancel rather than
-    /// compound. 2.5 measures 1.25pt, which is a fatter head than was asked for.
-    /// **Which half is kept flipped with the fifth pass's mask and the number did
-    /// not move** — it is the same curve, cancelling the same way, from the other
-    /// side: measured inward, the core reads alpha 194 on the pixel inside the rim
-    /// against 172 outside it before.
-    ///
-    /// The measurement was taken on a straight edge, where the rim also happens to
-    /// land on the pixel grid. Through a corner the inner edge feathers and the
-    /// head reads a touch softer there. That is the corner, not the constant.
-    static var beamStrokeWidth: CGFloat { beamWidth * 2 }
+    /// It was 3.5 when the beam was a bar, and 1pt visible while it was masked. A
+    /// comet is a light *source* travelling the rim, and a 3.5pt core with a blurred
+    /// tail behind it reads as a fat smear; 2pt centred reads as one crisp line
+    /// sitting on the border, which is what the reference material shows.
+    static let beamWidth: CGFloat = 2
 
     /// The **core**'s blur radius at the very end of the tail.
     ///
@@ -224,9 +216,13 @@ enum Style {
     /// and that is the whole reason there is a width here at all.
     static let beamGlowWidth: CGFloat = 10
 
-    /// What is handed to the glow's `StrokeStyle`, for the same reason
-    /// `beamStrokeWidth` is doubled: the inward mask keeps the inner half of a
-    /// centred stroke.
+    /// What is handed to the glow's `StrokeStyle`: double, because the glow **is**
+    /// masked — outward — and a `.stroke` is centred on its path, so the mask keeps
+    /// half of it.
+    ///
+    /// The core is not doubled and no longer has an equivalent: it is unmasked and
+    /// straddles the rim. The two layers therefore relate to the mask differently on
+    /// purpose — the halo is outside the Card, the line is on its edge.
     static var beamGlowStrokeWidth: CGFloat { beamGlowWidth * 2 }
 
     /// The glow's blur radius **at the head**, and it is deliberately not 0.
@@ -239,37 +235,38 @@ enum Style {
     /// inside it: a bright line in a soft bloom, not a line that is soft at one
     /// end.
     ///
-    /// 10 with `beamGlowHead`'s alpha at 0.80. Probed against three grounds in
+    /// 12 for four passes, **14 now**, and the increase is the "bigger" half of
+    /// "spread it more out kinda like the image". Probed against three grounds in
     /// both appearances: at 8/0.85 the near-rim halo is stronger and the head's
-    /// reach drops to 20pt; at 12/0.75 the reach is 28pt and the halo one point
-    /// out is nearly half as bright. 10 is the middle and was chosen off the
-    /// numbers.
-    static let beamGlowHeadBlur: CGFloat = 12
+    /// reach drops to 20pt; at 12/0.75 the reach is 28pt and the halo one point out
+    /// is nearly half as bright.
+    ///
+    /// It was tried at 15 once, while the beam was masked outward and near-white,
+    /// and reverted because it cost the halo everywhere and light appearance had no
+    /// contrast to spare. That reason is gone: the core straddles the rim now, so
+    /// the *line*'s contrast no longer comes out of the halo's budget, and the
+    /// colour is chromatic in both appearances instead of a near-white that only
+    /// read on a dark ground.
+    static let beamGlowHeadBlur: CGFloat = 14
 
     /// The glow's blur radius at the very end of the tail.
     ///
-    /// **The ceiling used to be `cardInset * 2`, the gutter between two Card
-    /// surfaces; it is now the Card's own interior.** For four passes the glow blew
-    /// outward and the bound was that it must not reach a neighbouring Card's rim.
-    /// Since the mask was inverted the glow spills *inward*, and what it must not do
-    /// is wash over the Card's content: measured, it is still perceptible **33pt**
-    /// in and gone by 40, on a 236 × 216 surface — so it dies at 30% of the way to
-    /// the Card's centre, and nothing more than 36pt in ever sees alpha above **5**.
-    ///
-    /// What it does reach is the bottom-trailing `KeyHintChip`, which sits
-    /// `Style.padding` (12) from two rims and takes up to alpha **77** as the head
-    /// goes past. That is accepted rather than overlooked: the reference material's
-    /// rim light spills over content near its own rim too, and the alternative is a
-    /// glow that stops before it has started. A long app name is inset the same 12
-    /// horizontally and gets the same treatment for the same fraction of a second.
-    ///
-    /// Raise this and re-measure that pair — the reach and the chip's alpha — rather
-    /// than assuming either scales with the radius.
+    /// **The ceiling is the gutter between two Card surfaces again — `cardInset * 2`
+    /// = 48pt — and it is load-bearing again.** The fifth pass masked the beam
+    /// inward and the bound briefly became the Card's own interior; the sixth put
+    /// the halo back outside, so what it must not do is reach a neighbouring Card's
+    /// rim. Measured, the total reach is **40pt** at 24 — against 34 at 22 — and the
+    /// clearance is 8pt. That is the number that stops this going any higher, and it
+    /// is why `cardInset` stays at 24.
     ///
     /// It ramps *up* from `beamGlowHeadBlur` toward the tail, so the halo widens
     /// and thins as it trails — which is the tail dissolving without the glow
     /// ever going out.
-    static let beamGlowTailBlur: CGFloat = 22
+    ///
+    /// Raise this and re-measure the reach against the gutter rather than assuming
+    /// it scales with the radius: the reach is where alpha falls under 8, and the
+    /// glow's opacity ramp moves it as much as the blur does.
+    static let beamGlowTailBlur: CGFloat = 24
 
     /// The exponent that turns the glow from a **tube** into a **coma**.
     ///
@@ -287,42 +284,53 @@ enum Style {
     /// `position^beamGlowRamp`, peaking at the head and reaching nothing well
     /// before the segment's geometric end.
     ///
+    /// **1.4, then 2.4, and now 1.25 — and the round trip is not indecision, it is
+    /// two different complaints about the same dial.** 2.4 was the answer to "the
+    /// opacity of the start should be less so that it just looks more misty", which
+    /// is a statement about the *tail*. 1.25 is the answer to "not just a dot that
+    /// has a radial glow … spread it more out", which is a statement about the
+    /// *length*, and it is the opposite direction on the same exponent. What makes
+    /// them compatible rather than a loop is that the tail's own alpha came down
+    /// with the first change and stayed down: `position^ramp` multiplies
+    /// `beamGlowTail`, so the far end is quiet at 1.25 now in a way it was not at
+    /// 1.4 then.
+    ///
+    /// Intensity by position — this is the whole of the "dot versus streak"
+    /// argument, and it is arithmetic before it is a render:
+    ///
+    /// | position | 1 (head) | 0.75 | 0.5 | 0.25 |
+    /// |---|---|---|---|---|
+    /// | at 2.4 | 1.00 | 0.50 | 0.19 | 0.036 |
+    /// | at 1.25 | 1.00 | 0.70 | 0.42 | 0.177 |
+    ///
+    /// At 2.4 more than half the stroked segment was effectively unlit and the
+    /// visible comet was about 150pt of the 303 that is stroked; at 1.25 it is about
+    /// 260pt. **The invariant is that it still peaks at the head and falls
+    /// monotonically** — a flat profile is the glowing tube this exponent was
+    /// introduced to kill, and it is the failure mode to watch when lowering it.
+    /// Measured 4pt outside the rim, at the head and 15/30/60/90pt behind it, the
+    /// profile went **112 / 80 / 62 / 48 / 35** at 2.4 to **149 / 130 / 111 / 84 /
+    /// 63** at 1.25, with head-to-far 8.9× → 5.0×. Below about 1 the ratio stops
+    /// clearing `BorderBeamRenderTests`'s 4× floor and the thing becomes a hose.
+    ///
     /// **Why this is not `beamFalloff` coming back.** That exponent existed to
     /// undo a *linear* opacity ramp (1/20, 2/20, …) applied to the **only layer
     /// there was**, over colours already carrying alpha, which left 40pt of an
     /// intended 336pt on screen and made the beam invisible. Three things differ,
     /// and all three matter. There is now a separate crisp core carrying the
     /// beam's visibility, so the glow is *allowed* to fall to nothing — it is the
-    /// bloom, not the beam. The ramp is deliberately steep rather than
-    /// accidentally steep: killing the last fifth of the glow is the *point*,
-    /// because a stroke that fades out before its own `.butt` cap has no cap to
-    /// see. And it is measured across the beam as well as along it, which is the
-    /// measurement the first pass never took.
+    /// bloom, not the beam. The ramp is deliberately shaped rather than
+    /// accidentally steep. And it is measured across the beam as well as along it,
+    /// which is the measurement the first pass never took.
     ///
-    /// **2.4, raised from 1.4 for "the opacity of the start should be less so that
-    /// it just looks more misty".** At 1.4 the near-rim alpha 4pt out read
-    /// 155 / 111 / 85 / 75 / 58 at the head and 15, 30, 60 and 90 points behind it
-    /// — a falloff, but a slow one, so the first third of the tail was still a band
-    /// of paint. At 2.4 the same five places read **112 / 80 / 62 / 48 / 35**: the
-    /// head against 90pt behind it goes from 2.7× to 3.2×, and the ratio to the far
-    /// end of the segment from 7.4× to 8.6×.
-    ///
-    /// Intensity by position: 1.0 at the head, 0.19 a quarter back, 0.038 half way,
-    /// 0.004 three quarters back — so more than half the stroked segment is
-    /// effectively unlit glow and the visible comet is roughly 150pt of the 303
-    /// that is stroked. That is the point rather than an accident; the crisp core
-    /// still runs the whole length, which is what stops this being `beamFalloff`
-    /// again.
-    ///
-    /// **The exponent is not the whole of the mist, and moving it alone would have
-    /// been the wrong half.** The trailing end of the *glow* is already zero at any
-    /// exponent — `position^ramp` is 0 at position 0 — so what is actually visible
-    /// at the start of the beam is the **core**'s trailing colour, blurred by
-    /// `beamCoreTailBlur`. Measured at the trailing terminus, alpha 1pt out went
-    /// 22 → **14** only when `beamTail`'s own alpha came down 0.70 → 0.42. Raising
-    /// this exponent thins the *body* of the tail; lowering `beamTail` thins its
-    /// end.
-    static let beamGlowRamp: Double = 2.4
+    /// **The exponent is not the whole of the mist, and moving it alone is the wrong
+    /// half in either direction.** The trailing end of the *glow* is zero at any
+    /// exponent — `position^ramp` is 0 at position 0 — so what is actually visible at
+    /// the start of the beam is the **core**'s trailing colour, blurred by
+    /// `beamCoreTailBlur`. Measured at the trailing terminus, alpha 1pt out only
+    /// moved 22 → 14 when `beamTail`'s own alpha came down 0.70 → 0.42. This
+    /// exponent sets the *body* of the tail; `beamTail`'s alpha sets its end.
+    static let beamGlowRamp: Double = 1.25
 
     /// The glow's opacity multiplier for a slice at `position`.
     ///
@@ -352,45 +360,75 @@ enum Style {
     /// stroke does not follow the path at all. This one follows nothing — it is a
     /// disc, placed at a point.
     ///
-    /// **96, and the constraint it was chosen against has moved without moving the
-    /// number.** It used to be that the disc's geometric radius was exactly the
-    /// gutter between two Card surfaces (`cardInset * 2` = 48pt) and nothing might
-    /// reach a neighbouring Card's rim. Since the mask was inverted the disc's
-    /// surviving half points *into* the Card, so the bound is the Card's own
-    /// interior — 108pt to the centre from the long rim — and 96 is comfortably
-    /// inside it. Either way the bound is the *measured* reach rather than the
-    /// geometry: the gradient's outer stops are 0.02 and 0, so past about 30pt there
-    /// is nothing there, and the whole beam's reach is **33pt**, essentially what it
-    /// was outward. Raise this and re-measure the reach; do not reason from the
-    /// radius.
+    /// **It is an ellipse now, not a disc, and that is the fix for "it is just a
+    /// dot".** A circle centred on the rim is a *spot on a line*: it has the same
+    /// extent along the rim as across it, so however soft it is, the nucleus reads as
+    /// a point rather than as a streak of light travelling an edge. The answer on
+    /// screen to the circular version was "not just a dot that has a radial glow …
+    /// but spread it more out". So the bloom is `beamBloomLength` **along** the rim
+    /// by `beamBloomThickness` **across** it, rotated to the path's own tangent at
+    /// the head by `BorderBeam.head(in:at:)`, and drawn as an `EllipticalGradient` —
+    /// which stretches to its frame, where a `RadialGradient` would draw a circle
+    /// inside it and clip.
     ///
-    /// At 88 the head reads as a small bright spot rather than a glow; at 96 the
-    /// halo eight points out measures Δ108 on white against Δ68 for the version
-    /// this replaced, while total lit energy is down 46%. That pair is the whole
-    /// brief: less light, further out.
+    /// **168 × 96, an elongation of 1.75, and the split is deliberate: all of the
+    /// growth is along the rim and none of it across.** The bound outward is the
+    /// gutter between two Card surfaces (`cardInset * 2` = 48pt) and the gutter is
+    /// *across* the rim, so lengthening the streak costs nothing there — measured,
+    /// the beam's total reach across the rim is 40pt against 48. Extent along the rim
+    /// at alpha 8 or more is **74pt** against **34pt** across, which is the claim
+    /// `BorderBeamRenderTests.theBloomIsElongatedAlongTheRim` pins, because "it's a
+    /// dot" is now an explicit rejection rather than a hypothetical.
     ///
-    /// **Its alpha came down 0.76 → 0.48 with the fourth pass, and the diameter did
-    /// not move.** The disc was the *densest* thing on screen in light appearance —
-    /// rasterised over white it was a blue blob with the core's line lost inside it
-    /// — and "no dense coloured halo anywhere" is the half of the reference the
-    /// bloom was failing. Lowering the alpha rather than the diameter is deliberate:
-    /// the diameter is what makes it have no edge, and 96 → 80 would have given back
-    /// a findable rim. Turning the disc down and leaving it wide is what "misty"
-    /// means here. Raising `beamGlowHeadBlur` 12 → 15 was tried in the same pass and
-    /// reverted: it does lift the core's contrast against its own halo (rim / 4pt-out
-    /// alpha 1.59 → 1.73) but it costs the halo everywhere — Δ at 4pt out on white
-    /// fell 60 → 50 and the head's rim Δ 103 → 96 — and light appearance has none to
-    /// spare.
+    /// The thickness did not move from the 96 the disc was, and that was a decision
+    /// twice over. 96 is what gives it no findable edge — the gradient's outer stops
+    /// are 0.02 and 0, so past about 34pt there is nothing there — and 96 → 80 would
+    /// hand a rim back. Turning the light *down* and leaving it *wide* is what
+    /// "misty" means here; that is why the alpha rather than the size is what came
+    /// down when it was too dense.
     ///
-    /// Half the disc is thrown away by the inward mask, which is correct — the light
-    /// is on the Card's edge, spilling into the Card — and it is why the bloom's
-    /// alpha is higher than a disc drawn whole would need. **Its alpha came down
-    /// again with the inversion, 0.48 → 0.44 in dark and 0.48 → 0.28 in light**: the
-    /// kept half now lands on the Card's own material rather than on a wallpaper, so
-    /// the same disc reads considerably stronger, and in light appearance — where it
-    /// is a *darkening*, see `Palette.beamHead` — a bloom at the old alpha rendered
-    /// as a grey smudge inside the corner.
-    static let beamBloomDiameter: CGFloat = 96
+    /// **Its alpha history is the "blue blob" history.** 0.76 was the *densest* thing
+    /// on screen — rasterised over white it was a blob with the core's line lost
+    /// inside it, and "no dense coloured halo anywhere" is the half of the reference
+    /// it was failing. 0.76 → 0.48 fixed that, 0.48 → 0.44/0.28 followed the mask
+    /// going inward, and it is **0.46** now in both appearances: a wider ellipse
+    /// spreads the same alpha over more area, so it needed nothing back. The number
+    /// that says the line still reads as a line is the rim's alpha against the alpha
+    /// 4pt out, and it must stay above about 1.3.
+    ///
+    /// Half of it is thrown away by the outward mask, which is correct — the light is
+    /// on the Card's edge, blooming away from it — and it is why the alpha is higher
+    /// than an ellipse drawn whole would need.
+    static let beamBloomLength: CGFloat = 168
+
+    /// The bloom's extent **across** the rim: the axis the gutter bounds.
+    ///
+    /// See `beamBloomLength`. This is the one of the two that has a hard constraint
+    /// on it, and it is why the elongation was bought along the rim instead.
+    static let beamBloomThickness: CGFloat = 96
+
+    /// How far past the layer's own bounds the outward mask reaches.
+    ///
+    /// **Deleted by the fifth pass and back with the sixth, and it is not
+    /// optional.** `BorderBeam.outward` is a `Rectangle` with the Card's shape
+    /// punched out of it, and a `Rectangle` in an overlay is laid out at the
+    /// *content's* size — which is the Card. The halo is drawn well outside that, so
+    /// a mask stopping at the bounds clips the glow and the bloom into a hard square
+    /// edge along all four sides. That artefact is documented from the second pass
+    /// and there is no reason to rediscover it. While the mask was `cardShape`
+    /// itself — a region entirely *inside* the bounds — there was no boundary to
+    /// overrun and the constant was correctly deleted; going back outward brings the
+    /// boundary back.
+    ///
+    /// Derived rather than chosen, so that raising a blur or the bloom cannot start
+    /// clipping: three times the widest blur plus the glow's own stroke width, or the
+    /// bloom's longest axis, whichever is larger. Three times a Gaussian's radius is
+    /// past where it has anything left. Two instead of three measured no differently
+    /// (1.40ms against 1.43 in an older harness, inside the noise) and is not worth
+    /// the margin.
+    static var beamMaskOutset: CGFloat {
+        max(beamGlowTailBlur * 3 + beamGlowStrokeWidth, beamBloomLength)
+    }
 
     /// Whether the glow layer is drawn at all.
     ///
@@ -612,67 +650,66 @@ private struct Palette {
     /// The Border Beam **core**'s bright leading edge, and the colour it fades
     /// out through.
     ///
-    /// **The ground is the Card's own glass now, and that is the fifth pass and the
-    /// only architectural change the beam has ever had.** For four passes the beam
-    /// was masked to the region *outside* the rim, which is the gutter and then the
-    /// Panel's transparent margin — the user's desktop. So none of the colour work
-    /// below was ever measured against anything this app draws. Dark appearance's
-    /// white head over a **white** desktop measured **Δ10/442**: invisible, and
-    /// invisible for a reason no amount of retuning could reach. "Dark appearance"
-    /// does not mean "dark ground". See `BorderBeam.inward`.
+    /// **One light blue, the same in both appearances, and the reason it is
+    /// chromatic is the most important sentence in this file.** The core straddles
+    /// the rim — see `Style.beamWidth` — so its outer half composites against the
+    /// user's desktop, and the fifth pass proved what that costs a *near-white*
+    /// light: masked outward, dark appearance's white head over a **white** desktop
+    /// measured **Δ10/442**. Invisible, and invisible for a reason no amount of
+    /// retuning could reach, because "dark appearance" does not mean "dark ground" —
+    /// the appearance sets the Card's tint and has nothing to do with the wallpaper.
+    /// That finding is why the light cannot be white. **A near-white colour has no
+    /// distance from a bright sky and a near-black one has none from a dark desktop;
+    /// a chromatic colour has real distance from both.** The beam is outside the Card
+    /// again *only because* the colour changed.
     ///
-    /// Masked inward, the ground is `cardSurface(focused:)` — `.regular` glass at
-    /// this palette's own `tint` and `base` — and it is *known*, in the only sense
-    /// that matters: it is a material with a fixed polarity. Measured on the real
-    /// composite, the Card's own luminance over a white desktop, a hazy grey-white
-    /// one, a photograph and a near-black one:
+    /// The arithmetic, in the same RGB metric the rest of this file uses (out of
+    /// 442). Contrast against a ground is about `0.7 × dist(colour, ground)` — 0.7
+    /// being the coverage a thin core keeps through its own head blur — so what binds
+    /// is the **worst** ground, not the best:
+    ///
+    /// | | white | mid-grey | near-black |
+    /// |---|---|---|---|
+    /// | white@1.0 (the fifth pass) | **0** | 128 | 239 |
+    /// | (0.20, 0.45, 1.00), the withdrawn saturated blue | 178 | **112** | 213 |
+    /// | (0.50, 0.68, 1.00), this one | 152 | **135** | 307 |
+    ///
+    /// Own-colour saturation is **0.50**, against 0.80 for the withdrawn blue and
+    /// 0.026 for the near-white. That is the band this has to stay in and both edges
+    /// of it are prior rejections on screen: a saturated primary was "too dense" and
+    /// a "blue blob", and a near-white was invisible. It is a *light* blue reading as
+    /// light, which is what was asked for — "ofc a light blue for both white and
+    /// black" — and `BorderBeamRenderTests.theCoreIsADesaturatedHighlight` bounds it
+    /// from both sides for that reason.
+    ///
+    /// **The same colour in both appearances, which is new and is the simpler
+    /// answer.** The two appearances used to need opposite polarities, and the reason
+    /// was that the beam was masked *inward*: light appearance's Card measures
+    /// (247, 247, 247) over a white desktop, so a near-white line drawn on it was
+    /// Δ5 and the only way out was a dark line. A chromatic colour does not have
+    /// that problem — it is far from a light Card *and* from a dark one:
     ///
     /// | | white | hazy | photo | near-black |
     /// |---|---|---|---|---|
     /// | dark appearance's Card | 166 | 145 | 62 | 22 |
     /// | light appearance's Card | 247 | 222 | 146 | 110 |
     ///
-    /// `.regular` glass transmits, so neither row is a constant — but the two rows do
-    /// not overlap, and that is enough to fix a polarity per appearance.
+    /// (`.regular` glass transmits, so neither row is a constant. That is the second
+    /// half of why the polarity flip is gone: it was pinned to the rows not
+    /// overlapping, and a blue does not care whether they do.)
     ///
-    /// **Dark appearance's core is white, which is the reference material exactly.**
-    /// The reference — Tuna for Mac, in dark appearance — has a pale, crisp,
-    /// near-white rim highlight and a Card whose **fill** is blue; reading that blue
-    /// as belonging to the *light* is what sent two passes to a saturated core. The
-    /// blue is in the fill. Measured off the crop, its Card's rim highlight sits
-    /// around (150–185, 190–215, 225–248) over a fill of roughly (70, 120, 170), and
-    /// its outer slab's rim around (165–180, 168–182, 172–188). Our core reads
-    /// un-premultiplied **(248, 251, 255)** at own-colour saturation **0.026**, and
-    /// composited over the Card it measures Δ87 / Δ104 / Δ174 / Δ256 across the four
-    /// grounds above — against Δ17 / Δ27 / Δ95 / Δ270 outward. The floor went
-    /// **17 → 87**.
+    /// The reference material's own rim light is near-white, and that is recorded
+    /// rather than followed: Tuna for Mac is in dark appearance over a dark wallpaper
+    /// — its Card's rim highlight sits around (150–185, 190–215, 225–248) over a
+    /// **fill** of roughly (70, 120, 170) — so its white reads because *its* ground
+    /// is known and dark. Ours is a desktop we do not own. Reading its blue as
+    /// belonging to the light sent two passes to a saturated core; reading its white
+    /// as portable sent one to an invisible beam. The light blue is the colour that is
+    /// nearest to it and survives an unknown ground.
     ///
-    /// **Light appearance's core is a dark cool line, and that is the same idea
-    /// rather than a retreat from it.** A highlight needs a ground darker than
-    /// itself. Light appearance's Card is 247 over a white desktop, so a near-white
-    /// line on it measures Δ5 — there is nothing brighter than white-tinted glass to
-    /// be, which is the same sentence the old comment wrote about wallpaper, one
-    /// layer in and now actually binding. So the polarity flips, exactly as every
-    /// other edge in this appearance already does: `cardRim` is black 0.10 and
-    /// `raisedRim` black 0.16. **(58, 68, 82)** un-premultiplied, own-colour
-    /// saturation **0.293**, measuring Δ169 / Δ154 / Δ93 / Δ40 over the four grounds
-    /// — against Δ89 / Δ63 / Δ59 / Δ204 for the blue it replaces.
-    ///
-    /// **What light appearance cannot do, and this time it is arithmetic rather than
-    /// a hope.** Its Card spans 110 → 247 across wallpapers, a 137-unit range, so any
-    /// colour on the grey axis is at most 68 units from one end or the other and a
-    /// core keeps about 0.7 of that through the mask and its head blur: **~46 is the
-    /// best worst-case a desaturated light core can have, and this one measures 40**,
-    /// with its strong end at 169. Only saturation moves a colour off that axis, and
-    /// a saturated blue is the thing this project shipped twice and withdrew twice.
-    /// The old (0.50, 0.65, 0.98) measured 59–89 across all four grounds — flatter,
-    /// and never good. Do not "fix" the 40 by saturating this again; that is the loop
-    /// this comment exists to break, and do not fix it with a static lit rim, which
-    /// has been declined.
-    ///
-    /// The trade is deliberate and it is the right way round: light appearance is now
-    /// strongest over the *light* desktops most light-appearance users have, and
-    /// weakest over a dark one, where the whole app is low-contrast anyway.
+    /// Do not "fix" a weak ground by saturating this again — that is the loop these
+    /// comments exist to break — and do not fix one with a static lit rim, which is
+    /// the fixed lamp and has been declined.
     let beamHead: Color
     let beamTail: Color
 
@@ -682,26 +719,29 @@ private struct Palette {
     /// glow is a wider band and wants less saturation and less weight per pixel
     /// than the line at its centre.
     ///
-    /// **Both alphas came down twice, because "too dense" was said twice.**
-    /// 0.80 → 0.55, then 0.72 → 0.46, and dark's are now **0.52 → 0.16**. The tail's
-    /// is the one that moved furthest, on purpose: "the opacity of the start should
-    /// be less so that it just looks more misty" is a statement about the trailing
-    /// end, and the head's halo is the part that has to stay.
+    /// **Both alphas came down twice, because "too dense" was said twice**, and they
+    /// have not gone back up. 0.80 → 0.55, then 0.72 → 0.46, and they are
+    /// **0.52 → 0.18** now, in both appearances. The tail's is the one that moved
+    /// furthest, on purpose: "the opacity of the start should be less so that it just
+    /// looks more misty" is a statement about the trailing end, and the head's halo
+    /// is the part that has to stay. The tail's went 0.16 → 0.18 with this pass and
+    /// nothing else did — `Style.beamGlowRamp` coming down from 2.4 to 1.25 raises the
+    /// *body* of the tail a long way on its own, so the halo got its length out of the
+    /// exponent rather than out of the alphas.
     ///
-    /// The saturation came down with them: dark's glow head is
-    /// **(0.92, 0.96, 1.00)**, which is white with a hint, having been (0.88, 0.94,
-    /// 1.00) and before that a real blue. The reference has no dense coloured halo
-    /// anywhere in it, and a halo is where a colour is most obvious because it covers
-    /// the most pixels.
+    /// **The colour is a light blue rather than the near-white it was**, and the
+    /// reason is `beamHead`'s: half of this lands on the desktop, and near-white light
+    /// on a bright sky is the fifth pass's Δ10. It is *less* saturated than the core —
+    /// (0.62, 0.78, 1.00) at the head — because a halo covers the most pixels and is
+    /// where a colour is most obvious. The reference has no dense coloured halo
+    /// anywhere in it, which is the constraint this pair keeps failing and being
+    /// pulled back from.
     ///
-    /// **Light's pair is now the other polarity and quieter again** — (0.26, 0.30,
-    /// 0.38) at **0.34** and (0.34, 0.38, 0.46) at **0.10**, from 0.52 and 0.16. Two
-    /// reasons, both measured. The kept half of the halo lands on the Card's own
-    /// material instead of on a wallpaper, so the same alpha reads considerably
-    /// stronger; and a *darkening* spread over 30pt of a light Card is a grey wash
-    /// where the same thing in dark appearance is a mist. Rendered at 3× over a white
-    /// desktop at 0.46 it read as a soft shadow band down the inside of the rim
-    /// competing with the line; at 0.34 the line is the brightest thing in it.
+    /// **One pair for both appearances, where there used to be two of opposite
+    /// polarity.** Light appearance's halo was a *darkening* while the beam was masked
+    /// inward, because a light Card is lighter than any highlight. Outside the rim
+    /// there is no such ceiling, and a blue is far from a light desktop as well as a
+    /// dark one.
     ///
     /// A ramp *is* multiplied over these now, and only over these:
     /// `Style.beamGlowIntensity(at:)`. That is a deliberate reversal of the "no
@@ -711,23 +751,21 @@ private struct Palette {
     let beamGlowHead: Color
     let beamGlowTail: Color
 
-    /// The **radial head bloom**'s colour: the light the comet comes out of.
+    /// The **head bloom**'s colour: the light the comet comes out of.
     ///
-    /// One colour rather than a pair, because a bloom has no head and tail — it
-    /// is a disc. Its falloff is the gradient's own stops, in `BeamBloom`.
+    /// One colour rather than a pair, because a bloom has no head and tail — it is
+    /// an ellipse. Its falloff is the gradient's own stops, in `BeamBloom`.
     ///
-    /// Less saturated than `beamGlowHead` in both appearances and deliberately so:
-    /// this is the widest, softest thing the beam draws, and a saturated wash
-    /// across 38pt is the blue *paint* an earlier version was rejected for. In light
-    /// appearance it is a *darkening* rather than a brightness — see `beamHead`,
-    /// which is where the polarity is argued — and it carries the least of anything
-    /// per pixel, because the widest soft thing is the one that reads as mud first.
+    /// The least saturated of the three and deliberately so: this is the widest,
+    /// softest thing the beam draws, and a saturated wash across 40pt is the blue
+    /// *paint* two earlier versions were rejected for. It carries the least per pixel
+    /// for the same reason — the widest soft thing is the one that reads as mud first.
     ///
-    /// **0.76 → 0.48, and it is the single biggest reason the head stopped being a
-    /// blob.** At 0.76 the disc was brighter than the core it sits under, so the
-    /// crisp line was *inside* the brightest thing on screen and could not be seen
-    /// as a line. The rim's alpha against the alpha 4pt out went 1.30 → **1.59**
-    /// across this pass, which is the number that says the line reads.
+    /// **0.76 → 0.48 is the single biggest reason the head stopped being a blob**,
+    /// and 0.46 is where it sits now. At 0.76 the disc was brighter than the core it
+    /// sat under, so the crisp line was *inside* the brightest thing on screen and
+    /// could not be seen as a line at all. The number that says the line reads is the
+    /// rim's alpha against the alpha 4pt out, which must stay above about 1.3.
     let beamBloom: Color
 
     // MARK: Derived surface tints
@@ -760,11 +798,17 @@ private struct Palette {
         chipFill: .white.opacity(0.09),
         chipRim: .white.opacity(0.10),
         shadow: .black.opacity(0.44),
-        beamHead: .white.opacity(1.0),
-        beamTail: Color(red: 0.74, green: 0.85, blue: 1.0).opacity(0.42),
-        beamGlowHead: Color(red: 0.92, green: 0.96, blue: 1.0).opacity(0.52),
-        beamGlowTail: Color(red: 0.80, green: 0.88, blue: 1.0).opacity(0.16),
-        beamBloom: Color(red: 0.88, green: 0.93, blue: 1.0).opacity(0.44)
+        // The Border Beam's five colours are the **same in both appearances**, which
+        // is new with the sixth pass and is the whole of what makes an outward beam
+        // viable. See `beamHead`. They are declared in both tables rather than
+        // hoisted out of `Palette` because a colour belongs to a palette here, and a
+        // future pass that has to split them again should not have to move them
+        // back in first.
+        beamHead: Color(red: 0.50, green: 0.68, blue: 1.0).opacity(1.0),
+        beamTail: Color(red: 0.68, green: 0.82, blue: 1.0).opacity(0.42),
+        beamGlowHead: Color(red: 0.62, green: 0.78, blue: 1.0).opacity(0.52),
+        beamGlowTail: Color(red: 0.74, green: 0.86, blue: 1.0).opacity(0.18),
+        beamBloom: Color(red: 0.66, green: 0.81, blue: 1.0).opacity(0.46)
     )
 
     static let light = Palette(
@@ -779,11 +823,16 @@ private struct Palette {
         chipFill: .white.opacity(0.62),
         chipRim: .black.opacity(0.07),
         shadow: .black.opacity(0.20),
-        beamHead: Color(red: 0.22, green: 0.25, blue: 0.31).opacity(1.0),
-        beamTail: Color(red: 0.32, green: 0.36, blue: 0.44).opacity(0.42),
-        beamGlowHead: Color(red: 0.26, green: 0.30, blue: 0.38).opacity(0.34),
-        beamGlowTail: Color(red: 0.34, green: 0.38, blue: 0.46).opacity(0.10),
-        beamBloom: Color(red: 0.28, green: 0.32, blue: 0.40).opacity(0.28)
+        // Identical to dark's, and that is the point — see `beamHead`. The polarity
+        // flip that used to live here (a dark cool line, because a light Card is
+        // lighter than any highlight) belonged to the inward mask and is deleted with
+        // it. Outside the rim there is no such ceiling, and a light blue is far from
+        // a light desktop as well as a dark one.
+        beamHead: Color(red: 0.50, green: 0.68, blue: 1.0).opacity(1.0),
+        beamTail: Color(red: 0.68, green: 0.82, blue: 1.0).opacity(0.42),
+        beamGlowHead: Color(red: 0.62, green: 0.78, blue: 1.0).opacity(0.52),
+        beamGlowTail: Color(red: 0.74, green: 0.86, blue: 1.0).opacity(0.18),
+        beamBloom: Color(red: 0.66, green: 0.81, blue: 1.0).opacity(0.46)
     )
 
     static func of(_ scheme: ColorScheme) -> Palette {
@@ -949,8 +998,11 @@ struct BeamSlice: View {
         case .core: palette.beamTail.mix(with: palette.beamHead, by: position)
         }
         let width = switch layer {
+        // The glow's is doubled because the glow is masked outward and a `.stroke`
+        // is centred on its path; the core's is not, because the core is unmasked
+        // and straddles the rim. See `Style.beamWidth`.
         case .glow: Style.beamGlowStrokeWidth
-        case .core: Style.beamStrokeWidth
+        case .core: Style.beamWidth
         }
         let blur = switch layer {
         case .glow: Style.beamGlowBlur(at: position)
@@ -980,42 +1032,55 @@ struct BeamSlice: View {
     }
 }
 
-/// The comet's nucleus: a radial bloom, drawn at the head.
+/// The comet's nucleus: an elongated bloom, drawn at the head and aligned with
+/// the rim.
 ///
 /// **This is the piece that makes the effect read as light rather than as paint,
-/// and it is not a fourth tuning of the stroke.** A stroke has ends. Blur them
+/// and it is not a fifth tuning of the stroke.** A stroke has ends. Blur them
 /// and they are soft ends; ramp them and they are faint ends; they are still
 /// ends, and "you can see where the border thing ends" is what came back twice.
-/// A `RadialGradient` fill has no ends in any direction by construction — it
-/// fades to nothing everywhere — so the head stops having a terminus rather than
-/// having a well-hidden one. It is also, straightforwardly, what was asked for:
-/// "a single area/point that a radial blue kinda goes out from".
+/// A gradient fill has no ends in any direction by construction — it fades to
+/// nothing everywhere — so the head stops having a terminus rather than having a
+/// well-hidden one.
+///
+/// **It was a circle, and a circle centred on a line is a dot on that line.** That
+/// is the whole of the sixth pass's complaint about it: "not just a dot that has a
+/// radial glow … but spread it more out". It is an `EllipticalGradient` in a frame
+/// of `Style.beamBloomLength` × `beamBloomThickness`, rotated onto the rim's own
+/// tangent by `BorderBeam.bloom`, so the nucleus is a streak travelling an edge
+/// rather than a spot sitting on one. `EllipticalGradient` rather than a
+/// `RadialGradient` in a stretched frame because it takes its radii *from* the
+/// frame — a `RadialGradient` draws a circle inside whatever frame it is given and
+/// then the corners are simply empty.
+///
+/// A gradient used as a **fill** is not the stroke gradient this project has twice
+/// refused. An `AngularGradient` in a stroke sweeps at a constant *angular* rate
+/// and races a rectangle's long edges; a `LinearGradient` in a stroke does not
+/// follow the path at all. This one follows nothing — it is an ellipse, placed at a
+/// point and turned to face along the rim.
 ///
 /// It lives here rather than in `BorderBeam.swift` for the same reason
 /// `BeamSlice` does: `Palette` is private to this file, and which blue a thing is
-/// drawn in is this file's business. Where the head *is* at a given phase is the
-/// modifier's.
+/// drawn in is this file's business. Where the head *is* at a given phase, and
+/// which way the rim runs there, is the modifier's.
 ///
 /// The stops are a hand-rolled Gaussian-ish shoulder rather than a two-stop
-/// linear fade. A linear `RadialGradient` reads as a disc with a visible rim at
-/// its own edge — the falloff is constant, so the eye finds the boundary where it
-/// reaches zero. Front-loading it (1.00, 0.62, 0.30, 0.11, 0.02, 0) puts most of
-/// the light in the inner third and lets the outer half approach nothing
-/// asymptotically, which is what has no edge.
+/// linear fade. A linear gradient reads as a shape with a visible rim at its own
+/// edge — the falloff is constant, so the eye finds the boundary where it reaches
+/// zero. Front-loading it (1.00, 0.62, 0.30, 0.11, 0.02, 0) puts most of the light
+/// in the inner third and lets the outer half approach nothing asymptotically,
+/// which is what has no edge. The stops are fractions of the frame's own radii, so
+/// they describe both axes at once.
 ///
-/// **Masked inward with everything else.** A disc centred on the rim spreads
-/// outward exactly as far as inward, so half of it is thrown away either way; what
-/// changed with the fifth pass is *which* half. It used to be the inner one, on the
-/// rule that nothing may wash over the Card's content — which also meant the disc
-/// only ever landed on the user's wallpaper. It is now the outer one, so the disc's
-/// light falls on the Card's own glass and spills into the Card. See
-/// `BorderBeam.inward`.
+/// **Masked outward with the glow.** An ellipse centred on the rim spreads outward
+/// exactly as far as inward, so half of it is thrown away; the outer half is the
+/// one kept, which is why its alpha is higher than a whole one would need.
 struct BeamBloom: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         let bloom = Palette.of(scheme).beamBloom
-        return RadialGradient(
+        return EllipticalGradient(
             stops: [
                 .init(color: bloom, location: 0),
                 .init(color: bloom.opacity(0.62), location: 0.16),
@@ -1025,10 +1090,11 @@ struct BeamBloom: View {
                 .init(color: bloom.opacity(0), location: 1)
             ],
             center: .center,
-            startRadius: 0,
-            endRadius: Style.beamBloomDiameter / 2
+            startRadiusFraction: 0,
+            endRadiusFraction: 0.5
         )
-        .clipShape(Circle())
+        .frame(width: Style.beamBloomLength, height: Style.beamBloomThickness)
+        .clipShape(Ellipse())
     }
 }
 
