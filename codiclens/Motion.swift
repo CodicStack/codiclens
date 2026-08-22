@@ -106,9 +106,17 @@ enum Motion {
     /// make it linear.
     ///
     /// 0.25 → 0.55 because the paint changed rather than the intent. A 3.5pt bar
-    /// at 0.25s was a whip and meant to be; a 1pt head with 300pt of dissolving
-    /// tail behind it needs long enough for the tail to be seen as a tail rather
+    /// at 0.25s was a whip and meant to be; a 1pt core with 300pt of dissolving
+    /// glow behind it needs long enough for the tail to be seen as a tail rather
     /// than as a flash.
+    ///
+    /// **It stayed 0.55 when the glow was rebuilt as a second layer**, and that
+    /// was decided rather than skipped. The glow got wider *outward* — 34pt of
+    /// reach where there had been 11 — and no longer along the rim: the lit
+    /// segment is still `Style.beamTailFraction` of the perimeter, so there is
+    /// exactly as much rim to travel and exactly as much of it lit at once.
+    /// Duration answers segment length and perimeter, and neither moved. A bigger
+    /// halo is easier to see, not slower to read.
     static let beamSweep: Animation = .easeOut(duration: 0.55)
 
     /// The Loading Ring's revolution.
@@ -136,16 +144,21 @@ enum Motion {
     /// remove a decoration outright. Reduce Transparency is about legibility, and
     /// Apple's guidance is that content be opaque rather than semi-transparent —
     /// which a blur is, by definition. So the Border Beam's answer to this one is
-    /// to drop the blur and keep sweeping: `Style.beamBlur(at:)` returns 0 and the
-    /// crisp 1pt core still travels the rim. With Reduce Motion on there is no
+    /// to drop its **glow layer** and keep sweeping: the crisp 1pt core still
+    /// travels the rim, with no halo around it. With Reduce Motion on there is no
     /// beam to be transparent about, and with only this one on there is a beam
     /// with no halo. Giving `isReduced` a second meaning would make those two
     /// cases indistinguishable.
     ///
+    /// The layer is dropped whole rather than un-blurred, which is a change from
+    /// when the beam was one layer and setting its blur to 0 was the answer. The
+    /// glow's source band is `Style.beamGlowWidth` wide, so an un-blurred glow is
+    /// not a quieter halo — it is a 10pt flat bar travelling the rim.
+    ///
     /// It lives here, in the motion file, because `Motion.swift` is already the
     /// single place the app reads AppKit accessibility state — `isReduced` is the
     /// other read — and one slightly-misnamed home for both beats two files each
-    /// holding one. `Style.beamBlur(at:)` consults it rather than reading
+    /// holding one. `Style.beamDrawsGlow` consults it rather than reading
     /// `NSWorkspace` itself, for the same reason.
     static var isTransparencyReduced: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency

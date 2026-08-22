@@ -17,9 +17,22 @@ import CoreGraphics
 /// The empty space is not hit-testable — see `PanelHitRegions`.
 enum PanelLayout {
 
-    /// One Card. Every Card is this wide whether it has neighbours or not.
-    static let cardWidth: CGFloat = 260
-    static let cardHeight: CGFloat = 240
+    /// One Card's **cell**. Every Card gets one, whether it has neighbours or not.
+    ///
+    /// The drawn glass surface is smaller than this by `Style.cardInset` on every
+    /// side, because that padding sits *outside* the surface: 284 × 264 less 24
+    /// twice is **236 × 216**, which is the size the beam runs on and the size
+    /// `Style.beamSeamOffset` is a function of.
+    ///
+    /// **The cell grew 260 × 240 → 284 × 264 for the Border Beam's glow, and the
+    /// surface deliberately did not move.** The glow needs gutter to fall off in —
+    /// `Style.cardInset` went 12 → 24 for it — and the previous time that inset
+    /// grew the growth came out of the drawn surface, which cost the user Card
+    /// content. This time it comes out of the Panel's declared size instead. The
+    /// Panel is still fixed and still never resizes; it is simply bigger, which is
+    /// free, and it leaves 236 × 216 alone.
+    static let cardWidth: CGFloat = 284
+    static let cardHeight: CGFloat = 264
 
     /// Subject, Action, Target — the most Cards any Phase shows.
     static let maxCardCount = 3
@@ -125,9 +138,20 @@ enum PanelLayout {
     /// Empty space on all four sides of the content.
     ///
     /// `PanelEntrance` peaks at 1.04 about the centre, which pushes the widest
-    /// layout `contentWidth * 0.02 ≈ 16pt` past its own edge. The remaining
-    /// ~32pt is room for a surface's shadow to fall off in. Shrink this and the
+    /// layout `contentWidth * 0.02 ≈ 17pt` past its own edge. The remaining
+    /// ~31pt is room for a surface's shadow to fall off in. Shrink this and the
     /// shadow comes back as a band along the window edge.
+    ///
+    /// **The Border Beam's glow did not need this to grow**, and it was checked
+    /// rather than assumed, because a glow clipped by the window edge is the same
+    /// artefact this margin exists to prevent. The glow is perceptible 34pt out
+    /// from a Card's rim, and every rim has more than that between it and anything
+    /// it could be cut by: the outermost Card's rim is `margin + 10 + cardInset` =
+    /// 82pt from the window edge, the top rim is `margin + cardInset` = 72pt from
+    /// it, and the bottom rim is `cardInset + Style.gap` = 36pt above the Results
+    /// Slab, which is the one clearance the glow comes close to using. The Slab is
+    /// a later sibling in the `VStack`, so it would draw *over* the glow rather
+    /// than clip it; 36 > 34 means it does not have to.
     static let margin: CGFloat = 48
 
     static var panelWidth: CGFloat { contentWidth + margin * 2 }
