@@ -103,13 +103,22 @@ is the mistake this entry exists to prevent. OCR Text sweeps the Subject Card
 because the *Subject changed*, not because OCR finished. It never marks a
 selection moving — that stays instant. All three Cards have one; the Slab does
 not. Shares a drawing primitive with the Loading Ring and nothing else.
-The light is **white**: a thin desaturated near-white line with a faint diffuse
-mist around it. The reference material's blue belongs to its Card's *fill*, not to
-its rim light, and reading it the other way is what made this a saturated blue line
-twice. Dark appearance is where that reads 1:1; in light appearance the beam
-*darkens* whatever it crosses, because nothing is brighter than a light wallpaper,
-so the line is quiet there and the mist carries it. A permanently lit rim would be
-the **fixed lamp**, which is a different thing and has been declined.
+The light is **on the Card**: the core sits just inside the rim, on the Card's own
+glass, and the mist spills inward and fades into the Card. That is the correction
+that took five attempts, and the reason it took five is worth carrying: for four of
+them the beam was masked to the region *outside* the rim, which is the gutter and
+then the Panel's transparent margin — the user's **desktop**. So it never
+composited against anything the app draws, and whether it could be seen at all was
+decided by somebody's wallpaper. Dark appearance over a white desktop measured
+Δ10/442: nothing. **"Dark appearance" does not mean "dark ground".**
+The line is a thin desaturated rim highlight, and its polarity follows the ground it
+now has. In **dark** appearance that is white, which is the reference material
+exactly. In **light** appearance the Card's glass is lighter than any highlight, so
+the line is a dark cool one — the same polarity as every other edge in that
+appearance. The reference material's blue belongs to its Card's *fill*, not to its
+rim light, and reading it the other way is what made this a saturated blue line
+twice. A permanently lit rim would be the **fixed lamp**, which is a different thing
+and has been declined.
 _Avoid_: glow, edge blur, border glow, loading animation, spinner, focus ring,
 blue beam, accent
 
