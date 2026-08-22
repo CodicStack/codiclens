@@ -56,8 +56,19 @@ enum Style {
     /// One device pixel's worth of rim at 1x, which is what a hairline means.
     static let hairline: CGFloat = 1
 
-    /// The gap between two Cards.
-    static let cardInset: CGFloat = 6
+    /// Half the gap between two Cards, because it is a padding *outside* each
+    /// Card's drawn surface: two adjacent Cards contribute one each, so the
+    /// visible gutter is twice this.
+    ///
+    /// **12, and the Border Beam is why it is not 6.** The beam is a comet whose
+    /// tail blurs outward from the rim, and a blur spreads both ways. At an inset
+    /// of 6 the gutter was 12pt and `beamTailBlur` had nowhere to fall off into
+    /// — the far tail of the Subject Card's comet would have washed across the
+    /// Action Card's rim. `beamTailBlur` is bounded by this number for exactly
+    /// that reason. `PanelLayout.cardWidth` and `cardHeight` did **not** move
+    /// with it: the Panel is fixed and never resizes for a decoration, so what
+    /// changed is the drawn surface inside the cell — 248 × 228 became 236 × 216.
+    static let cardInset: CGFloat = 12
     /// A Result's own inset from the Slab edge, so its selection fill reads as a
     /// row inside the Slab rather than a band across it.
     static let resultInset: CGFloat = 6
@@ -86,11 +97,58 @@ enum Style {
 
     // MARK: - Border Beam
 
-    /// The lit segment's width. Half a point proud of the 1pt rim on either
-    /// side, which is what lets it read as light running *down* the rim rather
-    /// than as a second line beside it. 1pt disappears at this speed; 3pt and up
-    /// becomes a bar.
-    static let beamWidth: CGFloat = 3.5
+    /// How much lit rim the comet's crisp head puts on screen, measured outward
+    /// from the rim.
+    ///
+    /// **1pt, and it is a *visible* width rather than a stroke width.** The whole
+    /// beam layer is masked to the region *outside* `cardShape`, so nothing of it
+    /// can wash over the Card's icon, name or chips and the light is at its
+    /// densest exactly on the border. A `.stroke` is centred on the path it
+    /// follows, so that mask takes the inner half away: what is stroked has to be
+    /// wider than what is seen. `beamStrokeWidth` is the wider number, and it was
+    /// probed rather than assumed.
+    ///
+    /// It was 3.5 when the beam was a bar. A comet is a light *source* travelling
+    /// the rim, and a 3.5pt core with a blurred tail behind it reads as a fat
+    /// smear; the contrast the whole effect lives on is a hard 1pt head against a
+    /// tail that dissolves.
+    static let beamWidth: CGFloat = 1
+
+    /// What is actually handed to `StrokeStyle`, so that `beamWidth` survives the
+    /// outward mask.
+    ///
+    /// Double, because a `.stroke` is centred on its path and the mask keeps the
+    /// outer half. **The doubling is the arithmetic and it was still probed**, on
+    /// the assumption that the mask's own antialiased edge would eat part of the
+    /// innermost pixel row and 2.0 would come back measuring less than 1pt. It
+    /// does not: rasterised at 2x, a 2.0pt stroke measures exactly 1.00pt of
+    /// outward coverage and 1.00pt of it at full alpha, because the mask edge and
+    /// the stroke's inner edge are the same curve and cancel rather than compound.
+    /// 2.5 measures 1.25pt, which is a fatter head than was asked for.
+    ///
+    /// The measurement was taken on a straight edge, where the rim also happens to
+    /// land on the pixel grid. Through a corner the inner edge feathers and the
+    /// head reads a touch softer there. That is the corner, not the constant.
+    static var beamStrokeWidth: CGFloat { beamWidth * 2 }
+
+    /// The blur radius at the very end of the tail; the head's is 0.
+    ///
+    /// **8, and the ceiling is `cardInset`.** The tail blurs *outward* from the
+    /// rim into the gutter between Cards, so it cannot be allowed to reach a
+    /// neighbouring Card's rim — which is one `cardInset` away. A blur reaches
+    /// past its nominal radius: measured, the trailing slice's 7.6pt radius puts
+    /// visible light 11.5pt out. That fits inside an inset of 12 and would not
+    /// have fitted inside 6, which is why `cardInset` grew for this and why 8 is
+    /// not 16. There is not much room left over — raise this and raise the inset
+    /// with it.
+    ///
+    /// The ramp from 0 to here is **linear** in the slice's position along the
+    /// lit segment, deliberately: a linear ramp has no exponent to invent, and
+    /// the reason the *opacity* ramp needed one is that opacity multiplied on top
+    /// of colours that already carried alpha. Blur does not multiply anything. It
+    /// dims by spreading the same alpha over more pixels, which is one cause with
+    /// one ramp.
+    static let beamTailBlur: CGFloat = 8
 
     /// The lit segment's length, as a fraction of the Card's perimeter.
     ///
@@ -100,29 +158,46 @@ enum Style {
     /// reason to make it less so. It was load-bearing on the Slab, which ran from
     /// about 280 × 70 to 800 × 360: a fixed length there was a third of the
     /// smallest Slab's rim and a tenth of the largest's.
+    ///
+    /// In points, on the one size a Card is: the 236 × 216 surface's rim is about
+    /// **866pt** after the corners are rounded off, so the comet is about
+    /// **303pt** long and each of the `beamSegments` slices about **15pt**.
     static let beamTailFraction: CGFloat = 0.35
 
-    /// How many stepped sub-strokes build the tail's falloff.
+    /// How many sub-strokes build the tail.
     ///
-    /// The falloff cannot be a gradient. A `LinearGradient` in a `.stroke` does
-    /// not follow a path, and an `AngularGradient` is a constant *angular* rate,
-    /// which races the long edges of a wide rectangle and crawls its corners.
-    /// So the tail is this many equal slices *of path length*, each a flat
-    /// colour, stepping from `beamTail` to `beamHead`.
+    /// **This is the only way to vary a blur along a path.** The falloff cannot
+    /// be a gradient — a `LinearGradient` in a `.stroke` does not follow a path,
+    /// and an `AngularGradient` is a constant *angular* rate, which races the long
+    /// edges of a rectangle and crawls its corners — and there is no API at all
+    /// that makes a *blur* follow a path's arc length. But each slice is already
+    /// its own view, so giving each one its own `blur(radius:)` is variable blur
+    /// along a path, assembled out of the one primitive that *is* uniform in arc
+    /// length: `trim`.
+    ///
+    /// Each slice's radius is a constant for the whole sweep — slice *i* is always
+    /// `beamBlur(at:)` of its own position, and only its `from`/`to` move — so
+    /// nothing here animates a blur radius.
     static let beamSegments: Int = 20
 
-    /// How sharply the tail fades out, as an exponent on each slice's position
-    /// along the lit segment.
+    /// The blur radius for a slice at `position` along the lit segment, 0 at the
+    /// trailing end and 1 at the head.
     ///
-    /// **Below 1 on purpose, and it is the difference between a beam and
-    /// nothing.** A straight linear ramp — opacity 1/n, 2/n, 3/n … — is not a
-    /// falloff, it is a deletion: it multiplies on top of colours that already
-    /// carry alpha, so the first slices land near 0.05 effective alpha and the
-    /// only thing left on screen is the leading slice, a fortieth of the rim.
-    /// The rendered probe that caught it showed a 40pt sliver where 336pt of lit
-    /// rim was intended. This pulls the whole tail back above the visibility
-    /// floor while still falling off.
-    static let beamFalloff: Double = 0.3
+    /// Linear, and the head is **exactly** 0: the crisp leading edge against a
+    /// dissolving tail is the entire contrast the comet lives on, and a head with
+    /// any blur at all is a smear with a bright end.
+    ///
+    /// **Reduce Transparency drops the blur and keeps the sweep.** That is a
+    /// separate switch from Reduce Motion and it means something different: Apple
+    /// asks for opaque content rather than semi-transparent, and a blur is
+    /// semi-transparent by definition. Reduce Motion removes the beam entirely
+    /// (`BorderBeam` reads `Motion.isReduced`); Reduce Transparency leaves the
+    /// crisp 1pt core sweeping and takes the halo away. The two never fold into
+    /// one another.
+    static func beamBlur(at position: Double) -> CGFloat {
+        guard !Motion.isTransparencyReduced else { return 0 }
+        return beamTailBlur * CGFloat(1 - min(max(position, 0), 1))
+    }
 
     /// Where the seam is: the point on the rim the head enters through and the
     /// tail leaves through, as a fraction of the perimeter from the start of
@@ -140,21 +215,28 @@ enum Style {
     /// 280 × 70 and 0.604 at 280 × 200 — so one constant was a compromise across
     /// a range, and 0.56 was the middle of it. Every Card is one size: the
     /// surface the beam strokes is `PanelLayout.cardWidth - cardInset * 2` ×
-    /// `cardHeight - cardInset * 2`, 248 × 228, because `.padding(cardInset)`
+    /// `cardHeight - cardInset * 2`, **236 × 216**, because `.padding(cardInset)`
     /// sits *outside* the surface. Probed by sweeping `trim` over that shape at
     /// `cardRadius` and taking the fraction whose point is nearest the rect's
-    /// top-left: **0.619525**, landing at (6.41, 6.41) — the 45° midpoint of the
+    /// top-left: **0.619221**, landing at (6.41, 6.41) — the 45° midpoint of the
     /// corner's own curve, which is as close to a rounded corner as a point on it
     /// gets.
     ///
     /// Probed, not derived, on purpose: the corners shorten the path, so the
     /// sharp-cornered `(1.5h + w) / 2(w + h)` is only an estimate. It happens to
-    /// land at 0.619748 here — within 0.0002, or about a tenth of a point of rim
+    /// land at 0.619469 here — within 0.00025, or about a fifth of a point of rim
     /// — which is luck at this radius and not a licence to compute the next one.
+    /// The proof that it is luck is sitting in this comment's own history: the
+    /// surface was 248 × 228 before `cardInset` grew to 12, and the probe there
+    /// read 0.619525 against an analytic 0.619748. Both pairs agree to four
+    /// figures and neither agreement was predictable in advance.
     ///
     /// Change `cardRadius`, `cardWidth`, `cardHeight` or `cardInset` and this has
-    /// to be re-probed.
-    static let beamSeamOffset: CGFloat = 0.6195
+    /// to be re-probed. The probe is a `trim` sweep with successive refinement,
+    /// taking the first point of `trimmedPath(from: f, to: f + ε)` — not
+    /// `currentPoint` on `trimmedPath(from: 0, to: f)`, which returns the *end*
+    /// of the sub-path and reads `nil` at f = 0.
+    static let beamSeamOffset: CGFloat = 0.6192
 
     // MARK: - Shadow
 
@@ -198,7 +280,7 @@ enum Style {
 ///
 /// The Border Beam's two colours are the one exception, and a deliberate one.
 /// The ban `CONTEXT.md` records is on a *static* accent — something on screen
-/// long enough to be a colour the app is. The beam is gone in 0.25s.
+/// long enough to be a colour the app is. The beam is gone in 0.55s.
 private struct Palette {
 
     /// The one colour every glass surface is tinted with.
@@ -269,6 +351,20 @@ private struct Palette {
     /// glass over a light wallpaper — is invisible, so light carries the blue
     /// much further toward the head and puts a deeper blue in the tail. Dark
     /// gets a white head for free.
+    ///
+    /// **The light pair is measurably wrong and is left alone deliberately.**
+    /// Rasterised against a white Card, light's `beamHead` reads Δ43/765 of
+    /// luminance and light's `beamTail` Δ127/765 — so the head is a *third* the
+    /// contrast of the tail it is supposed to be leading, which inverts a comet
+    /// whose whole point is a bright head and a dissolving tail. Against a
+    /// mid-grey ground the two swap over (Δ182 / Δ15), because a pale blue reads
+    /// on grey and a saturated blue reads on white. This predates the comet; what
+    /// the comet changed is that 1pt of visible rim carries it instead of 3.5pt.
+    /// The lever is `beamHead` going darker and more saturated in light, **not**
+    /// `beamTail`, which is already the stronger of the two where it matters and
+    /// would only widen the inversion. It needs a real screen to choose on: a
+    /// candidate that measured Δ236 on white measured Δ1 on mid-grey, so no single
+    /// opaque colour reads against both backdrops.
     let beamHead: Color
     let beamTail: Color
 
@@ -422,14 +518,24 @@ private struct ChipSurface: ViewModifier {
     }
 }
 
-/// One slice of the Border Beam's tail: a Card's own rim shape, trimmed to
-/// `from...to` and stroked at `Style.beamWidth`.
+/// One slice of the comet: a Card's own rim shape, trimmed to `from...to`,
+/// stroked at `Style.beamStrokeWidth` and blurred by its own distance behind the
+/// head.
 ///
 /// It lives here rather than in `BorderBeam.swift` because it is the only part
 /// of the beam that is a *colour*, and `Palette` is private to this file. The
 /// beam's geometry — where the lit segment is at a given moment, and how it is
 /// sliced — is the modifier's business; which blue a slice is drawn in is this
 /// file's, the same as every other colour in the app.
+///
+/// **One ramp, one cause.** The blur is the falloff, and there is no opacity
+/// ramp behind it. There used to be — `Style.beamFalloff`, an exponent on
+/// `position` — and stacking the two would be the exact double-multiplication
+/// that exponent existed to undo: a linear opacity ramp on top of colours that
+/// already carry alpha put the trailing slices near 0.05 effective alpha and
+/// left a 40pt sliver of an intended 336pt of lit rim. Blur already dims, by
+/// spreading the same alpha over more pixels. So the opacity across the slices
+/// is **flat** and `beamFalloff` is gone rather than retuned.
 struct BeamSlice: View {
     @Environment(\.colorScheme) private var scheme
 
@@ -437,8 +543,8 @@ struct BeamSlice: View {
     let to: CGFloat
 
     /// Where this slice sits along the lit segment: 0 at the trailing end,
-    /// 1 at the head. Both the colour and the opacity are functions of it, so
-    /// the tail steps to fully transparent behind the beam.
+    /// 1 at the head. The colour and the blur radius are both functions of it,
+    /// so the tail warms toward the head's white and sharpens into it.
     let position: Double
 
     var body: some View {
@@ -446,17 +552,16 @@ struct BeamSlice: View {
         return Style.cardShape
             .trim(from: from, to: to)
             .stroke(
-                palette.beamTail
-                    .mix(with: palette.beamHead, by: position)
-                    .opacity(pow(position, Style.beamFalloff)),
+                palette.beamTail.mix(with: palette.beamHead, by: position),
                 // `.butt`, never `.round`. A round cap bulges half the line
                 // width past each slice's own trim range, so twenty translucent
                 // slices overlap at nineteen joints and each overlap composites
                 // twice — which renders as a row of regular bright beads down
                 // the beam rather than a smooth falloff. Confirmed in a probe
                 // render, not guessed at.
-                style: StrokeStyle(lineWidth: Style.beamWidth, lineCap: .butt)
+                style: StrokeStyle(lineWidth: Style.beamStrokeWidth, lineCap: .butt)
             )
+            .blur(radius: Style.beamBlur(at: position))
     }
 }
 
