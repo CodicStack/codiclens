@@ -8,8 +8,11 @@ import SwiftUI
 ///
 /// There are exactly three tiers:
 ///
-/// - **surface** — a Slab. Liquid Glass, its own hairline rim, its own shadow.
-///   `slabSurface()`.
+/// - **surface** — a Slab. Liquid Glass and its own shadow, and **no rim**: it is
+///   the one surface that carries none. `Palette.slabRim` is declared and unused,
+///   which is deliberate rather than forgotten — it was wired up once, while the
+///   Border Beam lived on the Slab and wanted an edge to run along, and reverted
+///   when the beam moved to the Cards. `slabSurface()`.
 /// - **raised** — the focused Card. Brighter and a touch more defined at the
 ///   edge than its neighbours. No accent colour: brightness is the focus
 ///   signal. `cardSurface(focused: true)`.
@@ -68,6 +71,91 @@ enum Style {
     static let chipPaddingH: CGFloat = 7
     static let chipPaddingV: CGFloat = 3
 
+    // MARK: - Loading Ring
+
+    /// The Loading Ring's box. A `.small` `ProgressView` — the system spinner
+    /// this replaced — occupies about 14pt, so nothing sized to fit that moves.
+    static let ringDiameter: CGFloat = 13
+
+    static let ringStroke: CGFloat = 1.5
+
+    /// How much of the circle is lit: 270°, and a **constant** length. A ring
+    /// that fills once and waits would be a progress claim, and neither Vision
+    /// nor `mdfind` reports progress for it to be a measure of.
+    static let ringArcFraction: CGFloat = 0.75
+
+    // MARK: - Border Beam
+
+    /// The lit segment's width. Half a point proud of the 1pt rim on either
+    /// side, which is what lets it read as light running *down* the rim rather
+    /// than as a second line beside it. 1pt disappears at this speed; 3pt and up
+    /// becomes a bar.
+    static let beamWidth: CGFloat = 3.5
+
+    /// The lit segment's length, as a fraction of the Card's perimeter.
+    ///
+    /// A fraction rather than a length, and it stays one now that the beam runs
+    /// on a Card. Every Card is `PanelLayout.cardWidth` × `cardHeight`, so a
+    /// length would work too — but the drawing is shape-agnostic and there is no
+    /// reason to make it less so. It was load-bearing on the Slab, which ran from
+    /// about 280 × 70 to 800 × 360: a fixed length there was a third of the
+    /// smallest Slab's rim and a tenth of the largest's.
+    static let beamTailFraction: CGFloat = 0.35
+
+    /// How many stepped sub-strokes build the tail's falloff.
+    ///
+    /// The falloff cannot be a gradient. A `LinearGradient` in a `.stroke` does
+    /// not follow a path, and an `AngularGradient` is a constant *angular* rate,
+    /// which races the long edges of a wide rectangle and crawls its corners.
+    /// So the tail is this many equal slices *of path length*, each a flat
+    /// colour, stepping from `beamTail` to `beamHead`.
+    static let beamSegments: Int = 20
+
+    /// How sharply the tail fades out, as an exponent on each slice's position
+    /// along the lit segment.
+    ///
+    /// **Below 1 on purpose, and it is the difference between a beam and
+    /// nothing.** A straight linear ramp — opacity 1/n, 2/n, 3/n … — is not a
+    /// falloff, it is a deletion: it multiplies on top of colours that already
+    /// carry alpha, so the first slices land near 0.05 effective alpha and the
+    /// only thing left on screen is the leading slice, a fortieth of the rim.
+    /// The rendered probe that caught it showed a 40pt sliver where 336pt of lit
+    /// rim was intended. This pulls the whole tail back above the visibility
+    /// floor while still falling off.
+    static let beamFalloff: Double = 0.3
+
+    /// Where the seam is: the point on the rim the head enters through and the
+    /// tail leaves through, as a fraction of the perimeter from the start of
+    /// `cardShape`'s own path.
+    ///
+    /// **This is not zero, and the reason is measured rather than assumed.**
+    /// SwiftUI's `RoundedRectangle` path begins at the *right* edge's vertical
+    /// midpoint and runs clockwise from there — right, bottom, left, top — so
+    /// fraction 0 is the middle of the right-hand edge, 0.25 the middle of the
+    /// bottom, 0.5 the middle of the left, 0.75 the middle of the top. The
+    /// top-left corner therefore falls a little past 0.5.
+    ///
+    /// **And now it is exact, which it could not be while the beam was on the
+    /// Slab.** The Slab's proportions vary — the same corner sat at 0.547 at
+    /// 280 × 70 and 0.604 at 280 × 200 — so one constant was a compromise across
+    /// a range, and 0.56 was the middle of it. Every Card is one size: the
+    /// surface the beam strokes is `PanelLayout.cardWidth - cardInset * 2` ×
+    /// `cardHeight - cardInset * 2`, 248 × 228, because `.padding(cardInset)`
+    /// sits *outside* the surface. Probed by sweeping `trim` over that shape at
+    /// `cardRadius` and taking the fraction whose point is nearest the rect's
+    /// top-left: **0.619525**, landing at (6.41, 6.41) — the 45° midpoint of the
+    /// corner's own curve, which is as close to a rounded corner as a point on it
+    /// gets.
+    ///
+    /// Probed, not derived, on purpose: the corners shorten the path, so the
+    /// sharp-cornered `(1.5h + w) / 2(w + h)` is only an estimate. It happens to
+    /// land at 0.619748 here — within 0.0002, or about a tenth of a point of rim
+    /// — which is luck at this radius and not a licence to compute the next one.
+    ///
+    /// Change `cardRadius`, `cardWidth`, `cardHeight` or `cardInset` and this has
+    /// to be re-probed.
+    static let beamSeamOffset: CGFloat = 0.6195
+
     // MARK: - Shadow
 
     /// How far a surface's shadow reaches, and how far it hangs below the
@@ -107,6 +195,10 @@ enum Style {
 /// signalled by brightness and rim weight alone. An accent fill across a whole
 /// Card turned the Panel into a coloured box, and a tinted selection fought
 /// every app icon it sat next to.
+///
+/// The Border Beam's two colours are the one exception, and a deliberate one.
+/// The ban `CONTEXT.md` records is on a *static* accent — something on screen
+/// long enough to be a colour the app is. The beam is gone in 0.25s.
 private struct Palette {
 
     /// The one colour every glass surface is tinted with.
@@ -169,6 +261,17 @@ private struct Palette {
     /// without turning into a halo on a light one.
     let shadow: Color
 
+    /// The Border Beam's bright leading edge, and the colour its tail fades out
+    /// through.
+    ///
+    /// Asymmetric between appearances for the same reason everything else here
+    /// is, and more sharply. A near-white beam on a light Card — white-tinted
+    /// glass over a light wallpaper — is invisible, so light carries the blue
+    /// much further toward the head and puts a deeper blue in the tail. Dark
+    /// gets a white head for free.
+    let beamHead: Color
+    let beamTail: Color
+
     // MARK: Derived surface tints
 
     /// Slab, focused Card and unfocused Card all share this. The Slab is not a
@@ -198,7 +301,9 @@ private struct Palette {
         selectionFill: .white.opacity(0.13),
         chipFill: .white.opacity(0.09),
         chipRim: .white.opacity(0.10),
-        shadow: .black.opacity(0.44)
+        shadow: .black.opacity(0.44),
+        beamHead: .white.opacity(0.95),
+        beamTail: Color(red: 0.45, green: 0.65, blue: 1.0).opacity(0.70)
     )
 
     static let light = Palette(
@@ -212,7 +317,9 @@ private struct Palette {
         selectionFill: .black.opacity(0.07),
         chipFill: .white.opacity(0.62),
         chipRim: .black.opacity(0.07),
-        shadow: .black.opacity(0.20)
+        shadow: .black.opacity(0.20),
+        beamHead: Color(red: 0.62, green: 0.78, blue: 1.0).opacity(0.95),
+        beamTail: Color(red: 0.30, green: 0.50, blue: 0.95).opacity(0.60)
     )
 
     static func of(_ scheme: ColorScheme) -> Palette {
@@ -312,6 +419,44 @@ private struct ChipSurface: ViewModifier {
             .padding(.vertical, Style.chipPaddingV)
             .background(palette.chipFill, in: Capsule())
             .overlay { Capsule().strokeBorder(palette.chipRim, lineWidth: Style.hairline) }
+    }
+}
+
+/// One slice of the Border Beam's tail: a Card's own rim shape, trimmed to
+/// `from...to` and stroked at `Style.beamWidth`.
+///
+/// It lives here rather than in `BorderBeam.swift` because it is the only part
+/// of the beam that is a *colour*, and `Palette` is private to this file. The
+/// beam's geometry — where the lit segment is at a given moment, and how it is
+/// sliced — is the modifier's business; which blue a slice is drawn in is this
+/// file's, the same as every other colour in the app.
+struct BeamSlice: View {
+    @Environment(\.colorScheme) private var scheme
+
+    let from: CGFloat
+    let to: CGFloat
+
+    /// Where this slice sits along the lit segment: 0 at the trailing end,
+    /// 1 at the head. Both the colour and the opacity are functions of it, so
+    /// the tail steps to fully transparent behind the beam.
+    let position: Double
+
+    var body: some View {
+        let palette = Palette.of(scheme)
+        return Style.cardShape
+            .trim(from: from, to: to)
+            .stroke(
+                palette.beamTail
+                    .mix(with: palette.beamHead, by: position)
+                    .opacity(pow(position, Style.beamFalloff)),
+                // `.butt`, never `.round`. A round cap bulges half the line
+                // width past each slice's own trim range, so twenty translucent
+                // slices overlap at nineteen joints and each overlap composites
+                // twice — which renders as a row of regular bright beads down
+                // the beam rather than a smooth falloff. Confirmed in a probe
+                // render, not guessed at.
+                style: StrokeStyle(lineWidth: Style.beamWidth, lineCap: .butt)
+            )
     }
 }
 

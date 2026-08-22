@@ -41,7 +41,7 @@ A glass surface inside the Panel. There is one — the Results Slab, below the C
 _Avoid_: panel, pane, tray, sheet
 
 **Card**:
-One tile representing one Phase. Cards float directly over the desktop in a row at the top of the Panel — there is deliberately no Slab behind them. The focused Card is brighter and more defined at the edge; there is no accent colour anywhere in the app.
+One tile representing one Phase. Cards float directly over the desktop in a row at the top of the Panel — there is deliberately no Slab behind them. The focused Card is brighter and more defined at the edge; no surface in the app carries an accent colour. The ban is on a *static* accent — an accent fill across a Card turned the Panel into a coloured box and a tinted selection fought every app icon beside it. A transient highlight that is gone in a quarter of a second is not one; see Border Beam.
 _Avoid_: tile, pane, box
 
 **Result**:
@@ -85,8 +85,29 @@ Returning macOS activation to the app that was frontmost before the Panel appear
 _Avoid_: focus restore, app switch
 
 **Motion**:
-The app's animation vocabulary. Only three curves exist, and only Panel appearance, Panel dismissal, and Slab resizing use them. Everything else changes instantly and on purpose.
-_Avoid_: transitions, effects, FX
+The app's animation vocabulary, in two categories that must not be confused. A
+**Transition** carries a change the user caused; there are exactly three curves
+and only Panel appearance, Panel dismissal and Slab resizing use them.
+**Decoration** carries nothing — it is the Border Beam and the Loading Ring, it
+never tells the user anything, it never delays anything, and it is absent under
+Reduce Motion. Everything else changes instantly and on purpose.
+_Avoid_: transitions (Transition means one of the three), effects, FX
+
+**Border Beam**:
+A bright segment that travels once around a Card's rim when that Card takes the
+keyboard. It belongs to the Card **as a surface** and it means nothing — it is
+not tied to OCR, to searching, to loading, or to any other in-flight state, and
+reading it as one is the mistake this entry exists to prevent. All three Cards
+have one; the Slab does not. Shares a drawing primitive with the Loading Ring and
+nothing else.
+_Avoid_: glow, edge blur, border glow, loading animation, spinner, focus ring
+
+**Loading Ring**:
+The app's own spinner: a constant-length arc, rotating, beside the text in each
+of the Panel's two waiting states. Decorative in the strict sense — neither
+Vision nor `mdfind` reports progress, so there is nothing for it to measure. It
+never fills, and it never appears without text saying what is being waited on.
+_Avoid_: progress, progress indicator, activity indicator, throbber
 
 ### Reading text out of images
 

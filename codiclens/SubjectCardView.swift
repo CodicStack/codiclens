@@ -4,12 +4,22 @@ struct SubjectCardView: View {
     @Bindable var coordinator: CommandCoordinator
     @FocusState private var isEditorFocused: Bool
 
-    private var isFocused: Bool {
+    /// Whether the Query is still the question being asked.
+    ///
+    /// This is the distinction the Card turns on, and it decides two separate
+    /// things: whether the Card *follows the selection* or *names the chosen
+    /// Subject*, and whether the displayed name is marked up against the Query
+    /// at all. The Phases where the Query is still live happen to be exactly the
+    /// Phases where this Card holds the keyboard, which is why `isFocused` is
+    /// the same set — if the two ever come apart, they come apart here.
+    private var isQueryPhase: Bool {
         switch coordinator.phase {
         case .searchingSubject, .browsingClipboard, .browsingEmoji: true
         default: false
         }
     }
+
+    private var isFocused: Bool { isQueryPhase }
 
     /// Whether the Card is holding text rather than naming something, which is
     /// the one case that needs a near-solid ground to stay readable.
@@ -17,7 +27,22 @@ struct SubjectCardView: View {
         isClipboardText || isTextMode || retargetedText != nil
     }
 
+    /// What the Card is about — and it is two different things by Phase.
+    ///
+    /// While the Query is still the question, the Card previews the highlighted
+    /// Result, so it reads `subjectVM.results[selectedIndex]` and moves as the
+    /// selection moves. Once a Subject has been **chosen**, the Card is about
+    /// that Subject and the Query's matches are no longer what it is showing.
+    ///
+    /// Those are not the same value, and reading only the first is how "Use as
+    /// Subject" left Finder sitting on the Card after promoting a file out of
+    /// it: the promotion writes `selectedSubject`, while `subjectVM.results`
+    /// still holds whatever the Query matched. `retargetedText` already solved
+    /// exactly this for OCR Text and a transform's output — but only for a
+    /// `.text` Subject, and a promoted file or app is not one, so it fell
+    /// straight through to the stale Result.
     private var subject: Subject? {
+        if !isQueryPhase, let chosen = coordinator.selectedSubject { return chosen }
         let vm = coordinator.subjectVM
         guard vm.selectedIndex < vm.results.count else { return nil }
         return vm.results[vm.selectedIndex]
@@ -31,20 +56,14 @@ struct SubjectCardView: View {
     /// The text of a Subject that has *replaced* what the Query matched — OCR
     /// Text, or a transform's output.
     ///
-    /// `subjectVM.results` is what the Query matched, and after a retarget that
-    /// is no longer what the Card is about. A transform got away with reading
-    /// the results because retargeting also rewrote the Query, so the results
-    /// were rebuilt around the new text; OCR Text cannot be written into a
-    /// one-line Query bar, so the Card asks the coordinator what the Subject is
-    /// instead. Only outside the searching Phases, where the Query is still the
-    /// thing being answered.
+    /// A narrower case of what `subject` now does generally: it exists because a
+    /// text Subject is *previewed* rather than named, so the Card needs the
+    /// string and not the Subject. It stays separate for that reason alone, and
+    /// no longer for the reason it was written — `subject` reads
+    /// `selectedSubject` outside a Query Phase now, for every kind and not just
+    /// text.
     private var retargetedText: String? {
-        switch coordinator.phase {
-        case .searchingSubject, .browsingClipboard, .browsingEmoji:
-            return nil
-        default:
-            break
-        }
+        guard !isQueryPhase else { return nil }
         guard case .text(let rawText)? = coordinator.selectedSubject?.kind else { return nil }
         return rawText
     }
@@ -91,6 +110,7 @@ struct SubjectCardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottomTrailing) { corner }
         .cardSurface(focused: isFocused, writing: isWriting)
+        .cardBeam(focused: isFocused)
         .padding(Style.cardInset)
     }
 
@@ -284,7 +304,16 @@ struct SubjectCardView: View {
                 .aspectRatio(contentMode: .fit)
                 .frame(width: Style.cardIcon, height: Style.cardIcon)
 
-            Text(highlightedName(subject.displayName, query: coordinator.subjectVM.searchText))
+            // Marked up only where the name is what the Query matched. A
+            // promoted or chosen Subject is not, and underlining the
+            // characters of `find` that happen to line up in a file it was
+            // found through would be marking a match that never happened.
+            Text(
+                highlightedName(
+                    subject.displayName,
+                    query: isQueryPhase ? coordinator.subjectVM.searchText : ""
+                )
+            )
                 .font(.system(size: 15, weight: .semibold))
                 .lineLimit(1)
                 .foregroundStyle(.primary)
