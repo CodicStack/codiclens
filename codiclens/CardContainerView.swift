@@ -79,12 +79,42 @@ struct CardContainerView: View {
                 coordinator.submit()
                 return .handled
             }
-            if press.key == .tab && press.modifiers.isEmpty {
-                coordinator.advancePhase()
+            // Shift+Tab does not arrive as `.tab`, and that is why this used
+            // to do nothing at all.
+            //
+            // AppKit gives a back-tab its own control character — `NSText.h`
+            // spells them `NSTabCharacter = 0x0009` and
+            // `NSBackTabCharacter = 0x0019` — and SwiftUI passes it straight
+            // through: `press.key` is U+0019, not `.tab`, so a
+            // `press.key == .tab && press.modifiers.contains(.shift)` test is
+            // false for every Shift+Tab ever pressed. `KeyEquivalent` has no
+            // `.backTab` member, so the scalar literal is the only spelling
+            // available.
+            //
+            // **Measured, not reasoned.** Apple documents none of this, and
+            // `KeyPress.characters` is documented as the characters "as if no
+            // modifier key applies" — which reads like a promise that a back-tab
+            // normalises back down to a tab, and is wrong. A probe logging the
+            // scalars of both fields recorded, for one Shift+Tab:
+            //
+            //     key=U+0019 characters=U+0019 modifiers=0x0002[shift]
+            //
+            // and for a plain Tab, `U+0009` in both with no modifiers. So both
+            // fields carry the back-tab and `.shift` is present as well.
+            //
+            // The `.shift` test is not redundant: U+0019 is also what Ctrl+Y
+            // produces, and without it Ctrl+Y would retreat the Phase.
+            if press.key == KeyEquivalent("\u{19}") && press.modifiers.contains(.shift) {
+                // Unconditional, because Tab is unconditional — Shift+Tab is the
+                // exact inverse of Tab and nothing else. Deliberately *not*
+                // Ctrl+H's grid-first shape (`if !moveLeft() { retreatPhase() }`):
+                // in Emoji Mode Shift+Tab has to leave the grid, not walk one
+                // cell left.
+                coordinator.retreatPhase()
                 return .handled
             }
-            if press.key == .tab && press.modifiers.contains(.shift) {
-                coordinator.retreatPhase()
+            if press.key == .tab && press.modifiers.isEmpty {
+                coordinator.advancePhase()
                 return .handled
             }
             if press.modifiers.contains(.command) && press.characters == "e" {
