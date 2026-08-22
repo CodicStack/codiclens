@@ -64,6 +64,18 @@ needs no `project.pbxproj` edit.
   to). The next animation that "just needs to show that something is happening" is
   a transition wearing decoration's clothes and goes through the three curves. See
   `docs/adr/0003-motion-budget.md`.
+  **`Motion.swift` also owns the app's only two AppKit accessibility reads, and
+  they are independent.** `isReduced` is Reduce Motion plus the app's own
+  animations preference, and its answer is that a decoration is absent.
+  `isTransparencyReduced` is Reduce Transparency, which is a claim about
+  legibility rather than about movement — Apple asks for opaque content over
+  semi-transparent, and a blur is semi-transparent — and its answer is that the
+  Border Beam **drops its blur and keeps sweeping**. Do not fold the second into
+  the first or give `isReduced` a second meaning: with Reduce Motion on there is
+  no beam at all, with only Reduce Transparency on there is a beam with no halo,
+  and neither switch implies the other. `Style.beamBlur(at:)` consults
+  `Motion.isTransparencyReduced` rather than reading `NSWorkspace` itself, so both
+  reads stay in the one file.
 - **The Border Beam belongs to a *Card* and means nothing.** It sweeps around
   a Card that becomes about something new — `cardBeam(identity:)` on all three,
   applied *between* `.cardSurface(...)` and `.padding(Style.cardInset)`, because
@@ -99,32 +111,68 @@ needs no `project.pbxproj` edit.
   trigger to arrival. A Card focused across a dismiss-and-resummon sees no
   false→true edge and no `onAppear`, so it does not sweep on that summon — known,
   documented on `CardBeam`, not a bug to fix twice.
-  `Style.beamSeamOffset` is now **exact** (0.6195), because every Card is one
+  `Style.beamSeamOffset` is **exact** (0.6192), because every Card is one
   size — it was a compromise across the Slab's variable proportions. Probe it, do
   not compute it: the analytic `(1.5h + w) / 2(w + h)` happens to land within
-  0.0002 at radius 22 and that is luck, not a method. It shares one drawing primitive with the
+  0.00025 at radius 22 and that is luck, not a method — it also landed within
+  0.0002 at the *previous* surface size, and neither agreement was predictable.
+  **Change `cardRadius`, `cardWidth`, `cardHeight` or `cardInset` and re-probe
+  it**, by sweeping `trim` and taking the fraction whose point is nearest the
+  rect's top-left; at 236 × 216 that is 0.619221, landing at (6.41, 6.41), the 45°
+  midpoint of the corner's own curve. Read the *first* point of
+  `trimmedPath(from: f, to: f + ε)` — `currentPoint` on `trimmedPath(from: 0, to: f)`
+  gives the sub-path's end and is `nil` at f = 0.
+  It shares one drawing primitive with the
   Loading Ring — an animated `trim` along a stroked path — and nothing else.
   Two things it must not become: a rotating **conic gradient**, which sweeps at a
-  constant *angular* rate and so races a wide Slab's long edges and crawls its
-  corners; and a **stroke gradient**, which does not follow a path. The falloff is
-  `Style.beamSegments` flat slices of equal path length. `trim` *is* uniform in
-  path length — verified: `slabShape`'s path starts at the right edge's vertical
-  midpoint and runs clockwise, so the top-left corner lands at
-  `(1.5h + w) / 2(w+h)`, which is 0.55–0.60 across every Slab the app draws.
-  `Style.beamSeamOffset` is the middle of that range, and no single constant can
-  hit the corner at every size.
-- **A stepped falloff needs an eased ramp and `.butt` caps, and it needs a
-  *render* to check.** The Border Beam's tail is `Style.beamSegments` flat slices,
-  and fading them linearly (1/n, 2/n, …) is not a falloff — it multiplies on top
-  of colours that already carry alpha, so the trailing slices land near 0.05
-  effective alpha and only the leading slice survives. `Style.beamFalloff` is the
-  exponent that fixes it and must stay below 1. Round caps bulge half a line width
-  past each slice's own trim range, so the joints composite twice and the beam
-  renders as a row of beads; the caps are `.butt`. Both were found by rasterising
-  the modifier with `ImageRenderer`, because `BorderBeamTests` pinned the trim
-  geometry and passed the whole time the beam was invisible. `BorderBeamRenderTests`
-  is the pixel-level counterpart and the only test here that looks at pixels — a
-  geometry test cannot tell you a thing is on screen.
+  constant *angular* rate and so races a wide rectangle's long edges and crawls its
+  corners; and a **stroke gradient**, which does not follow a path. `trim` *is*
+  uniform in path length — verified: `cardShape`'s path starts at the right edge's
+  vertical midpoint and runs clockwise, which is why the top-left corner falls a
+  little past 0.5.
+- **The beam is a *comet*: a crisp 1pt head and a tail that blurs out and
+  dissolves. One layer, one ramp, masked outward.** `Style.beamWidth` is 1 and is
+  the *visible* width; `beamStrokeWidth` is `beamWidth * 2`, because a `.stroke` is
+  centred on its path and `BorderBeam.outward` masks the whole layer to the region
+  outside `Style.cardShape` so nothing washes over the Card's content. A 2.0pt
+  stroke measures exactly 1.00pt outward at full alpha — probed, on the assumption
+  the mask's antialiasing would eat some of it; it does not, because the mask edge
+  and the stroke's inner edge are the same curve. The hard inner edge on the rim
+  *is* the "densest at the border" reading, not a compromise.
+  **The falloff is a per-slice blur and the opacity across the slices is flat.**
+  `Style.beamSegments` is still 20 equal slices of path length, but each carries its
+  own `blur(radius:)` — linear from 0 at the head to `beamTailBlur` (8) behind it —
+  because there is **no API that makes a gradient or a blur follow a path's arc
+  length**, and per-slice blur out of the one arc-length-uniform primitive (`trim`)
+  is the only way to vary one. `Style.beamFalloff` is **deleted, not retuned**:
+  blur already dims by spreading the same alpha over more pixels, and stacking an
+  opacity ramp on top is the exact double-multiplication that exponent existed to
+  undo — it once left 40pt of an intended 336pt on screen. One ramp, one cause. The
+  head's blur is exactly 0; that contrast is what the comet lives on. Round caps
+  still bulge half a line width past each slice's trim range, so nineteen joints
+  composite twice and the beam renders as a row of beads: the caps stay `.butt`.
+  `beamTailBlur` is bounded by `Style.cardInset` — the tail reaches about 11.5pt
+  past the rim, which is why the inset went 6 → 12 and the drawn Card surface went
+  248 × 228 → **236 × 216**. `PanelLayout.cardWidth`/`cardHeight` and the Panel's
+  own size did not move; the Panel does not resize for a decoration.
+  `Motion.beamSweep` is 0.55s and stays `easeOut` — the visible *end* of a sweep is
+  the tail draining through the seam, and easeOut spends its last frames there.
+  **All of it was found by rasterising with `ImageRenderer`**, because
+  `BorderBeamTests` pins the trim geometry and passed the whole time the beam was
+  invisible. `BorderBeamRenderTests` is the pixel-level counterpart and the only
+  test here that looks at pixels — a geometry test cannot tell you a thing is on
+  screen. It now pads what it rasterises (the beam is outside the Card's bounds and
+  `ImageRenderer` renders a view at its own size, so an unpadded render crops the
+  effect: 327 lit pixels against 1,039) and it asserts **zero beam pixels inside the
+  rim**, which is the one rule taste cannot catch — deleting the mask leaves every
+  geometry test passing.
+  **Known and open: the beam is near-invisible in light appearance over a light
+  backdrop, and it is inverted.** Measured, against a white Card: light `beamHead`
+  is Δ43/765 of luminance and light `beamTail` Δ127/765, so the head is a third the
+  contrast of the tail it should be leading. Over mid-grey they swap (Δ182 / Δ15).
+  Retuning `beamTail`, the obvious lever, makes it worse. The fix is `beamHead` in
+  light going darker and more saturated, and it needs a real screen, because no
+  single opaque colour reads on both a white and a mid-grey backdrop.
 - **The Loading Ring is not a progress indicator.** A constant-length 270° arc that
   turns, in both of the Panel's waiting states. Neither Vision nor `mdfind` reports
   progress, so a ring that *fills* would be claiming something the app cannot back.
@@ -326,7 +374,22 @@ Contains a hidden `TextField` that captures all keyboard input, and the Card row
 **The keyboard lives here and nowhere else** — the Query field in the Results Slab is
 display-only. Routes to coordinator:
 - Enter → `submit()`, ⌥Enter → `toggleSkinTonePicker()`
-- Tab → `advancePhase()` / Shift+Tab → `retreatPhase()`
+- Tab → `advancePhase()` / Shift+Tab → `retreatPhase()`, both unconditional.
+  **Shift+Tab does not arrive as `.tab`, and testing for it that way is why it did
+  nothing at all for a while.** AppKit gives a back-tab its own control character
+  — `NSText.h` spells them `NSTabCharacter = 0x0009` and
+  `NSBackTabCharacter = 0x0019` — and SwiftUI passes it straight through, so
+  `press.key` is U+0019 and a `press.key == .tab && press.modifiers.contains(.shift)`
+  test is false for every Shift+Tab ever pressed. `KeyEquivalent` has no `.backTab`,
+  so the scalar literal is the only spelling. Apple documents none of this and
+  `KeyPress.characters` — "the characters generated by the pressed key as if no
+  modifier key applies" — reads like a promise that the back-tab normalises back
+  down to a tab, which is **wrong**: a probe logging both fields recorded
+  `key=U+0019 characters=U+0019 modifiers=0x0002[shift]`, against `U+0009` in both
+  with no modifiers for a plain Tab. The `.shift` test that remains is not
+  redundant — U+0019 is also Ctrl+Y, which would otherwise retreat the Phase.
+  Shift+Tab is the inverse of **Tab**, not of Ctrl+L: it is unconditional, so in
+  Emoji Mode it leaves the grid rather than walking a cell left.
 - Up/Down → `moveUp()` / `moveDown()`
 - Left/Right → `moveLeft()` / `moveRight()`, which mean something only in a grid
 - Escape → `handleEscape()`
@@ -431,8 +494,8 @@ User types query → Enter
 | `EmojiRecentsStore.swift` | Emoji Recents persistence (Application Support) |
 | `EmojiGridView.swift` | Results Slab in grid Mode |
 | `Style.swift` | Every radius, material, tint and rim. The only `colorScheme` branch |
-| `Motion.swift` | The three transition curves, the two decorations, Reduce Motion collapse, entrance/shake/hardCut |
-| `BorderBeam.swift` | A Card's one-lap beam: over-travel geometry, slicing, `CardBeam`'s focus policy |
+| `Motion.swift` | The three transition curves, the two decorations, the Reduce Motion and Reduce Transparency reads, entrance/shake/hardCut |
+| `BorderBeam.swift` | A Card's one-lap comet: over-travel geometry, slicing, the outward mask, `CardBeam`'s identity policy |
 | `LoadingRing.swift` | The app's own spinner, in place of a system `ProgressView` |
 | `AppIndex.swift` | The app Index: background scan, atomic swap, lazy icons |
 | `AppDirectoryWatcher.swift` | FSEvents watch over the application directories |
@@ -469,6 +532,21 @@ Real, unfixed, none urgent.
   pair per call — the dataset is already lowercase — or to move ranking off the main
   thread. Do not "optimise" it by loosening the scoring: `FuzzyMatchTests` pins the
   tiers, and app search shares the function.
+- **The Border Beam's comet is near-invisible in light appearance over a light
+  backdrop, and inverted.** Measured against a white Card: light `beamHead` is
+  Δ43/765 of luminance, light `beamTail` Δ127/765 — the head has a third the
+  contrast of the tail it should be leading. Over mid-grey the two swap (Δ182 /
+  Δ15). It predates the comet; the comet made it more noticeable by putting 1pt of
+  visible rim behind it instead of 3.5pt. The lever is `Palette.light.beamHead`,
+  not `beamTail`, and it needs an eye: a candidate measuring Δ236 on white measured
+  Δ1 on mid-grey, so no one opaque colour reads on both.
+- **Release-configuration tests fail and have nothing to do with the Panel.** Run
+  with `-configuration Release SWIFT_ENABLE_TESTABILITY=YES` (Release lacks
+  testability, so `@testable import` will not resolve without it), the
+  `PasteboardWatcherTests` cases in `ClipboardHistoryTests.swift` abort the test
+  host, which marks every suite scheduled after them failed at 0.000s. Every suite
+  passes when run on its own, and the whole suite passes in Debug. The documented
+  command is the Debug one.
 - The Panel's runtime behaviour has not been verified on screen from this environment:
   screen recording is not granted, so no screenshot was possible, and Cmd+Space is
   taken by Spotlight so the hotkey could not be driven either. The geometry and the

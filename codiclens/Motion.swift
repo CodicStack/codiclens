@@ -32,6 +32,13 @@ import SwiftUI
 /// animate information*, and a decorative loop touches none of that. The next
 /// animation that "just needs to show that something is happening" is a
 /// transition wearing decoration's clothes and goes through the three curves.
+///
+/// **Two accessibility switches are read here and nowhere else.** `isReduced`
+/// covers Reduce Motion and the app's own animations preference, and it is what a
+/// decoration checks before drawing at all. `isTransparencyReduced` covers Reduce
+/// Transparency, which is a claim about legibility rather than about movement —
+/// the Border Beam answers it by dropping its blur and going on sweeping. They
+/// are independent on purpose and neither implies the other.
 enum Motion {
 
     // MARK: - The three curves
@@ -84,12 +91,25 @@ enum Motion {
     // to it: a decoration reads `Motion.isReduced` at the point of use and is
     // absent. Whatever the surface said without it, it still says.
 
-    /// The Border Beam's one lap. `easeOut` on purpose: perceived speed is set
-    /// by the velocity at the *start* of a motion, so easeOut leaves the mark at
-    /// full speed and reads as fast. easeInOut reads as mass, which is a
-    /// different quality and slower-feeling because it spends its first frames
-    /// accelerating.
-    static let beamSweep: Animation = .easeOut(duration: 0.25)
+    /// The Border Beam's one lap. `easeOut` on purpose, and now for two reasons.
+    ///
+    /// The first is perceived speed: it is set by the velocity at the *start* of
+    /// a motion, so easeOut leaves the mark at full speed and reads as fast.
+    /// easeInOut reads as mass, which is a different quality and slower-feeling
+    /// because it spends its first frames accelerating.
+    ///
+    /// The second arrived with the comet. Because of the over-travel geometry,
+    /// the last thing the sweep does is drain the tail out through the seam — so
+    /// the *end* of the curve is not the head arriving anywhere, it is a blurred
+    /// glow emptying. easeOut spends its final frames slowly, which is exactly
+    /// where that glow wants to be spent. Linear would arrive and stop; do not
+    /// make it linear.
+    ///
+    /// 0.25 → 0.55 because the paint changed rather than the intent. A 3.5pt bar
+    /// at 0.25s was a whip and meant to be; a 1pt head with 300pt of dissolving
+    /// tail behind it needs long enough for the tail to be seen as a tail rather
+    /// than as a flash.
+    static let beamSweep: Animation = .easeOut(duration: 0.55)
 
     /// The Loading Ring's revolution.
     static let ringSpin: Animation = .linear(duration: 0.85).repeatForever(autoreverses: false)
@@ -106,6 +126,29 @@ enum Motion {
     static var isReduced: Bool {
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return true }
         return !(UserDefaults.standard.object(forKey: animationsEnabledKey) as? Bool ?? true)
+    }
+
+    /// Whether the system is asking for opaque content instead of
+    /// semi-transparent.
+    ///
+    /// **A different switch with a different meaning, and it must not be folded
+    /// into `isReduced`.** Reduce Motion is about movement and its answer is to
+    /// remove a decoration outright. Reduce Transparency is about legibility, and
+    /// Apple's guidance is that content be opaque rather than semi-transparent —
+    /// which a blur is, by definition. So the Border Beam's answer to this one is
+    /// to drop the blur and keep sweeping: `Style.beamBlur(at:)` returns 0 and the
+    /// crisp 1pt core still travels the rim. With Reduce Motion on there is no
+    /// beam to be transparent about, and with only this one on there is a beam
+    /// with no halo. Giving `isReduced` a second meaning would make those two
+    /// cases indistinguishable.
+    ///
+    /// It lives here, in the motion file, because `Motion.swift` is already the
+    /// single place the app reads AppKit accessibility state — `isReduced` is the
+    /// other read — and one slightly-misnamed home for both beats two files each
+    /// holding one. `Style.beamBlur(at:)` consults it rather than reading
+    /// `NSWorkspace` itself, for the same reason.
+    static var isTransparencyReduced: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
     }
 
     /// How long a collapsed animation takes. Long enough to read as a fade
