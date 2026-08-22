@@ -111,10 +111,11 @@ enum Motion {
     /// glow behind it needs long enough for the tail to be seen as a tail rather
     /// than as a flash.
     ///
-    /// **It stayed 0.55 through both later paint changes**, and that was decided
-    /// rather than skipped, twice. The glow got wider *outward* — 34pt of reach
-    /// where there had been 11 — and then quieter and more concentrated at the
-    /// head. Neither changed anything along the rim: the lit segment is still
+    /// **It stayed 0.55 through all three later paint changes**, and that was
+    /// decided rather than skipped each time. The glow got wider *outward* — 34pt
+    /// of reach where there had been 11 — then quieter and more concentrated at the
+    /// head, then quieter again and white rather than blue. None of that changed
+    /// anything along the rim: the lit segment is still
     /// `Style.beamTailFraction` of the perimeter, so there is exactly as much rim
     /// to travel and exactly as much of it stroked at once. Duration answers
     /// segment length and perimeter, and neither moved. A bigger halo is easier to

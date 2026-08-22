@@ -21,7 +21,7 @@ import Testing
 ///
 /// **Every test in here was added after a version shipped and was rejected on
 /// sight, and each one is the measurement the pass before it had not taken.** That
-/// is the pattern worth knowing about this file, because it has now happened three
+/// is the pattern worth knowing about this file, because it has now happened four
 /// times.
 ///
 /// `theTailSurvivesItsOwnFalloff` and `theRimAloneIsWhatBothEndsOfTheSweepLookLike`
@@ -43,6 +43,13 @@ import Testing
 /// `neitherEndOfTheLitSegmentIsAHardEdge` came from the two-layer comet, whose glow
 /// ran at *constant opacity* down the whole lit segment and so read as a glowing
 /// tube with a visible flat end. Every other test in this file passed, again.
+///
+/// `theCoreIsANearWhiteHighlight` came from the three-part comet, whose core was a
+/// **saturated** blue line where the reference material's is a desaturated
+/// near-white one — the reference's blue is in its Card's *fill*, and two passes
+/// read it as belonging to the light. It is the only test here about a colour, and
+/// it is a bound rather than a target, because "it went saturated blue again" is
+/// now a repeat failure mode rather than a hypothetical one.
 ///
 /// The through-line: a render can prove light is on screen and cannot say whether
 /// it reads as the thing it is for. What a render *can* be made to catch is a
@@ -98,6 +105,22 @@ struct BorderBeamRenderTests {
         let pixels: [UInt8]
 
         func alpha(x: Int, y: Int) -> Int { Int(pixels[(y * width + x) * 4 + 3]) }
+
+        /// The stored, **premultiplied** channels. Saturation — `(max - min) / max`
+        /// — is invariant under premultiplication by a scalar, so this is the
+        /// beam's own colour's saturation without having to un-premultiply it and
+        /// without a ground to composite over.
+        func rgb(x: Int, y: Int) -> (r: Int, g: Int, b: Int) {
+            let i = (y * width + x) * 4
+            return (Int(pixels[i]), Int(pixels[i + 1]), Int(pixels[i + 2]))
+        }
+
+        func saturation(x: Int, y: Int) -> Double {
+            let c = rgb(x: x, y: y)
+            let mx = Double(max(c.r, max(c.g, c.b)))
+            let mn = Double(min(c.r, min(c.g, c.b)))
+            return mx == 0 ? 0 : (mx - mn) / mx
+        }
     }
 
     private func rasterise(progress: Double) -> Bitmap? {
@@ -164,13 +187,20 @@ struct BorderBeamRenderTests {
     /// 10pt band blurred by 10–20 puts real alpha across the whole gutter instead
     /// of a hairline against the rim. That version was rejected on screen for
     /// being *too* dense, and the fix — an opacity ramp on the glow, a bloom at
-    /// the head, quieter colours — brings it to **5,197**, deliberately. A beam
-    /// reduced to its head slice alone, which is the failure mode this test is
-    /// for, would still be about 60 pixels. So 3,000 is well under a working
-    /// comet and fifty times a deleted one.
+    /// the head, quieter colours — brought it to **5,197**, deliberately. It was
+    /// rejected again for the same reason, and the fourth pass — a steeper glow
+    /// ramp, a much fainter glow tail, a dimmer bloom — brings it to **3,782**. A
+    /// beam reduced to its head slice alone, which is the failure mode this test is
+    /// for, would still be about 60 pixels. So 3,000 is under a working comet and
+    /// fifty times a deleted one.
     ///
-    /// Two of those three numbers went *down* on purpose, so this floor cannot be
-    /// read as "more is better". It is a floor on the beam existing.
+    /// **Three of those four numbers went *down* on purpose, so this floor cannot
+    /// be read as "more is better", and it is now the tightest it has been** — 782
+    /// pixels of margin rather than 2,197. It stays at 3,000 rather than following
+    /// the measurement down, because it is a floor on the beam *existing* and the
+    /// deleted-beam failure it guards is two orders of magnitude below. If a fifth
+    /// pass takes the mist down again, re-measure this before assuming there is
+    /// room.
     @Test func theTailSurvivesItsOwnFalloff() {
         let lit = litPixels(progress: 0.5) - baseline
 
@@ -204,15 +234,19 @@ struct BorderBeamRenderTests {
     /// puts the head slice there. The two-layer version read alpha 247 at the rim,
     /// then 96, 92, 78, 60, 22 at 1, 4, 8, 12 and 20 points out, reaching zero by
     /// 34. The third pass — a glow that ramps, a bloom at the head, and a core
-    /// whose head blur is no longer 0 — reads **202, 192, 155, 137, 110, 62**,
-    /// still nothing by 40. The rim pixel is *lower* and everything behind it is
-    /// higher, which is the trade the pass was making: less total light, more
-    /// spread.
+    /// whose head blur is no longer 0 — read **202, 192, 155, 137, 110, 62**. The
+    /// fourth, which turned the halo down to mist and the core into a near-white
+    /// highlight, reads **178, 163, 112, 97, 77, 41**, still nothing by 40.
     ///
-    /// The rim floor came down from 220 to 170 because of that, and it was
-    /// **re-measured rather than scaled**: 202 is what a 1pt core blurred by
-    /// `Style.beamCoreHeadBlur` puts on the rim, and the floor sits under it by
-    /// about the same margin 220 sat under 247.
+    /// The rim floor has come down twice, 220 → 170 → **155**, and both times it
+    /// was **re-measured rather than scaled**. 178 is what a 1pt core at full
+    /// opacity, blurred by `Style.beamCoreHeadBlur`, puts on the rim once the glow
+    /// underneath it is only half as dense; the floor sits about 13% under that,
+    /// which is the margin 170 had under 202 and 220 had under 247. Note the rim
+    /// alpha *fell* while the core's own opacity went 0.95 → 1.00 — what it lost is
+    /// the glow that used to be stacked beneath it, and that loss is the point: the
+    /// rim's alpha against the alpha 4pt out went 1.30 → **1.59**, which is the
+    /// core becoming visible *as a line* rather than as the middle of a bloom.
     @Test func theHeadHasAHaloAndACrispCore() {
         guard let bitmap = beamAlone(progress: Self.headOnTheRightEdge) else {
             Issue.record("the beam layer did not rasterise")
@@ -226,7 +260,7 @@ struct BorderBeamRenderTests {
         }
 
         #expect(
-            alpha(0) > 170,
+            alpha(0) > 155,
             "the core is not crisp at the rim: alpha \(alpha(0)). Style.beamWidth is what survives the mask."
         )
         #expect(
@@ -242,6 +276,52 @@ struct BorderBeamRenderTests {
             alpha(1) > alpha(12) && alpha(12) > alpha(28),
             "the halo does not fall off outward: \(alpha(1)) / \(alpha(12)) / \(alpha(28))"
         )
+    }
+
+    /// **The core is a desaturated near-white highlight, not a blue line.**
+    ///
+    /// The one claim in this file about a *colour*, and it is here because "it went
+    /// saturated blue again" is a repeat failure. The reference material — Tuna for
+    /// Mac — has a pale, crisp, near-white rim highlight over a Card whose **fill**
+    /// is blue, and two separate passes read that blue as belonging to the *light*
+    /// and pushed the core to a saturated mid-luminance blue. Both were rejected on
+    /// screen, and the second one was rejected with the words "the line should be
+    /// highlighted exactly like … the tunaformac".
+    ///
+    /// Measured at the head's rim pixel, on the beam's own colour: the saturated
+    /// version read **0.738** in light appearance and **0.158** in dark. It now
+    /// reads **0.477** and **0.056**. The bound below is loose on purpose — it is a
+    /// guard against a *return* to a saturated core, not a target — and it is set
+    /// under the rejected value rather than just over the shipping one, so a pass
+    /// that legitimately trades a little saturation back for contrast on a light
+    /// ground does not have to argue with a test.
+    ///
+    /// **Saturation rather than a Δ against a ground**, because the two appearances
+    /// and the three grounds disagree about contrast and agree about this. It is
+    /// read off the premultiplied channels directly: `(max - min) / max` is
+    /// invariant under multiplication by alpha.
+    @Test func theCoreIsANearWhiteHighlight() {
+        let y = Int(((pad + size.height / 2) * Self.scale).rounded(.down))
+        let x = Int(((pad + size.width + 0.25) * Self.scale).rounded(.down))
+
+        for dark in [false, true] {
+            guard let bitmap = beamAlone(progress: Self.headOnTheRightEdge, dark: dark) else {
+                Issue.record("the beam layer did not rasterise")
+                return
+            }
+            let saturation = bitmap.saturation(x: x, y: y)
+            #expect(
+                saturation < 0.60,
+                """
+                the core has gone saturated again in \(dark ? "dark" : "light") \
+                appearance: saturation \(saturation) at the head's rim, against \
+                0.477 shipping in light and 0.056 in dark. The reference's rim \
+                light is white and its blue is in the Card's *fill* — see \
+                Palette.beamHead. On a light ground the answer to a beam that does \
+                not read is not more blue.
+                """
+            )
+        }
     }
 
     /// The sweep phase that puts the head slice on the right edge's vertical
@@ -272,10 +352,14 @@ struct BorderBeamRenderTests {
     /// was "it should be more like a single area/point that a radial blue kinda
     /// goes out from".
     ///
-    /// It now reads **155 / 75 / 43 / 21** at the same four places. The floors
-    /// below are a monotone requirement plus a 4× head-to-far ratio, which the
-    /// tube fails on both counts (its ratio was 1.5 and its first step went the
-    /// wrong way).
+    /// It read **155 / 75 / 43 / 21** at the same four places with
+    /// `Style.beamGlowRamp` at 1.4, and reads **112 / 48 / 24 / 13** at 2.4 — the
+    /// fourth pass's answer to "the opacity of the start should be less so that it
+    /// just looks more misty". Head-to-far went 7.4× → **8.6×** while every
+    /// absolute number came down, and those two have to be read together: a fainter
+    /// tail is a *steeper* comet, not a weaker one. The floors below are a monotone
+    /// requirement plus a 4× head-to-far ratio, which the tube fails on both counts
+    /// (its ratio was 1.5 and its first step went the wrong way).
     ///
     /// The four points are addressed off straight edges rather than by walking the
     /// path, so no arc-length machinery is needed here: at
@@ -319,7 +403,8 @@ struct BorderBeamRenderTests {
             """
             the glow's falloff is too shallow to read as a comet: \(head) at the \
             head against \(furthest) 280pt behind it. The version this test was \
-            written for measured 92 against 62.
+            written for measured 92 against 62; the shipping one measures 112 \
+            against 13.
             """
         )
     }
@@ -335,7 +420,13 @@ struct BorderBeamRenderTests {
     /// `beamCoreHeadBlur` = 0: a 1pt square of alpha 250 with nothing beyond it.
     /// Measured as the largest alpha step between vertically adjacent pixels half
     /// a point outside the rim, scanned ±24pt around the head, it read **170**
-    /// against a mid-segment control of 7. It now reads **6** against 3.
+    /// against a mid-segment control of 7. It read **6** against 3 once
+    /// `beamCoreHeadBlur` went to 1.5, and reads **9** against 2 now that the glow
+    /// under the head is half as dense — a brighter line inside a fainter halo has
+    /// a slightly steeper edge by construction, and 9 against a threshold of 40 is
+    /// still a fifth of the way to a visible terminus. `Style.beamGlowHeadBlur` is
+    /// what would put it back up: raising it 12 → 15 was tried in the same pass and
+    /// read 10 here while costing the halo everywhere else.
     ///
     /// The worse one was structural and had nothing to do with caps.
     /// `BorderBeam.trimRange` pins the lit segment's leading end at 1 from phase
@@ -346,7 +437,8 @@ struct BorderBeamRenderTests {
     /// full-brightness terminus sitting at the top-left corner for 0.14s. Peak
     /// alpha across the whole render at phases 0.74, 0.80, 0.86, 0.92 and 0.97
     /// read **249, 249, 248, 249, 248** — a parked head. Measuring `position`
-    /// against the unclamped travel instead reads **218, 174, 126, 79, 46**.
+    /// against the unclamped travel instead read **218, 174, 126, 79, 46**, and
+    /// with the fourth pass's quieter mist it reads **190, 132, 87, 51, 31**.
     ///
     /// **The ratio is in the assertion and the monotonicity alone is not enough**,
     /// which was checked rather than assumed: with the travel-based `position`
@@ -518,11 +610,17 @@ struct BorderBeamRenderTests {
     }
 
     /// The beam with no Card under it, so any alpha inside the rim is the beam's.
-    private func beamAlone(progress: Double) -> Bitmap? {
+    ///
+    /// `dark` exists for `theCoreIsANearWhiteHighlight`, which is the one claim in
+    /// this file that is about a *colour* and therefore the one that has to be made
+    /// twice. Everything else here measures alpha, which the palette's two halves
+    /// agree on to within a point.
+    private func beamAlone(progress: Double, dark: Bool = false) -> Bitmap? {
         let view = Color.clear
             .frame(width: size.width, height: size.height)
             .modifier(BorderBeam(progress: progress, target: 1, reduced: false))
             .padding(pad)
+            .environment(\.colorScheme, dark ? .dark : .light)
 
         let renderer = ImageRenderer(content: view)
         renderer.scale = Self.scale

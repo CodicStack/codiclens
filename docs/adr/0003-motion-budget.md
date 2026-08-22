@@ -164,15 +164,17 @@ clock, no `TimelineView`. A `trim` along the shape's own path, never a rotating
 conic gradient: the Slab is a wide rectangle, and a constant *angular* rate races
 the long edges and crawls the corners.
 
-### The beam is a comet, and only the paint changed — three times
+### The beam is a comet, and only the paint changed — four times
 
 It was a 3.5pt bright bar with a stepped opacity falloff. Then it was a **comet**
 in one layer: a crisp 1pt head, a per-slice blur ramping from 0 at the head, one
 sliced stroke, masked outward. Then it was a comet in **two layers** — a crisp
-core inside a soft glow of constant opacity. It is now a comet in **three parts**:
-a radial bloom at the head, a glow that peaks under the bloom and dies away
-behind it, and the crisp core on top of both. The sections below record all three
-steps, because each is a correction of the one before and the corrections are the
+core inside a soft glow of constant opacity. Then a comet in **three parts**: a
+radial bloom at the head, a glow that peaks under the bloom and dies away behind
+it, and the crisp core on top of both. It is still those three parts; what the
+fourth pass changed is that the light is now **white** rather than blue, and the
+halo is mist rather than a cloud. The sections below record all four steps,
+because each is a correction of the one before and the corrections are the
 valuable part.
 
 **Nothing in the decision above moved, through any step.** Same `trim`, same
@@ -182,18 +184,26 @@ which is why they are recorded here rather than in ADRs of their own — a secon
 ADR would restate this one and leave two documents disagreeing about who owns the
 beam.
 
-**The one thing worth reading if nothing else is read.** All three passes
+**The one thing worth reading if nothing else is read.** All four passes
 measured carefully, reported true numbers, and were rejected on sight. The first
 profiled the falloff *along* the beam and never across it, and shipped a head
 with no halo at all while reporting a monotone falloff. The second profiled it
 *across* and never along, and shipped a halo of constant opacity — a glowing tube
 — while reporting a real halo at every distance. The third took both profiles
 *and* rasterised PNGs and looked at them, at 3×, which is the only thing that
-found the core's flat cap and the per-slice banding in it. The lesson is not
-"measure more". It is **choose the measurement that corresponds to the
-complaint**: "you can see where it ends" is a large local gradient, and for two
-passes nobody measured a local gradient. Where the complaint is about how
-something *looks*, the closing check has to be a picture.
+found the core's flat cap and the per-slice banding in it. The fourth is the one
+worth dwelling on, because its miss was not a missing profile: every number it
+inherited was a **delta against a ground**, and a delta cannot tell a saturated
+blue line from a desaturated near-white one. Both can measure Δ200 on the same
+backdrop. The reference material's rim light is white and the blue in the image
+belongs to its Card's *fill*; two passes read that blue as belonging to the light
+and pushed the core further into saturation to make it "read", which is the exact
+opposite of what was being asked for. The lesson is not "measure more". It is
+**choose the measurement that corresponds to the complaint** — "you can see where
+it ends" is a large local gradient, "it should be white" is an absolute colour and
+a saturation, and in both cases nobody had measured the quantity being complained
+about. Where the complaint is about how something *looks*, the closing check has
+to be a picture.
 
 #### Why the one-layer comet failed on screen while measuring correctly
 
@@ -303,6 +313,16 @@ far from both — (0.20, 0.45, 1.00) is 247 units from white and 255 from black 
 the same RGB metric — so light's `beamHead` went from a pale blue to that, and
 measures Δ207 on white, Δ149 on mid-grey and Δ250 on near-black. One colour, three
 grounds, no inversion. The open question is closed.
+
+**That paragraph is the single most expensive sentence in this document and the
+fourth pass had to unpick it. Read it with the correction below.** It is true as
+arithmetic and it answered the wrong question. Nobody had asked for a colour that
+maximises contrast on an unknown backdrop; the reference material shows a
+*white* line, and a saturated blue is what "reads against every backdrop" gets you
+if contrast is the only thing being optimised. The fourth pass also found the
+arithmetic itself was over-stated: the binding ground for a saturated blue is
+mid-grey rather than white, so **desaturating cost 18% of worst-case contrast, not
+the inversion this paragraph feared.** See "The white comet" below.
 
 The consequence worth naming: on a light ground the beam's **luminance delta is
 negative** — it darkens by 260/765 at the head. That is not a defect, it is the
@@ -422,9 +442,9 @@ and it was measurable the whole time; nobody had taken the measurement. Rasteris
 | after | 175 | 128 | 96 | 75 | 66 | 59 | 46 | 44 | 30 | 13 |
 
 The before row *rises* behind the head and then sits flat for 200pt. It is not a
-falloff at all; it is a hose with soft sides. `Style.beamGlowRamp` (1.4) is a
-per-slice opacity ramp, `position^ramp`, multiplied into the glow's colour and
-**nothing else's**.
+falloff at all; it is a hose with soft sides. `Style.beamGlowRamp` — 1.4 at this
+step, 2.4 now — is a per-slice opacity ramp, `position^ramp`, multiplied into the
+glow's colour and **nothing else's**.
 
 **Which is a reversal of the "no computed opacity ramp" rule above, and the
 distinction matters more than the rule did.** `Style.beamFalloff` — the exponent
@@ -494,10 +514,12 @@ which is 0 at both ends of the sweep and 1 whenever the segment is fully extende
 because a disc has extent even when the lit segment has none.
 
 **4. It was too dense.** The previous pass had pushed light's colours to a
-saturated mid-luminance blue to fix a measured inversion, and that part was right
-and has not moved: the **core** is still (0.20, 0.45, 1.00)@0.95. What
-over-corrected was the **glow**, at (0.28, 0.52, 1.00)@0.80 → (0.14, 0.36,
-0.92)@0.55 spread flat over 303pt. It is now (0.38, 0.60, 1.00)@0.72 → (0.24,
+saturated mid-luminance blue to fix a measured inversion, and *this* pass left the
+**core** at (0.20, 0.45, 1.00)@0.95 on the grounds that the saturation argument was
+settled — which is exactly the mistake the fourth pass had to undo, and it is worth
+noting that "the core has not moved" was written twice in a row as a reassurance.
+What this pass changed was the **glow**, at (0.28, 0.52, 1.00)@0.80 → (0.14, 0.36,
+0.92)@0.55 spread flat over 303pt. It went to (0.38, 0.60, 1.00)@0.72 → (0.24,
 0.46, 0.96)@0.46 — lighter, less saturated, lower alpha — with `beamBloom` at
 (0.32, 0.56, 1.00)@0.76, less saturated again because it is the widest and softest
 thing drawn. Dark's glow moved the same way. Measured at mid-sweep in light
@@ -595,6 +617,118 @@ Two things carry over from the amendment this replaces, unchanged:
   threshold, which is an `asyncAfter`, which the second rule above now forbids
   outright rather than merely discouraging.
 
+#### The white comet — the step that took the blue out of the light
+
+The answer to the three-part version, on screen and in light appearance, was: *"the
+opacity of the start should be less so that it just looks more misty and then the
+line should be highlighted exactly like i have shown you 100 times now with the
+tunafor mac. just see if you can replicate it 1:1"*, with a tight crop of the
+reference's slab and the tops of its two Cards.
+
+**The single most useful thing in this document is what that crop actually shows.**
+Its rim highlight is a thin, crisp, **desaturated near-white** line. Measured off
+the crop: the Card's rim light sits around (150–185, 190–215, 225–248) over a Card
+**fill** of roughly (70, 120, 170), and the outer slab's rim around
+(165–180, 168–182, 172–188), a light warm grey. The blue in that image belongs to
+the Card's fill, not to the light. Any glow around the line is very faint and
+diffuse; there is no dense coloured halo anywhere in the frame. Codiclens's Cards
+are not blue, so its beam has no blue to borrow, and every pass that read that
+image as "a blue light" was reading a fill as a lamp. Two passes did, and the
+second of them wrote down that the core "has not moved" as though that were
+reassurance.
+
+**The core.** Near-white and desaturated in both appearances. Own-colour saturation
+at the head's rim pixel: **0.738 → 0.477** in light, **0.158 → 0.056** in dark.
+Composited, dark over near-black reads **(172, 178, 183)** — the middle of the
+reference's slab-rim band — and light over white reads **(169, 198, 253)**, inside
+its Card-rim band on red and green and a hair over on blue. `beamHead` is
+(0.50, 0.65, 0.98)@1.0 in light and white@1.0 in dark; `beamTail` (0.38, 0.54,
+0.90)@0.42 and (0.74, 0.85, 1.00)@0.42.
+
+**What desaturating cost, and why the previous section over-stated it.** The beam's
+contrast against a ground is `0.7 × dist(colour, ground)` — the 0.7 is the coverage
+a 1pt core keeps through the outward mask and its own head blur — so what matters
+is the **worst** of the three grounds, and for a saturated blue that ground is
+mid-grey rather than white. Old (0.20, 0.45, 1.00): Δ178 on white, **Δ112** on
+mid-grey, Δ213 on near-black. New: Δ103, **Δ92**, Δ214. Worst case 112 → 92: **18%
+of contrast for 35% of saturation.** The high blue channel is what buys mid-grey
+back, which is why it stays at 0.98 while red and green come up — a fully neutral
+grey core measures Δ84 at best.
+
+**What light appearance cannot do, stated plainly because it has been "fixed" twice
+already.** On a ground lighter than the light the luminance delta is negative: the
+beam *darkens*, by 145/765 at the head over white, and nothing is brighter than a
+white wallpaper. Over a light-**grey** wallpaper (0.86, where a great many light
+desktops sit) the new core measures about Δ60/442 — the pale blue this project
+shipped and withdrew measured Δ30 there, so the margin over invisible is a factor
+of two rather than ten. Rendered as PNGs and looked at: in **dark** appearance the
+result is the reference's character — a thin crisp near-white line on the rim with
+a faint diffuse mist outside it and a small bloom at the head. In **light**
+appearance over white the line is present but quiet, and what carries the effect is
+the mist; over mid-grey it reads cleanly. **1:1 with the reference is a
+dark-appearance result, and the user is in light appearance.** The two ways to
+close that gap are both closed: saturating the core again is the loop this section
+exists to break, and a static lit rim is the fixed lamp, which has been declined.
+
+**The mist is two dials and the exponent is the wrong half on its own.**
+`Style.beamGlowRamp` 1.4 → **2.4** thins the *body* of the tail: near-rim alpha 4pt
+out at the head and 15/30/60/90pt behind it went 155/111/85/75/58 →
+**112/80/62/48/35**, and head-to-far 7.4× → **8.6×** — a fainter tail is a steeper
+comet, not a weaker one. But `position^ramp` is already 0 at position 0, so the
+glow contributes nothing at all at the trailing end whatever the exponent is; what
+is visible there is the **core**'s trailing colour, blurred by `beamCoreTailBlur`.
+The trailing terminus's alpha 1pt out only moved 22 → **14** when `beamTail`'s own
+alpha came down 0.70 → 0.42. Glow alphas are now **0.52 → 0.16** and `beamBloom`
+**0.48**, down from 0.76.
+
+**The bloom's diameter did not move, and that was a decision.** 96 is what gives it
+no findable edge; 96 → 80 would hand one back. Turning the disc *down* and leaving
+it *wide* is what "misty" means. At 0.76 the bloom was brighter than the core it sat
+under, so the crisp line was inside the brightest thing on screen and could not be
+seen as a line at all — which is the other half of "the line should be highlighted".
+The number that says the line reads is the rim's alpha against the alpha 4pt out:
+**1.30 → 1.59**.
+
+**One thing was tried and reverted, with numbers.** `beamGlowHeadBlur` 12 → 15
+lifts that same ratio to 1.73 — a thinner near-rim halo does make the core stand
+out — and costs the halo everywhere else: Δ at 4pt out on white 60 → 50, the head's
+rim Δ 103 → 96, and the hard-edge step at the head 9 → 10. Light appearance has no
+contrast to spare, so it went back to 12.
+
+| light over white, mid-sweep | two-layer | three-part | white comet |
+|---|---|---|---|
+| total perceptual energy | 534,554 | 290,850 | −64% again |
+| lit pixels over the rim | 8,115 | 5,197 | **3,782** |
+| peak per-pixel saturation | 0.776 | 0.643 | **0.361** |
+| core own-colour saturation | — | 0.738 | **0.477** |
+
+Reach is **34pt**, unchanged, against the 48pt gutter — so `Style.cardInset`,
+`PanelLayout.cardWidth`/`cardHeight` and `beamSeamOffset` all stayed exactly where
+they were, and the drawn surface is still 236 × 216. The hard-edge step at the head
+went 6 → **9** against a control of 2 and a threshold of 40: a brighter line inside
+a fainter halo has a steeper edge by construction, and that is the price of the line
+reading as a line. `Motion.beamSweep` stayed 0.55s for the fourth time — nothing
+about the rim's length or the lit segment's length moved.
+
+Cost: **nothing**. The same harness reads 1.59 ms per frame per Card in Release and
+2.40–2.49 ms in Debug before and after, because a colour and an exponent are free —
+twenty `pow` calls per frame — and no geometry moved. Those absolutes are again not
+comparable with the figures in the sections above; the *lit-pixel* count out of the
+same file reproduced the old 5,197 exactly, which is how the harness was checked
+rather than assumed.
+
+`BorderBeamRenderTests` gains **`theCoreIsANearWhiteHighlight`**, the only
+assertion in the suite about a colour: the beam's own-colour saturation at the
+head's rim, in both appearances, bounded below the rejected 0.738. It is a bound
+rather than a target — a future pass may legitimately trade a little saturation
+back for contrast on a light ground — and it exists because "it went saturated blue
+again" is now a repeat failure rather than a hypothetical one. The rim-alpha floor
+in `theHeadHasAHaloAndACrispCore` came down 170 → **155**, re-measured against 178
+rather than scaled, and `theTailSurvivesItsOwnFalloff`'s floor of 3,000 stayed put
+while the measurement fell to 3,782 — it is a floor on the beam *existing*, and it
+is now the tightest it has ever been, so a fifth pass that takes the mist down
+again has to re-measure it rather than assume there is room.
+
 ### What is not in this budget
 
 A **Glow** — a soft bloom outward from an edge — was considered alongside the beam
@@ -651,9 +785,11 @@ sit still and live in `Style.swift`. Neither is the other.
 **It has been explicitly declined — "comet only, no fixed lamp" — and neither the
 glow layer nor the head bloom is it arriving by the back door.** Both are lit only
 while a sweep is running, both travel, and both are gone in 0.55s. Worth recording
-twice over, because the reference image the halo has now been rebuilt against
-*twice* **is** the fixed lamp, so the temptation to satisfy it by drawing one is
-permanent — and the bloom, being a soft disc of light sitting on a rim, is the
+three times over, because the reference image the halo has now been rebuilt against
+**three times** *is* the fixed lamp — its rim highlight is static, both its Cards
+have one, and nothing in the frame is sweeping — so the temptation to satisfy it by
+drawing one is permanent, and it has now been asked for four times in words that do
+not mention it — and the bloom, being a soft disc of light sitting on a rim, is the
 closest thing to it that has ever been in this file. It is still not it: it is at a
 point, it moves, and it is not there at rest. The measured answer is that the
 moving halo gets there on its own: Δ167 one point outside the rim at the head and
@@ -703,14 +839,19 @@ on the glow it protects the falloff. A finding about a 2pt stroke was not a find
 about a 20pt one, and the general form this sentence used to take — "the slices
 need `.butt` caps" — was doing work it had not earned.
 
-**All three comets went through the same probe, and each of the first two missed
-the measurement the next one needed.** The first moved three numbers and never
+**All four comets went through the same probe, and each pass missed the
+measurement the next one needed.** The first moved three numbers and never
 profiled *across* the beam. The second was tuned on that profile and never
 profiled *along* it, so it shipped a constant-opacity band. The third took both
 and then rasterised the thing as a PNG and looked at it, which is what caught the
 core's flat cap and the banding in its blur ramp — neither of which appears in any
-number the first two were taking. `BorderBeamRenderTests` now carries the two
-assertions those two failures correspond to:
+number the first two were taking. The fourth found that every number all three had
+been taking was a **delta against a ground**, which is blind to the property being
+complained about: a saturated blue and a desaturated near-white can measure the
+same contrast on the same backdrop. It measured the core's absolute RGB and its
+saturation instead, which is `theCoreIsANearWhiteHighlight`.
+`BorderBeamRenderTests` also carries the two
+assertions the second and third failures correspond to:
 `theGlowPeaksAtTheHeadAndDiesAtTheTail`, which is monotone along the beam plus a
 4× head-to-far ratio (the tube failed both), and
 `neitherEndOfTheLitSegmentIsAHardEdge`, which bounds the tangential gradient at
@@ -745,19 +886,18 @@ interior slice has two neighbours' halos overlapping it and the leading slice ha
 one. A comet's coma sits behind its nucleus, so that was left alone rather than
 corrected.
 
-**The light-appearance problem the previous probe found is fixed, and the fix is
-not the one that pass predicted.** It had measured light's `beamHead` at Δ43/765
-and light's `beamTail` at Δ127/765 against a white Card — the head a third the
-contrast of the tail it was supposed to be leading — and correctly identified
-`beamHead` as the lever rather than `beamTail`. Where it went wrong was the
-direction: it looked for a *darker* colour and concluded that "no single opaque
-colour reads against both a white and a mid-grey backdrop", having measured a
-candidate at Δ236 on white and Δ1 on mid-grey. Every candidate in that search was
-varying lightness, and lightness is exactly the axis on which the two grounds
-disagree. Varying **saturation** instead: (0.20, 0.45, 1.00) sits at mid luminance
-and 247 units from white, 255 from black, and measures Δ207 on white, Δ149 on
-mid-grey and Δ250 on near-black. No inversion in any of the three, and the head is
-the strongest element in all of them.
+**The light-appearance problem the previous probe found was fixed, the fix was not
+the one that pass predicted, and the fix itself then had to be partly undone.** It
+had measured light's `beamHead` at Δ43/765 and light's `beamTail` at Δ127/765
+against a white Card — the head a third the contrast of the tail it was supposed to
+be leading — and correctly identified `beamHead` as the lever rather than
+`beamTail`. Where it went wrong was the direction: it looked for a *darker* colour
+and concluded that "no single opaque colour reads against both a white and a
+mid-grey backdrop". Varying **saturation** instead: (0.20, 0.45, 1.00) measured
+Δ207 on white, Δ149 on mid-grey and Δ250 on near-black, with no inversion. What
+that closed was the inversion and what it opened was a saturated blue line where
+the reference has a white one. The current colours, and the measured price of
+desaturating them, are in "The white comet" below.
 
 Dark appearance did not regress: head Δ400 on near-black (was 393), Δ259 on
 mid-grey (was 255), Δ91 on white (was 90), with a halo behind it in each case
@@ -815,18 +955,19 @@ per frame — costs 3.98 → 4.03 ms in Release and 4.50 → 4.67 ms in Debug: a
 and 4%, which is the cheapest thing in the effect.
 
 **The third pass closed part of that gap without getting the Panel on screen, by
-rasterising composited PNGs and looking at them.** That is not the same as seeing
-it move, and it is not the same as seeing it inside the Panel next to a Card's
-content and its shadow — but it is the difference between reading a table and
-seeing a shape, and it is what found the two artefacts no table showed. If a
-fourth pass is needed, render the picture first.
+rasterising composited PNGs and looking at them, and the fourth started there
+rather than ending there.** That is not the same as seeing it move, and it is not
+the same as seeing it inside the Panel next to a Card's content and its shadow —
+but it is the difference between reading a table and seeing a shape, and it is what
+found the artefacts no table showed. Render the picture first; that is the standing
+instruction for this feature now.
 
 Still unverified, and only an eye on the running app can close it: whether 0.55s
 reads as a comet or as a smear; whether the *travelling* bloom reads as light
-coming off the border or as a moving blue smudge, which is the one judgement the
-numbers cannot make; whether the visible comet, now roughly 200pt of the 303 that
-is stroked, is long enough to be a tail; whether the light appearance's
-*darkening* halo reads as blue light or as a blue shadow, since Δ108 of perceptual
-distance is Δ108 whichever side of the ground it falls; and whether `ringSpin` in
-`onAppear` yields a continuous rotation rather than one turn. Every number is a
-named constant for exactly that reason.
+coming off the border or as a moving smudge, which is the one judgement the numbers
+cannot make; whether the visible comet, now roughly 150pt of the 303 that is
+stroked, is long enough to be a tail; whether light appearance's **quiet** line —
+Δ103 on white, about Δ60 over a light-grey wallpaper — reads at all on a real
+desktop, which is the one number in this document that is a genuine risk rather
+than a trade; and whether `ringSpin` in `onAppear` yields a continuous rotation
+rather than one turn. Every number is a named constant for exactly that reason.
