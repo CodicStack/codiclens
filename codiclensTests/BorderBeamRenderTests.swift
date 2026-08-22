@@ -19,22 +19,38 @@ import Testing
 /// it exists because "the maths is right" and "you can see it" turned out to be
 /// very different claims.
 ///
-/// The opacity ramp is gone now — the comet's falloff is a per-slice blur, and
-/// `Style.beamFalloff` was deleted rather than retuned, because a blur *and* an
-/// opacity ramp is the same double-multiplication that deleted the beam the
-/// first time. What the tests below guard is unchanged in kind: that the tail
-/// survives whatever the current falloff is, and that both ends of the sweep are
-/// bare rim. Two rules are newer. **Nothing lands inside the rim** — a blur
-/// spreads both ways, and the mask that keeps the halo out of the Card's content
-/// is one modifier away from being silently absent. And **the head has a halo as
-/// well as a core**, which is the regression that actually shipped: the beam was
-/// one sliced stroke whose blur ramped from exactly 0 at the head, so the
-/// brightest, most visible part of the whole effect was a bare 1pt line with
-/// literally zero light more than one point outside the rim. Every geometry test
-/// passed, this file's tail test passed, and the answer on screen was "there is
-/// not enough spread at all and it should be more clear that there even is a
-/// glow". A test that would have caught that is worth more than another one
-/// pinning what already worked.
+/// **Every test in here was added after a version shipped and was rejected on
+/// sight, and each one is the measurement the pass before it had not taken.** That
+/// is the pattern worth knowing about this file, because it has now happened three
+/// times.
+///
+/// `theTailSurvivesItsOwnFalloff` and `theRimAloneIsWhatBothEndsOfTheSweepLookLike`
+/// came from the deleted `Style.beamFalloff`: a linear opacity ramp over colours
+/// already carrying alpha left 40pt of an intended 336pt on screen while every
+/// geometry test passed.
+///
+/// `nothingIsLitInsideTheRim` is the rule taste cannot catch — a blur spreads
+/// inward as much as outward, and the mask that keeps the halo off the Card's icon
+/// and name is one modifier away from being silently absent.
+///
+/// `theHeadHasAHaloAndACrispCore` came from the one-layer comet, whose blur ramped
+/// from exactly 0 at the head: the brightest part of the whole effect was a bare
+/// 1pt line with literally zero light more than one point outside the rim, and the
+/// answer was "there is not enough spread at all and it should be more clear that
+/// there even is a glow". Every other test in this file passed.
+///
+/// `theGlowPeaksAtTheHeadAndDiesAtTheTail` and
+/// `neitherEndOfTheLitSegmentIsAHardEdge` came from the two-layer comet, whose glow
+/// ran at *constant opacity* down the whole lit segment and so read as a glowing
+/// tube with a visible flat end. Every other test in this file passed, again.
+///
+/// The through-line: a render can prove light is on screen and cannot say whether
+/// it reads as the thing it is for. What a render *can* be made to catch is a
+/// measurable absence, or a shape claim stated as an inequality — which is what
+/// these two are. And when the complaint is about how something looks, the
+/// closing check is still a picture: the core's flat cap and the per-slice banding
+/// in its blur ramp were both found by writing composited PNGs out of this same
+/// harness and looking at them at 3×, and neither appears in any number above.
 @MainActor
 struct BorderBeamRenderTests {
 
@@ -56,6 +72,12 @@ struct BorderBeamRenderTests {
     /// beyond that clears the reach, which is measured at 34pt and gone by 40.
     /// The extra area is transparent, so it contributes no lit pixels and the
     /// baseline does not move with it.
+    ///
+    /// It is deliberately *less* than `Style.beamMaskOutset`, and less than the
+    /// head bloom's own radius: `beamBloomDiameter / 2` is 48 against this 46, so
+    /// the outermost two points of the disc are cropped. Those two points carry the
+    /// gradient's last stop, which is `.clear`, so nothing measurable is lost. What
+    /// has to be cleared is the *measured* reach, not the widest geometry.
     private var pad: CGFloat { Style.cardInset + Style.beamGlowTailBlur }
 
     /// Pixels brighter than the unlit Card, at 2x.
@@ -136,28 +158,32 @@ struct BorderBeamRenderTests {
     /// pixels over a 280 × 200 Slab's baseline and was invisible; the eased one
     /// scored over 1,500 there, and 1,447 over a Card.
     ///
-    /// **The threshold has been re-measured twice and scaled neither time.** The
-    /// one-layer comet measured 1,039 over a baseline of 3,468 at mid-sweep — the
-    /// head was 1pt of visible rim where the old bar had been 3.5, and the blurred
-    /// tail spread what was left over more pixels at lower alpha, with many of
-    /// them under the 130 floor. Adding the glow layer takes the same render to
-    /// **8,115** over the same baseline, because a 10pt band blurred by 10–20
-    /// puts real alpha across the whole gutter instead of a hairline against the
-    /// rim. A beam reduced to its head slice alone — the failure mode this test is
-    /// for — would still be about 60 pixels. So 4,000 is half of a working comet
-    /// and sixty times a deleted one.
+    /// **The threshold has been re-measured three times and scaled none of
+    /// them.** The one-layer comet measured 1,039 over a baseline of 3,468 at
+    /// mid-sweep. Adding the glow layer took the same render to 8,115, because a
+    /// 10pt band blurred by 10–20 puts real alpha across the whole gutter instead
+    /// of a hairline against the rim. That version was rejected on screen for
+    /// being *too* dense, and the fix — an opacity ramp on the glow, a bloom at
+    /// the head, quieter colours — brings it to **5,197**, deliberately. A beam
+    /// reduced to its head slice alone, which is the failure mode this test is
+    /// for, would still be about 60 pixels. So 3,000 is well under a working
+    /// comet and fifty times a deleted one.
+    ///
+    /// Two of those three numbers went *down* on purpose, so this floor cannot be
+    /// read as "more is better". It is a floor on the beam existing.
     @Test func theTailSurvivesItsOwnFalloff() {
         let lit = litPixels(progress: 0.5) - baseline
 
         #expect(
-            lit > 4_000,
+            lit > 3_000,
             """
             only \(lit) pixels of rim are lit at mid-sweep. The comet is being \
             deleted by its own falloff — check Style.beamGlowWidth and \
-            beamGlowBlur(at:), which are the whole of the halo, and \
+            beamGlowBlur(at:), which are the whole of the halo, \
+            Style.beamGlowRamp, which is the only computed opacity ramp in the \
+            beam and the one thing here that could delete it again, and \
             Style.beamWidth/beamStrokeWidth, which is what survives the \
-            outward mask. Blur dims by spreading alpha and must not be stacked \
-            on an opacity ramp.
+            outward mask.
             """
         )
     }
@@ -175,9 +201,18 @@ struct BorderBeamRenderTests {
     /// is a second layer for that reason and its blur is never 0.
     ///
     /// Measured outward from the right edge's vertical midpoint, at the phase that
-    /// puts the head slice there: alpha 247 at the rim, then 96, 92, 78, 60, 22
-    /// at 1, 4, 8, 12 and 20 points out, reaching zero by 34. The floors below are
-    /// well under those and well over nothing.
+    /// puts the head slice there. The two-layer version read alpha 247 at the rim,
+    /// then 96, 92, 78, 60, 22 at 1, 4, 8, 12 and 20 points out, reaching zero by
+    /// 34. The third pass — a glow that ramps, a bloom at the head, and a core
+    /// whose head blur is no longer 0 — reads **202, 192, 155, 137, 110, 62**,
+    /// still nothing by 40. The rim pixel is *lower* and everything behind it is
+    /// higher, which is the trade the pass was making: less total light, more
+    /// spread.
+    ///
+    /// The rim floor came down from 220 to 170 because of that, and it was
+    /// **re-measured rather than scaled**: 202 is what a 1pt core blurred by
+    /// `Style.beamCoreHeadBlur` puts on the rim, and the floor sits under it by
+    /// about the same margin 220 sat under 247.
     @Test func theHeadHasAHaloAndACrispCore() {
         guard let bitmap = beamAlone(progress: Self.headOnTheRightEdge) else {
             Issue.record("the beam layer did not rasterise")
@@ -191,7 +226,7 @@ struct BorderBeamRenderTests {
         }
 
         #expect(
-            alpha(0) > 220,
+            alpha(0) > 170,
             "the core is not crisp at the rim: alpha \(alpha(0)). Style.beamWidth is what survives the mask."
         )
         #expect(
@@ -220,6 +255,199 @@ struct BorderBeamRenderTests {
         let midpoint = 1 - Double(Style.beamSeamOffset)
         let halfSlice = Double(Style.beamTailFraction) / Double(Style.beamSegments) / 2
         return (midpoint + halfSlice) / (1 + Double(Style.beamTailFraction))
+    }()
+
+    /// **The glow peaks at the head and dies before the tail's own end: a coma,
+    /// not a tube.**
+    ///
+    /// This is the third regression to ship past every other test in this file,
+    /// and the measurement that catches it is the one nobody had taken. The first
+    /// pass profiled the falloff *along* the beam and never across it, and shipped
+    /// a beam with no halo. The second profiled it across and never along, and
+    /// shipped a halo of constant opacity down the whole 303pt lit segment — which
+    /// is a glowing hose. Rasterised, 4pt outside the rim, that version read
+    /// **92 at the head, 100 sixty points behind it, 91 at 180 and 62 at 280**: it
+    /// rose behind the head and then went flat, so nothing peaked anywhere and
+    /// there was no point for the light to be coming from. The answer on screen
+    /// was "it should be more like a single area/point that a radial blue kinda
+    /// goes out from".
+    ///
+    /// It now reads **155 / 75 / 43 / 21** at the same four places. The floors
+    /// below are a monotone requirement plus a 4× head-to-far ratio, which the
+    /// tube fails on both counts (its ratio was 1.5 and its first step went the
+    /// wrong way).
+    ///
+    /// The four points are addressed off straight edges rather than by walking the
+    /// path, so no arc-length machinery is needed here: at
+    /// `headOnTheRightEdge` the head sits on the right edge's vertical midpoint
+    /// and the lit segment runs *up* that edge, round the top-right corner and
+    /// leftward along the top. Two of the samples are on the right edge and two on
+    /// the top, and their order along the beam is unambiguous even though their
+    /// exact arc distances are not.
+    @Test func theGlowPeaksAtTheHeadAndDiesAtTheTail() {
+        guard let bitmap = beamAlone(progress: Self.headOnTheRightEdge) else {
+            Issue.record("the beam layer did not rasterise")
+            return
+        }
+
+        let outward: CGFloat = 4
+        func alpha(x: CGFloat, y: CGFloat) -> Int {
+            bitmap.alpha(
+                x: Int(((x + 0.25) * Self.scale).rounded(.down)),
+                y: Int(((y + 0.25) * Self.scale).rounded(.down))
+            )
+        }
+
+        let right = pad + size.width
+        let midY = pad + size.height / 2
+        let head = alpha(x: right + outward, y: midY)
+        let behind = alpha(x: right + outward, y: midY - 60)
+        let far = alpha(x: right - Style.cardRadius - 60, y: pad - outward)
+        let furthest = alpha(x: right - Style.cardRadius - 160, y: pad - outward)
+
+        #expect(
+            head > behind && behind > far && far > furthest,
+            """
+            the glow does not fall off along the beam: \(head) / \(behind) / \
+            \(far) / \(furthest) at the head and three points behind it. \
+            Style.beamGlowRamp is what makes this a coma rather than a tube, and \
+            a flat glow reads as a hose whatever its blur does.
+            """
+        )
+        #expect(
+            head > furthest * 4,
+            """
+            the glow's falloff is too shallow to read as a comet: \(head) at the \
+            head against \(furthest) 280pt behind it. The version this test was \
+            written for measured 92 against 62.
+            """
+        )
+    }
+
+    /// **Neither end of the lit segment is a hard edge, and the drain-out does not
+    /// park a bright head at the seam.**
+    ///
+    /// The user-visible complaint was "the end where the beam thing stops looks
+    /// bad because you can see where the border thing ends", and there were two
+    /// separate causes with very different sizes.
+    ///
+    /// The travelling head's own terminus was the *core*'s `.butt` cap at
+    /// `beamCoreHeadBlur` = 0: a 1pt square of alpha 250 with nothing beyond it.
+    /// Measured as the largest alpha step between vertically adjacent pixels half
+    /// a point outside the rim, scanned ±24pt around the head, it read **170**
+    /// against a mid-segment control of 7. It now reads **6** against 3.
+    ///
+    /// The worse one was structural and had nothing to do with caps.
+    /// `BorderBeam.trimRange` pins the lit segment's leading end at 1 from phase
+    /// 0.741 onward while the trailing end keeps advancing, and `slices` used to
+    /// take each slice's `position` from its *index in the current span* — so the
+    /// leading slice was always position 1, at full brightness and zero blur. For
+    /// the last quarter of every lap the beam therefore had a crisp, stationary,
+    /// full-brightness terminus sitting at the top-left corner for 0.14s. Peak
+    /// alpha across the whole render at phases 0.74, 0.80, 0.86, 0.92 and 0.97
+    /// read **249, 249, 248, 249, 248** — a parked head. Measuring `position`
+    /// against the unclamped travel instead reads **218, 174, 126, 79, 46**.
+    ///
+    /// **The ratio is in the assertion and the monotonicity alone is not enough**,
+    /// which was checked rather than assumed: with the travel-based `position`
+    /// reverted but this pass's blur and ramp left in, the same five phases read
+    /// 218, 203, 186, 166, **149** — still monotone, because the slices get
+    /// shorter as the span shrinks and a 1.75pt slice blurred by
+    /// `beamCoreHeadBlur` loses peak alpha on its own. Monotone-only would have
+    /// passed a terminus three times too bright at the end of the lap. A still
+    /// frame cannot tell a draining comet from a parked one; these numbers can.
+    @Test func neitherEndOfTheLitSegmentIsAHardEdge() {
+        let right = pad + size.width
+        let midY = pad + size.height / 2
+
+        /// The largest step between vertically adjacent pixels — which is the
+        /// step *along* the beam where it runs down the right edge — at a fixed
+        /// distance outside the rim, over 48pt centred on `y`.
+        func tangentialStep(_ bitmap: Bitmap, around y: CGFloat, outward: CGFloat) -> Int {
+            let x = Int(((right + outward + 0.25) * Self.scale).rounded(.down))
+            let first = Int(((y - 24) * Self.scale).rounded(.down))
+            let last = Int(((y + 24) * Self.scale).rounded(.down))
+            var worst = 0
+            for row in first..<last {
+                worst = max(worst, abs(bitmap.alpha(x: x, y: row) - bitmap.alpha(x: x, y: row + 1)))
+            }
+            return worst
+        }
+
+        guard let atHead = beamAlone(progress: Self.headOnTheRightEdge),
+              let atTail = beamAlone(progress: Self.tailOnTheRightEdge) else {
+            Issue.record("the beam layer did not rasterise")
+            return
+        }
+
+        for outward in [CGFloat(0.5), 1, 2] {
+            let head = tangentialStep(atHead, around: midY, outward: outward)
+            let control = tangentialStep(atHead, around: midY - 70, outward: outward)
+            let tail = tangentialStep(atTail, around: midY, outward: outward)
+
+            #expect(
+                head < 40,
+                """
+                the head terminates in a hard edge \(outward)pt out: a step of \
+                \(head), against \(control) along the beam's middle. \
+                Style.beamCoreHeadBlur must not be 0 — a `.butt` cap on an \
+                unblurred 1pt core is a visible flat end.
+                """
+            )
+            #expect(
+                tail < 40,
+                "the tail terminates in a hard edge \(outward)pt out: a step of \(tail)."
+            )
+        }
+
+        var previous = Int.max
+        var first = 0
+        var last = 0
+        for phase in [0.74, 0.80, 0.86, 0.92, 0.97] {
+            guard let bitmap = beamAlone(progress: phase) else {
+                Issue.record("the beam layer did not rasterise at phase \(phase)")
+                return
+            }
+            var peak = 0
+            for i in stride(from: 3, to: bitmap.pixels.count, by: 4) {
+                peak = max(peak, Int(bitmap.pixels[i]))
+            }
+            #expect(
+                peak < previous,
+                """
+                the drain-out is not draining: peak alpha \(peak) at phase \
+                \(phase), against \(previous) at the phase before it. The head \
+                is parked at the seam at full brightness — BorderBeam.slices must \
+                take `position` from the unclamped travel, not from the slice's \
+                index in the clipped span.
+                """
+            )
+            if first == 0 { first = peak }
+            last = peak
+            previous = peak
+        }
+
+        #expect(
+            last * 3 < first,
+            """
+            the drain-out only dims: peak alpha \(first) at phase 0.74 against \
+            \(last) at 0.97. The lit segment's leading end is pinned at the seam \
+            for the last quarter of the lap, so what is left there has to fade to \
+            nothing rather than merely thin out — see BorderBeam.slices.
+            """
+        )
+    }
+
+    /// The phase that puts the *trailing* end of the lit segment on the right
+    /// edge's vertical midpoint, so the step at that terminus can be read down one
+    /// column of pixels. The mirror of `headOnTheRightEdge`: the trailing end is a
+    /// whole `beamTailFraction` behind the head, and the phase backs off half a
+    /// slice the other way so the cap rather than the slice's middle lands there.
+    private static let tailOnTheRightEdge: Double = {
+        let midpoint = 1 - Double(Style.beamSeamOffset)
+        let halfSlice = Double(Style.beamTailFraction) / Double(Style.beamSegments) / 2
+        return (midpoint - halfSlice + Double(Style.beamTailFraction))
+            / (1 + Double(Style.beamTailFraction))
     }()
 
     /// The lit length grows in through the seam and drains back out through it,

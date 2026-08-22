@@ -37,8 +37,9 @@ import SwiftUI
 /// covers Reduce Motion and the app's own animations preference, and it is what a
 /// decoration checks before drawing at all. `isTransparencyReduced` covers Reduce
 /// Transparency, which is a claim about legibility rather than about movement —
-/// the Border Beam answers it by dropping its blur and going on sweeping. They
-/// are independent on purpose and neither implies the other.
+/// the Border Beam answers it by dropping its halo, the glow layer and the head
+/// bloom together, and going on sweeping. They are independent on purpose and
+/// neither implies the other.
 enum Motion {
 
     // MARK: - The three curves
@@ -110,13 +111,15 @@ enum Motion {
     /// glow behind it needs long enough for the tail to be seen as a tail rather
     /// than as a flash.
     ///
-    /// **It stayed 0.55 when the glow was rebuilt as a second layer**, and that
-    /// was decided rather than skipped. The glow got wider *outward* — 34pt of
-    /// reach where there had been 11 — and no longer along the rim: the lit
-    /// segment is still `Style.beamTailFraction` of the perimeter, so there is
-    /// exactly as much rim to travel and exactly as much of it lit at once.
-    /// Duration answers segment length and perimeter, and neither moved. A bigger
-    /// halo is easier to see, not slower to read.
+    /// **It stayed 0.55 through both later paint changes**, and that was decided
+    /// rather than skipped, twice. The glow got wider *outward* — 34pt of reach
+    /// where there had been 11 — and then quieter and more concentrated at the
+    /// head. Neither changed anything along the rim: the lit segment is still
+    /// `Style.beamTailFraction` of the perimeter, so there is exactly as much rim
+    /// to travel and exactly as much of it stroked at once. Duration answers
+    /// segment length and perimeter, and neither moved. A bigger halo is easier to
+    /// see, not slower to read, and a shorter *visible* comet is not a shorter
+    /// journey.
     static let beamSweep: Animation = .easeOut(duration: 0.55)
 
     /// The Loading Ring's revolution.
@@ -144,16 +147,18 @@ enum Motion {
     /// remove a decoration outright. Reduce Transparency is about legibility, and
     /// Apple's guidance is that content be opaque rather than semi-transparent —
     /// which a blur is, by definition. So the Border Beam's answer to this one is
-    /// to drop its **glow layer** and keep sweeping: the crisp 1pt core still
-    /// travels the rim, with no halo around it. With Reduce Motion on there is no
-    /// beam to be transparent about, and with only this one on there is a beam
-    /// with no halo. Giving `isReduced` a second meaning would make those two
-    /// cases indistinguishable.
+    /// to drop its **glow layer and the head bloom that belongs to it** and keep
+    /// sweeping: the crisp core still travels the rim, with no halo around it.
+    /// With Reduce Motion on there is no beam to be transparent about, and with
+    /// only this one on there is a beam with no halo. Giving `isReduced` a second
+    /// meaning would make those two cases indistinguishable.
     ///
-    /// The layer is dropped whole rather than un-blurred, which is a change from
+    /// The halo is dropped whole rather than un-blurred, which is a change from
     /// when the beam was one layer and setting its blur to 0 was the answer. The
     /// glow's source band is `Style.beamGlowWidth` wide, so an un-blurred glow is
-    /// not a quieter halo — it is a 10pt flat bar travelling the rim.
+    /// not a quieter halo — it is a 10pt flat bar travelling the rim — and a
+    /// `RadialGradient` disc is nothing but softness, so there is no un-blurred
+    /// version of the bloom at all.
     ///
     /// It lives here, in the motion file, because `Motion.swift` is already the
     /// single place the app reads AppKit accessibility state — `isReduced` is the

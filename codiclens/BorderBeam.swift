@@ -2,20 +2,39 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// A comet travelling once around a Card's rim: a crisp 1pt core inside a soft
-/// glow, both dissolving toward the tail.
+/// A comet travelling once around a Card's rim: a **radial bloom** at the head,
+/// a **glow** that peaks under it and dies away behind, and a **crisp core** on
+/// top of both.
 ///
 /// It was a 3.5pt bright bar, then a single sliced stroke whose blur ramped from
-/// 0 at the head, and the drive has never changed — same `trim`, same
-/// over-travel, same `Animatable`, same one lap, same meaning of nothing. What
-/// moved twice is the paint. **Two layers now, and the reason is worth the two
-/// lines it takes:** a slice has exactly one blur radius, so one sliced stroke
-/// cannot be a crisp line and a bloom at the same time, and choosing crisp at the
-/// head meant the brightest part of the whole effect had literally no halo — zero
-/// light more than 1pt out from the rim, measured. So the glow is its own layer,
-/// underneath, wide and blurred along the *entire* lit segment including under the
-/// head, and the core is the layer on top. Both are masked together to the region
-/// outside the rim so no part of either washes over the Card's content.
+/// 0 at the head, then two sliced strokes at constant opacity, and the drive has
+/// never changed — same `trim`, same over-travel, same `Animatable`, same one lap,
+/// same meaning of nothing. What has moved three times is the paint, and each
+/// correction fixed a thing the previous one could not have known:
+///
+/// **One layer cannot be crisp and bloomed at once**, because a slice has exactly
+/// one blur radius. Choosing crisp at the head left the brightest part of the
+/// effect with literally no halo — zero light more than 1pt out from the rim,
+/// measured. So the glow is its own sliced stroke, underneath, blurred along the
+/// entire lit segment including under the head.
+///
+/// **A stroke at constant opacity is a tube, not a comet.** The glow's opacity was
+/// flat down the whole 303pt segment, on a rule that said blur alone should carry
+/// the falloff. Rasterised 4pt outside the rim it read 92 at the head, 100 sixty
+/// points behind it, 91 at 180 and 62 at 280 — it *rose* behind the head and then
+/// went flat, so nothing peaked anywhere and there was nothing for the light to be
+/// coming from. `Style.beamGlowRamp` is the per-slice opacity ramp that fixes it,
+/// and it is the glow's alone.
+///
+/// **A lit line is not a light source, however carefully it is ramped**, so the
+/// head is a `RadialGradient` disc — `BeamBloom`, placed by `bloom` below on the
+/// rim point the head currently occupies. A disc has no edges in any direction,
+/// which is both what "a single area/point that a radial blue goes out from" asks
+/// for and what makes the head's terminus stop existing rather than merely soften.
+///
+/// All three are masked together to the region outside the rim, so no part of any
+/// of them washes over the Card's content. The bloom needs that most: a disc
+/// centred on the rim spreads inward exactly as far as outward.
 ///
 /// **It means nothing.** It belongs to a Card *as a surface*: it fires when that
 /// Card becomes about something new and that is the whole of it. It is not tied
@@ -99,19 +118,44 @@ struct BorderBeam: ViewModifier, Animatable {
     /// One list, drawn twice — once per layer. The two layers are the same
     /// geometry at different widths and blurs, so there is nothing here that knows
     /// which layer it is for.
+    ///
+    /// **`position` is measured against the *unclamped* travel, not against the
+    /// clipped span, and that is the fix for a hard edge parked at the seam.** It
+    /// used to be `(i + 1) / count`, which renormalises the whole head-to-tail
+    /// range onto whatever is currently on screen — so at both ends of the sweep
+    /// the beam drew a complete miniature comet with a full-brightness, zero-blur
+    /// head. The drain-out is where that shows: `trimRange` pins `to` at 1 from
+    /// phase 0.741 onward while `from` keeps advancing, so for the last quarter of
+    /// the lap — 0.14s — the leading end sat *still* at the seam, at maximum
+    /// brightness, with the core's `.butt` cap on it. That is a stationary crisp
+    /// terminus at the top-left corner, which is what "you can see where the
+    /// border thing ends" was pointing at.
+    ///
+    /// Measured against the travel instead, the head is a *place on the path* that
+    /// keeps going after the path runs out: a slice ending at trim `x` is
+    /// `u - x` behind it, so `position = 1 - (u - x) / tail`. The arithmetic is
+    /// **identical** while the segment is fully extended (substitute
+    /// `u = range.to` and it reduces to `(i + 1) / count` exactly), and it only
+    /// differs at the two ends — which is the whole point. The drain-out now dims
+    /// and blurs the pinned end from 1 down to 0, so there is nothing bright left
+    /// at the seam to have a cap; the grow-in draws the *front* of the comet
+    /// rather than a compressed copy of all of it.
     private var slices: [Slice] {
-        let range = Self.trimRange(phase: phase, tail: Style.beamTailFraction)
+        let tail = max(Style.beamTailFraction, 0.0001)
+        let range = Self.trimRange(phase: phase, tail: tail)
         guard range.to > range.from else { return [] }
 
+        let travel = CGFloat(phase) * (1 + tail)
         let span = range.to - range.from
         let count = max(Style.beamSegments, 1)
         var out: [Slice] = []
 
         for i in 0..<count {
             let step = span / CGFloat(count)
+            let leading = range.from + step * CGFloat(i + 1)
             let start = seam(range.from + step * CGFloat(i))
             let end = start + step
-            let position = Double(i + 1) / Double(count)
+            let position = Double(min(max(1 - (travel - leading) / tail, 0), 1))
 
             if end <= 1 {
                 out.append(Slice(id: out.count, from: start, to: end, position: position))
@@ -141,13 +185,16 @@ struct BorderBeam: ViewModifier, Animatable {
             // cannot express its collapse.
             if !reduced {
                 ZStack {
-                    // Glow underneath, core on top. Both are the same slices of
-                    // the same trim range; only the stroke width, the colour and
-                    // the blur radius differ, which is the whole of what two
-                    // layers buys. `Style.beamDrawsGlow` is Reduce Transparency's
-                    // answer: the halo goes, the sweep stays.
+                    // Glow underneath, then the head's bloom, then the core on
+                    // top. The two strokes are the same slices of the same trim
+                    // range; only the width, the colour, the blur and — on the
+                    // glow alone — the opacity ramp differ. The bloom is not a
+                    // stroke at all. `Style.beamDrawsGlow` is Reduce
+                    // Transparency's answer, and it covers the bloom as well:
+                    // the halo goes whole, the crisp sweep stays.
                     if Style.beamDrawsGlow {
                         layer(.glow)
+                        bloom
                     }
                     layer(.core)
                 }
@@ -168,6 +215,82 @@ struct BorderBeam: ViewModifier, Animatable {
                 )
             }
         }
+    }
+
+    // MARK: - The nucleus
+
+    /// The radial bloom, placed on the rim wherever the head currently is.
+    ///
+    /// **Part of the glow, not a third layer.** It is drawn inside the same
+    /// `Style.beamDrawsGlow` gate and under the same `outward` mask, so Reduce
+    /// Transparency takes the bloom away with the halo and leaves the crisp core
+    /// sweeping — which is what that switch has always meant here.
+    ///
+    /// The `GeometryReader` is how the bloom learns the Card's size; everything
+    /// else in this modifier is shape-relative and needs none. It costs the one
+    /// path build and the one `trimmedPath` in `headPoint(in:at:)` per frame, and
+    /// nothing per slice.
+    private var bloom: some View {
+        GeometryReader { proxy in
+            let tail = max(Style.beamTailFraction, 0.0001)
+            let range = Self.trimRange(phase: phase, tail: tail)
+            if range.to > range.from,
+               let head = Self.headPoint(
+                   in: CGRect(origin: .zero, size: proxy.size),
+                   at: seam(range.to)
+               ) {
+                BeamBloom()
+                    .frame(width: Style.beamBloomDiameter, height: Style.beamBloomDiameter)
+                    // How much of the comet is on the path: `span / tail` is 0 at
+                    // both ends of the sweep and 1 whenever the segment is fully
+                    // extended. Without it the bloom would appear at full size and
+                    // full alpha in the first frame — the disc has extent even
+                    // when the lit segment has none — and it would still be parked
+                    // at the seam at full strength while the tail drained out,
+                    // which is the same stationary-terminus problem `slices` fixes
+                    // for the strokes. One expression covers both ends, because
+                    // during the drain-out `span / tail` *is* `1 - (u - 1) / tail`.
+                    .opacity(min(Double((range.to - range.from) / tail), 1))
+                    .position(head)
+            }
+        }
+    }
+
+    /// Where on the rim the head is, at a fraction of `Style.cardShape`'s own
+    /// path.
+    ///
+    /// **Read the *first* point of a short trimmed sub-path.** `currentPoint` on
+    /// `trimmedPath(from: 0, to: f)` returns the sub-path's *end* and is `nil` at
+    /// f = 0, which is the trap `Style.beamSeamOffset`'s comment already records
+    /// being walked into once. A sub-path always opens with a `.move`, so that
+    /// case is the one that fires; the others are there so a future change to the
+    /// shape cannot make this silently return `nil`.
+    ///
+    /// Approximate on purpose. `beamSeamOffset` had to be exact to a
+    /// ten-thousandth because it decides *where the beam enters the rim* and an
+    /// error there is a visible discontinuity every lap. A bloom is a soft disc
+    /// 76pt across; being a point or two along the rim from the core's tip is
+    /// invisible, so `epsilon` is a plain small number and there is no refinement
+    /// loop. One path build and one trim per frame is affordable; forty would not
+    /// be.
+    static func headPoint(in rect: CGRect, at fraction: CGFloat) -> CGPoint? {
+        guard rect.width > 0, rect.height > 0 else { return nil }
+        let epsilon: CGFloat = 0.002
+        let f = min(max(fraction, 0), 1 - epsilon)
+        let sub = Style.cardShape.path(in: rect).trimmedPath(from: f, to: f + epsilon)
+
+        var found: CGPoint?
+        sub.forEach { element in
+            guard found == nil else { return }
+            switch element {
+            case .move(let point): found = point
+            case .line(let point): found = point
+            case .curve(_, let control1, _): found = control1
+            case .quadCurve(_, let control): found = control
+            case .closeSubpath: break
+            }
+        }
+        return found
     }
 
     // MARK: - Outward only
