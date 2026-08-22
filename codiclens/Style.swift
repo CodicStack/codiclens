@@ -138,22 +138,48 @@ enum Style {
     /// head reads a touch softer there. That is the corner, not the constant.
     static var beamStrokeWidth: CGFloat { beamWidth * 2 }
 
-    /// The **core**'s blur radius at the very end of the tail; the core's head is
-    /// 0.
+    /// The **core**'s blur radius at the very end of the tail.
     ///
-    /// This is the core dissolving, not the glow. The head is exactly 0 so the
-    /// leading edge is a line rather than a smudge, and the trailing slices smear
-    /// until the core has nothing left to end with. 6 rather than the 8 it was,
-    /// because the glow layer now carries the reach and the core only has to stop
-    /// being a line.
+    /// This is the core dissolving, not the glow. The trailing slices smear until
+    /// the core has nothing left to end with. 6 rather than the 8 it was, because
+    /// the glow layer now carries the reach and the core only has to stop being a
+    /// line.
     ///
-    /// The ramp from 0 to here is **linear** in the slice's position along the
-    /// lit segment, deliberately: a linear ramp has no exponent to invent, and
-    /// the reason the *opacity* ramp needed one is that opacity multiplied on top
-    /// of colours that already carried alpha. Blur does not multiply anything. It
-    /// dims by spreading the same alpha over more pixels, which is one cause with
-    /// one ramp.
+    /// The ramp from `beamCoreHeadBlur` to here is **linear** in the slice's
+    /// position along the lit segment, deliberately: a linear ramp has no exponent
+    /// to invent. (The glow's *opacity* ramp does have one, for reasons set out at
+    /// `beamGlowRamp`; the two are not the same kind of thing.)
     static let beamCoreTailBlur: CGFloat = 6
+
+    /// The **core**'s blur radius at the head, and it is **no longer 0**.
+    ///
+    /// **0 was the visible hard end, and it took a 3× zoom of a render to see
+    /// it.** The core is `beamWidth` wide with `.butt` caps, so at blur 0 its
+    /// leading tip is a 1pt square of alpha 250 with nothing either side of it:
+    /// a dead-flat terminus at full contrast. Measured as the largest alpha step
+    /// per half-point of arc, 1pt outside the rim, that tip scored **102** at the
+    /// grow-in and **98** as the head reached the seam, against 1–4 anywhere along
+    /// the beam's middle. It is the smallest artefact in the whole effect and it
+    /// was the one the user could see: "the end where the beam thing stops looks
+    /// bad because you can see where the border thing ends".
+    ///
+    /// 1.5 spreads that tip over about 4pt and takes the step to a fifth of what
+    /// it was, and a 1pt line blurred by 1.5 is still unmistakably a line — probed
+    /// at 3× on a white ground, the core reads as a hairline with the same
+    /// near-rim alpha it had. It also flattens the worst of the per-slice banding:
+    /// the core's blur ramp is quantised into `beamSegments` steps, and the steps
+    /// nearest 0 are the ones the eye can see, because the alpha a 1pt line keeps
+    /// falls off fastest there. Starting the ramp above 0 moves every step into the
+    /// flat part of that curve.
+    ///
+    /// **The previous two passes both asserted 0 here, and the second one was
+    /// right about its reason and wrong about the number.** "A crisp leading edge
+    /// against a dissolving tail is the entire contrast the comet lives on" was
+    /// used to justify a *single* layer with no halo, and correcting that to two
+    /// layers left the 0 in place unexamined. The contrast the comet lives on is
+    /// now the bloom against the tail. The core does not have to be razor sharp to
+    /// be crisp, and being razor sharp is what gave it an end.
+    static let beamCoreHeadBlur: CGFloat = 1.5
 
     // MARK: The glow layer
 
@@ -198,7 +224,7 @@ enum Style {
     /// reach drops to 20pt; at 12/0.75 the reach is 28pt and the halo one point
     /// out is nearly half as bright. 10 is the middle and was chosen off the
     /// numbers.
-    static let beamGlowHeadBlur: CGFloat = 10
+    static let beamGlowHeadBlur: CGFloat = 12
 
     /// The glow's blur radius at the very end of the tail.
     ///
@@ -211,16 +237,101 @@ enum Style {
     /// It ramps *up* from `beamGlowHeadBlur` toward the tail, so the halo widens
     /// and thins as it trails — which is the tail dissolving without the glow
     /// ever going out.
-    static let beamGlowTailBlur: CGFloat = 20
+    static let beamGlowTailBlur: CGFloat = 22
+
+    /// The exponent that turns the glow from a **tube** into a **coma**.
+    ///
+    /// **This is the correction the third pass exists for, and it is the one
+    /// thing here that reading could never have caught.** The glow's opacity was
+    /// flat along the whole 303pt lit segment, on a rule that said the blur alone
+    /// should carry the falloff. Rasterised, the near-rim alpha 4pt out ran
+    /// 110, 109, 105, 99, 94, 93, 97, 100, 96, 87, 88, 93, 89 … from 15pt behind
+    /// the head all the way to 180pt behind it. That is not a falloff, it is a
+    /// glowing hose: nothing peaks anywhere, so there is no point for the light to
+    /// be coming *from*, which is exactly what came back as "it should be more
+    /// like a single area/point that a radial blue goes out from".
+    ///
+    /// So the glow — **and only the glow** — gets a per-slice opacity ramp,
+    /// `position^beamGlowRamp`, peaking at the head and reaching nothing well
+    /// before the segment's geometric end.
+    ///
+    /// **Why this is not `beamFalloff` coming back.** That exponent existed to
+    /// undo a *linear* opacity ramp (1/20, 2/20, …) applied to the **only layer
+    /// there was**, over colours already carrying alpha, which left 40pt of an
+    /// intended 336pt on screen and made the beam invisible. Three things differ,
+    /// and all three matter. There is now a separate crisp core carrying the
+    /// beam's visibility, so the glow is *allowed* to fall to nothing — it is the
+    /// bloom, not the beam. The ramp is deliberately steep rather than
+    /// accidentally steep: killing the last fifth of the glow is the *point*,
+    /// because a stroke that fades out before its own `.butt` cap has no cap to
+    /// see. And it is measured across the beam as well as along it, which is the
+    /// measurement the first pass never took.
+    ///
+    /// 2.2, off the render. At 1.6 the tail still reads as a band; at 3.0 the coma
+    /// is a dot with no trail behind it. Intensity by position: 1.0 at the head,
+    /// 0.53 a quarter back, 0.22 half way, 0.046 three quarters back, and 0.006 at
+    /// the trailing slice — so about the last 45pt of the segment is dark and the
+    /// visible comet is roughly 200pt of the 303 that is stroked.
+    static let beamGlowRamp: Double = 1.4
+
+    /// The glow's opacity multiplier for a slice at `position`.
+    ///
+    /// The core has no equivalent and must not get one: the core *is* the beam,
+    /// and the reason a ramp is safe here is that something else is carrying
+    /// visibility. See `beamGlowRamp`.
+    static func beamGlowIntensity(at position: Double) -> Double {
+        pow(min(max(position, 0), 1), beamGlowRamp)
+    }
+
+    // MARK: The head bloom
+
+    /// The diameter of the **radial bloom** centred on the head, which is where
+    /// the comet's light comes *from*.
+    ///
+    /// **A stroke, however blurred, is a lit line; it is never a light source.**
+    /// The glow ramp above gives the comet a peak, and a peak on a band is still a
+    /// band — what makes a glow read as emitted is a bloom with no edges at all in
+    /// any direction, and a `RadialGradient` fill has none by construction. It is
+    /// also what makes the head's terminus stop existing rather than merely
+    /// soften: there is no end to see, because the brightest thing at the head is
+    /// a circle rather than the end of a line.
+    ///
+    /// A `RadialGradient` used as a *fill* is not the stroke gradient this file
+    /// has twice refused. An `AngularGradient` in a stroke sweeps at a constant
+    /// *angular* rate and races a rectangle's long edges; a `LinearGradient` in a
+    /// stroke does not follow the path at all. This one follows nothing — it is a
+    /// disc, placed at a point.
+    ///
+    /// **96, so the disc's geometric radius is exactly the gutter** — the gap
+    /// between two Card surfaces is `cardInset * 2` = 48pt, and nothing may reach a
+    /// neighbouring Card's rim. That sounds like it is right on the limit and is
+    /// not, because the bound is the *measured* reach rather than the geometry: the
+    /// gradient's outer stops are 0.02 and 0, so past about 30pt there is nothing
+    /// there, and the whole beam's reach — the last distance at which anything
+    /// still measures Δ8 — is still **34pt**, exactly what it was without the
+    /// bloom. Raise this and re-measure the reach; do not reason from the radius.
+    ///
+    /// At 88 the head reads as a small bright spot rather than a glow; at 96 the
+    /// halo eight points out measures Δ108 on white against Δ68 for the version
+    /// this replaced, while total lit energy is down 46%. That pair is the whole
+    /// brief: less light, further out.
+    ///
+    /// Half the disc is thrown away by the outward mask, which is correct — the
+    /// light comes off the border outward — and it is why the bloom's alpha is
+    /// higher than a disc drawn whole would need.
+    static let beamBloomDiameter: CGFloat = 96
 
     /// How far outside the Card's bounds the outward mask is grown.
     ///
     /// The mask's job is to cut everything *inside* the rim; it must not also cut
     /// the halo's outer edge, which would put a hard square boundary where the
-    /// falloff should be. Comfortably past the glow's real reach, derived from the
-    /// widest blur rather than typed in, so raising `beamGlowTailBlur` cannot
-    /// quietly start clipping.
-    static var beamMaskOutset: CGFloat { beamGlowTailBlur * 3 + beamGlowStrokeWidth }
+    /// falloff should be — a new hard edge, which is the bug this pass is fixing.
+    /// Comfortably past the reach of the widest thing the beam draws, derived
+    /// rather than typed in, so raising `beamGlowTailBlur` *or*
+    /// `beamBloomDiameter` cannot quietly start clipping.
+    static var beamMaskOutset: CGFloat {
+        max(beamGlowTailBlur * 3 + beamGlowStrokeWidth, beamBloomDiameter)
+    }
 
     /// Whether the glow layer is drawn at all.
     ///
@@ -270,12 +381,12 @@ enum Style {
     /// The **core**'s blur radius for a slice at `position` along the lit segment,
     /// 0 at the trailing end and 1 at the head.
     ///
-    /// Linear, and the head is **exactly** 0. That was true before and it was
-    /// half of a mistake, not the mistake itself: a crisp core is right, a crisp
-    /// core with nothing behind it is what read as a bare line. The halo is
-    /// `beamGlowBlur(at:)`'s job now, and it never returns 0.
+    /// Linear, from `beamCoreHeadBlur` at the head up to `beamCoreTailBlur` at the
+    /// trailing end. It is never 0 — see `beamCoreHeadBlur`, which is where the
+    /// two earlier versions of this were wrong.
     static func beamCoreBlur(at position: Double) -> CGFloat {
-        beamCoreTailBlur * CGFloat(1 - min(max(position, 0), 1))
+        let p = CGFloat(min(max(position, 0), 1))
+        return beamCoreTailBlur + (beamCoreHeadBlur - beamCoreTailBlur) * p
     }
 
     /// The **glow**'s blur radius for a slice at `position`, ramping from
@@ -472,13 +583,35 @@ private struct Palette {
     ///
     /// A second pair rather than the core's pair at a lower alpha, because the
     /// glow is a wider band and wants less saturation and less weight per pixel
-    /// than the line at its centre. Their alphas differ head-to-tail (0.80 →
-    /// 0.55) exactly as the core's do (0.95 → 0.70); that is the colour *mix*
-    /// along the segment, which this file has always done, and not the deleted
-    /// `beamFalloff` opacity ramp coming back — nothing multiplies a computed
-    /// ramp over the blur.
+    /// than the line at its centre.
+    ///
+    /// **Both alphas came down, because the answer on screen was "the blue is too
+    /// dense".** They were 0.80 → 0.55 and they are now 0.46 → 0.34, and the
+    /// saturation came down with them: light's head went (0.28, 0.52, 1.00) →
+    /// (0.38, 0.60, 1.00). The energy the effect lost there is bought back as
+    /// *spread* by `beamBloom`, which is the axis the complaint was actually
+    /// about — less light, further out, coming from somewhere.
+    ///
+    /// A ramp *is* multiplied over these now, and only over these:
+    /// `Style.beamGlowIntensity(at:)`. That is a deliberate reversal of the "no
+    /// computed ramp" rule, which was right while the glow was the whole beam and
+    /// wrong once it was the bloom around a core. See `Style.beamGlowRamp` for why
+    /// it is not the deleted `beamFalloff` returning.
     let beamGlowHead: Color
     let beamGlowTail: Color
+
+    /// The **radial head bloom**'s colour: the light the comet comes out of.
+    ///
+    /// One colour rather than a pair, because a bloom has no head and tail — it
+    /// is a disc. Its falloff is the gradient's own stops, in `BeamBloom`.
+    ///
+    /// Less saturated than `beamGlowHead` in both appearances and deliberately so:
+    /// this is the widest, softest thing the beam draws, and a saturated wash
+    /// across 38pt is the blue *paint* the last version was rejected for. In light
+    /// appearance it still has to be a colour rather than a brightness — nothing
+    /// is brighter than a white wallpaper — so it stays blue and simply carries
+    /// less of it per pixel.
+    let beamBloom: Color
 
     // MARK: Derived surface tints
 
@@ -512,8 +645,9 @@ private struct Palette {
         shadow: .black.opacity(0.44),
         beamHead: .white.opacity(0.95),
         beamTail: Color(red: 0.45, green: 0.65, blue: 1.0).opacity(0.70),
-        beamGlowHead: Color(red: 0.72, green: 0.86, blue: 1.0).opacity(0.80),
-        beamGlowTail: Color(red: 0.40, green: 0.62, blue: 1.0).opacity(0.55)
+        beamGlowHead: Color(red: 0.78, green: 0.89, blue: 1.0).opacity(0.72),
+        beamGlowTail: Color(red: 0.48, green: 0.67, blue: 1.0).opacity(0.46),
+        beamBloom: Color(red: 0.62, green: 0.80, blue: 1.0).opacity(0.76)
     )
 
     static let light = Palette(
@@ -530,8 +664,9 @@ private struct Palette {
         shadow: .black.opacity(0.20),
         beamHead: Color(red: 0.20, green: 0.45, blue: 1.0).opacity(0.95),
         beamTail: Color(red: 0.10, green: 0.30, blue: 0.86).opacity(0.70),
-        beamGlowHead: Color(red: 0.28, green: 0.52, blue: 1.0).opacity(0.80),
-        beamGlowTail: Color(red: 0.14, green: 0.36, blue: 0.92).opacity(0.55)
+        beamGlowHead: Color(red: 0.38, green: 0.60, blue: 1.0).opacity(0.72),
+        beamGlowTail: Color(red: 0.24, green: 0.46, blue: 0.96).opacity(0.46),
+        beamBloom: Color(red: 0.32, green: 0.56, blue: 1.0).opacity(0.76)
     )
 
     static func of(_ scheme: ColorScheme) -> Palette {
@@ -683,7 +818,12 @@ struct BeamSlice: View {
     var body: some View {
         let palette = Palette.of(scheme)
         let tint = switch layer {
+        // The glow's ramp, and the *only* computed ramp in the beam. It is what
+        // turns a constant-opacity band into a coma with a peak — see
+        // `Style.beamGlowRamp` for why it is safe here and was not safe as
+        // `beamFalloff`.
         case .glow: palette.beamGlowTail.mix(with: palette.beamGlowHead, by: position)
+            .opacity(Style.beamGlowIntensity(at: position))
         case .core: palette.beamTail.mix(with: palette.beamHead, by: position)
         }
         let width = switch layer {
@@ -698,16 +838,73 @@ struct BeamSlice: View {
             .trim(from: from, to: to)
             .stroke(
                 tint,
-                // `.butt`, never `.round`. A round cap bulges half the line
-                // width past each slice's own trim range, so twenty translucent
-                // slices overlap at nineteen joints and each overlap composites
-                // twice — which renders as a row of regular bright beads down
-                // the beam rather than a smooth falloff. Confirmed in a probe
-                // render, not guessed at. It matters more on the glow layer,
-                // whose stroke is twenty times wider.
+                // `.butt` on both layers, and the reason is no longer beading.
+                // A round cap bulges half the line width past each slice's own
+                // trim range. On the *core*, whose stroke is 2pt, that produced
+                // the row of bright beads this comment used to describe. On the
+                // *glow*, whose stroke is 20pt, it was re-measured with the
+                // opacity ramp in place and does **not** bead — 0–4 turns in the
+                // along-beam profile, the same as `.butt` — and is rejected for a
+                // different and worse reason: each slice's 10pt bulge overlaps its
+                // neighbours, so every slice's opacity is smeared into the ones
+                // either side and the ramp flattens back into the tube it was
+                // introduced to fix. Measured, `.round` on the glow put the alpha
+                // 30pt behind the head at 153 against the head's 194 (a ratio of
+                // 1.3) where `.butt` reads 96 against 175 (1.8), and raised the
+                // total lit energy 53%. The falloff is the thing being protected.
                 style: StrokeStyle(lineWidth: width, lineCap: .butt)
             )
             .blur(radius: blur)
+    }
+}
+
+/// The comet's nucleus: a radial bloom, drawn at the head.
+///
+/// **This is the piece that makes the effect read as light rather than as paint,
+/// and it is not a fourth tuning of the stroke.** A stroke has ends. Blur them
+/// and they are soft ends; ramp them and they are faint ends; they are still
+/// ends, and "you can see where the border thing ends" is what came back twice.
+/// A `RadialGradient` fill has no ends in any direction by construction — it
+/// fades to nothing everywhere — so the head stops having a terminus rather than
+/// having a well-hidden one. It is also, straightforwardly, what was asked for:
+/// "a single area/point that a radial blue kinda goes out from".
+///
+/// It lives here rather than in `BorderBeam.swift` for the same reason
+/// `BeamSlice` does: `Palette` is private to this file, and which blue a thing is
+/// drawn in is this file's business. Where the head *is* at a given phase is the
+/// modifier's.
+///
+/// The stops are a hand-rolled Gaussian-ish shoulder rather than a two-stop
+/// linear fade. A linear `RadialGradient` reads as a disc with a visible rim at
+/// its own edge — the falloff is constant, so the eye finds the boundary where it
+/// reaches zero. Front-loading it (1.00, 0.62, 0.30, 0.11, 0.02, 0) puts most of
+/// the light in the inner third and lets the outer half approach nothing
+/// asymptotically, which is what has no edge.
+///
+/// **Masked outward with everything else.** A disc centred on the rim spreads
+/// inward exactly as far as outward, so unmasked this would be the one part of
+/// the beam that washes across the Card's icon and name. It is inside
+/// `BorderBeam.outward` for that reason, and half of it is thrown away — which is
+/// correct: the light comes off the border, outward.
+struct BeamBloom: View {
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let bloom = Palette.of(scheme).beamBloom
+        return RadialGradient(
+            stops: [
+                .init(color: bloom, location: 0),
+                .init(color: bloom.opacity(0.62), location: 0.16),
+                .init(color: bloom.opacity(0.30), location: 0.34),
+                .init(color: bloom.opacity(0.11), location: 0.56),
+                .init(color: bloom.opacity(0.02), location: 0.78),
+                .init(color: bloom.opacity(0), location: 1)
+            ],
+            center: .center,
+            startRadius: 0,
+            endRadius: Style.beamBloomDiameter / 2
+        )
+        .clipShape(Circle())
     }
 }
 

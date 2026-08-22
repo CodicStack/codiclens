@@ -61,16 +61,18 @@ original consequences above apply to these and only these.
 system switch from Reduce Motion, and Apple's guidance for it is about legibility
 rather than movement: content should be opaque rather than semi-transparent. A
 blur is semi-transparent by definition, so the Border Beam's comet answers it by
-**dropping its glow layer and going on sweeping** — the crisp 1pt core still
-travels the rim. That is not a weaker version of Reduce Motion's answer, it is a
-different answer to a different question, and the two must stay independent: with
-Reduce Motion on there is no beam at all, and with only Reduce Transparency on
-there is a beam with no halo. Folding the read into `Motion.isReduced` would make
-those two cases indistinguishable, and there is no state in which one implies the
-other. The layer is dropped *whole* rather than un-blurred — that was the answer
-while the beam was one layer, and it stopped being right when the glow got its
-own 10pt-wide source band: un-blurring that is not a quieter halo, it is a flat
-bar travelling the rim.
+**dropping its halo — the glow layer and the head bloom together — and going on
+sweeping**; the crisp core still travels the rim. That is not a weaker version of
+Reduce Motion's answer, it is a different answer to a different question, and the
+two must stay independent: with Reduce Motion on there is no beam at all, and with
+only Reduce Transparency on there is a beam with no halo. Folding the read into
+`Motion.isReduced` would make those two cases indistinguishable, and there is no
+state in which one implies the other. The halo is dropped *whole* rather than
+un-blurred — that was the answer while the beam was one layer, and it stopped
+being right when the glow got its own 10pt-wide source band: un-blurring that is
+not a quieter halo, it is a flat bar travelling the rim. The bloom has no
+un-blurred form at all, being a `RadialGradient`, which is a second reason it
+leaves with the glow rather than being turned down.
 
 Both reads live in `Motion.swift` — `isReduced` and `isTransparencyReduced` —
 because that file is already the single place the app reads AppKit accessibility
@@ -162,20 +164,36 @@ clock, no `TimelineView`. A `trim` along the shape's own path, never a rotating
 conic gradient: the Slab is a wide rectangle, and a constant *angular* rate races
 the long edges and crawls the corners.
 
-### The beam is a comet, and only the paint changed — twice
+### The beam is a comet, and only the paint changed — three times
 
 It was a 3.5pt bright bar with a stepped opacity falloff. Then it was a **comet**
 in one layer: a crisp 1pt head, a per-slice blur ramping from 0 at the head, one
-sliced stroke, masked outward. It is now a comet in **two layers** — a crisp core
-inside a soft glow — and the section below records both steps, because the second
-one is a correction of the first and the correction is the valuable part.
+sliced stroke, masked outward. Then it was a comet in **two layers** — a crisp
+core inside a soft glow of constant opacity. It is now a comet in **three parts**:
+a radial bloom at the head, a glow that peaks under the bloom and dies away
+behind it, and the crisp core on top of both. The sections below record all three
+steps, because each is a correction of the one before and the corrections are the
+valuable part.
 
-**Nothing in the decision above moved, through either step.** Same `trim`, same
+**Nothing in the decision above moved, through any step.** Same `trim`, same
 over-travel geometry, same `Animatable` drive with no clock, same one lap, same
 "it means nothing", same absent-under-Reduce-Motion. These are paint changes,
 which is why they are recorded here rather than in ADRs of their own — a second
 ADR would restate this one and leave two documents disagreeing about who owns the
 beam.
+
+**The one thing worth reading if nothing else is read.** All three passes
+measured carefully, reported true numbers, and were rejected on sight. The first
+profiled the falloff *along* the beam and never across it, and shipped a head
+with no halo at all while reporting a monotone falloff. The second profiled it
+*across* and never along, and shipped a halo of constant opacity — a glowing tube
+— while reporting a real halo at every distance. The third took both profiles
+*and* rasterised PNGs and looked at them, at 3×, which is the only thing that
+found the core's flat cap and the per-slice banding in it. The lesson is not
+"measure more". It is **choose the measurement that corresponds to the
+complaint**: "you can see where it ends" is a large local gradient, and for two
+passes nobody measured a local gradient. Where the complaint is about how
+something *looks*, the closing check has to be a picture.
 
 #### Why the one-layer comet failed on screen while measuring correctly
 
@@ -222,7 +240,11 @@ as the thing it is for" are two more different claims, and the second one still
 needs an eye. What a render *can* do — and now does — is fail when the head has no
 halo at all, because that is a measurable absence rather than a matter of degree.
 
-#### The two-layer comet
+#### The two-layer comet — the step that fixed the halo and invented the tube
+
+*Everything in this sub-section was true of the version that shipped second, and
+the parts of it that have since been reversed are called out where they appear.
+The reversals are all in the sub-section after it.*
 
 **Two layers, glow under core.** The glow is its own sliced stroke:
 `Style.beamGlowWidth` (10) wide before blurring, blurred by
@@ -311,15 +333,26 @@ same alpha over more pixels. Multiplying an opacity ramp on top of that is the
 exact double-multiplication that once left only the leading slice on screen — 40pt
 of an intended 336pt — and `beamFalloff` existed *solely* to undo a multiplication
 of that kind. Both blur ramps are **linear** in the slice's position precisely so
-there is no exponent to invent. The head-to-tail *colour mix* is not that ramp:
-`beamGlowHead` and `beamGlowTail` are two named colours whose alphas happen to
-differ (0.80 → 0.55), exactly as the core's pair always has (0.95 → 0.70), and
-interpolating between two colours is what `BeamSlice` has always done. The rule is
-"no computed exponent over the blur", not "no alpha may ever differ".
+there is no exponent to invent.
+
+**That rule was half right and the wrong half made the tube.** It is correct for
+the core, which is the layer whose visibility the whole effect depends on, and it
+is wrong for the glow, which is the bloom around it. A constant-opacity,
+constant-width blurred band is a glowing hose: it peaks nowhere, so there is no
+point for the light to come from. The glow now carries
+`Style.beamGlowIntensity(at:)` and the reversal is set out in full below.
+`beamFalloff` itself stays deleted — the distinction between it and the glow's
+ramp is the substance of the next sub-section, not a technicality.
 
 **The core's blur is still exactly 0 at the head, and that is now correct rather
 than merely defensible**, because the halo is a different layer. What was wrong
 was not the crisp core; it was there being nothing else.
+
+**Also half right, and the wrong half was the visible hard end.** A crisp core is
+right. A core whose blur is *exactly* 0 has a 1pt `.butt` cap at full alpha with
+nothing beyond it — a flat terminus at maximum contrast — and that is what "you
+can see where the border thing ends" was about. `Style.beamCoreHeadBlur` is 1.5
+now. See below.
 
 **Both layers are masked outward, together.** Because a blur spreads inward as
 much as outward, the whole beam — glow and core — is masked to the region *outside*
@@ -367,12 +400,154 @@ to the Results Slab — which is the one clearance the glow comes close to using
 the Slab is a later sibling in the `VStack`, so it would draw *over* the glow
 rather than clip it even if it did.
 
+#### The three-part comet — the step that fixed the tube and the visible end
+
+The answer to the two-layer version, on screen and in light appearance, was: *"the
+blue color is too dense in a sense. it should be more like a single area/point
+that a radial blue kinda goes out from, which gives kind of an effect that
+something is glowing down from it. also the end where the beam thing stops looks
+bad because you can see where the border thing ends … more like the tunaformac
+that has that kinda radial blur looking vibe instead of one continues same amount
+of blur out from the whole line/beam/strokelength."*
+
+Four causes, and none of them was "the numbers are a bit high".
+
+**1. The glow's opacity was flat, so it was a tube.** This is the important one
+and it was measurable the whole time; nobody had taken the measurement. Rasterised
+4pt outside the rim, the near-rim alpha behind the head ran
+
+| arc behind head | 0 | 15 | 30 | 60 | 90 | 120 | 150 | 180 | 240 | 300 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| before | 70 | 110 | 109 | 99 | 93 | 100 | 87 | 93 | 85 | 43 |
+| after | 175 | 128 | 96 | 75 | 66 | 59 | 46 | 44 | 30 | 13 |
+
+The before row *rises* behind the head and then sits flat for 200pt. It is not a
+falloff at all; it is a hose with soft sides. `Style.beamGlowRamp` (1.4) is a
+per-slice opacity ramp, `position^ramp`, multiplied into the glow's colour and
+**nothing else's**.
+
+**Which is a reversal of the "no computed opacity ramp" rule above, and the
+distinction matters more than the rule did.** `Style.beamFalloff` — the exponent
+this project deleted — existed to undo a *linear* opacity ramp applied to the
+**only layer there was**, over colours that already carried alpha; it left 40pt of
+an intended 336pt visible. Three things make the glow's ramp a different animal,
+and all three have to stay true or it becomes that bug again. There is a separate
+crisp core carrying the beam's visibility, so the glow is *allowed* to fall to
+nothing: it is the bloom, not the beam. Killing the trailing fifth is the point
+rather than the accident — a stroke that has faded out before its own `.butt` cap
+has no cap to see. And it was measured along the beam *and* across it, which is
+the pair of profiles neither earlier pass took together.
+
+**2. There was no light source, only a lit line.** "A single area/point that a
+radial blue goes out from" is a coma, and no amount of ramping a stroke produces
+one, because a stroke has ends in the direction it runs. `BeamBloom` is a
+`RadialGradient` disc, `Style.beamBloomDiameter` (96) across, placed on the rim
+point the head currently occupies by `BorderBeam.bloom`. A radial fill has no
+edges in any direction by construction, which answers "radial blur looking vibe"
+and destroys the head's terminus rather than softening it. Its stops are a
+front-loaded shoulder (1.00, 0.62, 0.30, 0.11, 0.02, 0) rather than a linear fade,
+because a linear `RadialGradient` reads as a disc with a findable rim: the falloff
+is constant, so the eye locates the boundary where it reaches zero.
+
+A `RadialGradient` used as a **fill** is not the stroke gradient this ADR twice
+refused, and the difference is not a loophole. An `AngularGradient` in a stroke
+sweeps at a constant *angular* rate and so races a rectangle's long edges and
+crawls its corners; a `LinearGradient` in a stroke does not follow the path at all.
+The bloom follows nothing. It is a disc at a point, and the point comes from
+`BorderBeam.headPoint(in:at:)` — one `Path` build and one `trimmedPath` per frame,
+reading the *first* point of a short sub-path, which is the same trap
+`Style.beamSeamOffset` records having been walked into once. It is deliberately
+**approximate**: the seam offset has to be exact to a ten-thousandth because it
+decides where the beam enters the rim, and a 96pt soft disc a point or two along
+the rim from the core's tip is invisible.
+
+**3. The visible end was two things, and the smaller one was easier to find.** The
+travelling head's terminus was the core's `.butt` cap at `beamCoreHeadBlur` = 0: a
+1pt square of alpha 250 with nothing beyond it. As the largest alpha step between
+adjacent pixels half a point outside the rim, scanned ±24pt around the head, it
+measured **170** against a mid-segment control of 7; it now measures **6** against
+3. It was found by rasterising a PNG and looking at it at 3× — no number anyone was
+taking showed it, and the same zoom showed a second artefact nobody had reported:
+the core's blur ramp is quantised into `beamSegments` steps, and the steps nearest
+0 band visibly, because the alpha a 1pt line retains falls off fastest there.
+Starting the ramp at 1.5 fixes both. **The claim that 0 at the head was "now
+correct rather than merely defensible" was wrong for the third time in this
+document's history, and each time for a different reason.** A crisp core does not
+have to be razor sharp; being razor sharp is what gave it an end.
+
+The larger cause had nothing to do with caps. `BorderBeam.trimRange` pins the lit
+segment's leading end at 1 from phase 0.741 onward while the trailing end keeps
+advancing — that is the drain-out, and it is correct — but `BorderBeam.slices` took
+each slice's `position` from **its index in the current span**. That renormalises
+the whole head-to-tail range onto whatever is on screen, so the leading slice was
+always position 1: full brightness, zero blur, and for the last quarter of every
+lap *stationary at the top-left corner* for 0.14s. Peak alpha across the render at
+phases 0.74 / 0.80 / 0.86 / 0.92 / 0.97 read 249, 249, 248, 249, 248 — a parked
+head. Measuring `position` against the **unclamped travel** instead —
+`position = 1 - (u - x) / tail`, where `u` is `phase * (1 + tail)` and keeps going
+after the path runs out — reads 218, 174, 126, 79, 46. `trimRange` did not change
+and `BorderBeamTests` did not move: the arithmetic is *identical* while the segment
+is fully extended and differs only at the two ends, which is the whole point. The
+grow-in improves for the same reason — it now draws the front of the comet rather
+than a compressed copy of all of it. The bloom's own opacity is `span / tail`,
+which is 0 at both ends of the sweep and 1 whenever the segment is fully extended,
+because a disc has extent even when the lit segment has none.
+
+**4. It was too dense.** The previous pass had pushed light's colours to a
+saturated mid-luminance blue to fix a measured inversion, and that part was right
+and has not moved: the **core** is still (0.20, 0.45, 1.00)@0.95. What
+over-corrected was the **glow**, at (0.28, 0.52, 1.00)@0.80 → (0.14, 0.36,
+0.92)@0.55 spread flat over 303pt. It is now (0.38, 0.60, 1.00)@0.72 → (0.24,
+0.46, 0.96)@0.46 — lighter, less saturated, lower alpha — with `beamBloom` at
+(0.32, 0.56, 1.00)@0.76, less saturated again because it is the widest and softest
+thing drawn. Dark's glow moved the same way. Measured at mid-sweep in light
+appearance over white:
+
+| | before | after |
+|---|---|---|
+| total perceptual energy | 534,554 | 290,850 (−46%) |
+| lit pixels over the Card's rim | 8,115 | 5,197 (−36%) |
+| peak per-pixel saturation | 0.776 | 0.643 |
+| head's halo, Δ at 8pt out | 68 | **108** |
+| head's halo, Δ at 20pt out | 19 | **49** |
+| head's halo, Δ at 28pt out | 3 | **20** |
+
+**Less total light, further out, coming from a point.** Either half of that alone
+would mislead: the density numbers went down 40-odd percent while the halo the user
+was asking to see got two to seven times stronger. Reach is unchanged at 34pt
+against the 48pt gutter, so `Style.cardInset`, `PanelLayout.cardWidth`/`cardHeight`
+and `beamSeamOffset` all stayed exactly where they were. `Style.beamMaskOutset` is
+now `max(beamGlowTailBlur * 3 + beamGlowStrokeWidth, beamBloomDiameter)`, derived
+so that raising either cannot start clipping — a clipped bloom would be a new hard
+edge, which is the bug being fixed.
+
+**`.round` caps on the glow were tried and rejected, and not for the documented
+reason.** The `.butt` finding was made on the core, whose 2pt stroke beaded
+visibly at nineteen joints. Re-measured on the 20pt glow *with the opacity ramp in
+place*, `.round` does **not** bead — 0 to 4 turnarounds in the along-beam profile,
+the same as `.butt`. It is rejected for something worse: each slice's 10pt bulge
+overlaps its neighbours, so every slice's opacity smears into the ones either side
+and the ramp flattens back into the tube. `.round` on the glow read 153 thirty
+points behind the head against 194 at the head — a ratio of 1.3, where `.butt`
+reads 96 against 175, a ratio of 1.8 — and raised total lit energy 53%. The caps
+are `.butt` on both layers; on the glow the falloff is what they now protect.
+
+The bloom costs, in the same harness, 3.98 → **4.03 ms** per frame per Card in
+Release and 4.50 → **4.67 ms** in Debug: about 1% and 4%. Those absolutes are three
+times what the two-layer section below reports, and the difference is the timing
+harness rather than the drawing — the lit-pixel figure reproduces the older 8,115
+exactly. Measure before and after in one harness and ignore the absolute value.
+
 `Motion.beamSweep` went 0.25s → 0.55s with the first paint change, and stayed
 `easeOut`. It **stayed 0.55 through the second**, which was decided rather than
 skipped: the glow got wider *outward*, not longer along the rim. The lit segment is
 still `beamTailFraction` of the perimeter, so there is exactly as much rim to
 travel and exactly as much of it lit at once, and duration answers segment length
-and perimeter. A bigger halo is easier to see, not slower to read. The
+and perimeter. A bigger halo is easier to see, not slower to read. **It stayed
+0.55 through the third as well**, for the same reason turned the other way: the
+halo got quieter and more concentrated at the head, so the *visible* comet is
+shorter than the 303pt that is stroked — but a shorter visible comet is not a
+shorter journey, and the rim is the same length. The
 perceived-speed argument below still holds, and it now has a second reason: with
 the over-travel geometry the last thing a sweep does is drain the tail out through
 the seam, so the end of the curve is a blurred glow emptying rather than a head
@@ -447,9 +622,20 @@ be the one thing that could not be traded away: a slice has one blur radius, so 
 crisp core inside a bloom is two layers or it is nothing. Held any longer, the rule
 would have kept the beam permanently invisible in the name of a constraint that
 protected nothing. It is replaced by the constraints that were doing the real work
-— no `.shadow`, no growth in `PanelLayout.margin`, one mask, and the glow bounded
-by the gutter — all of which the two-layer beam satisfies and all of which are
-measurable.
+— no `.shadow`, no growth in `PanelLayout.margin`, one mask, and the halo bounded
+by the gutter — all of which are measurable.
+
+**The third part, the head's radial bloom, is in on the same four constraints and
+is not a `.shadow` wearing a hat.** It uses no `.shadow`, `PanelLayout.margin` did
+not move, it is inside the one outward mask with the strokes, and its reach is
+inside `cardInset`'s gutter — measured, not assumed: at `beamBloomDiameter` 96 the
+total reach is still 34pt against 48, because the gradient's outer stops are
+effectively zero past 30. It *is* a different primitive from the strokes — a
+`RadialGradient` fill rather than a trimmed stroke — and that is now allowed,
+because "a different primitive" was the ground that turned out to be protecting
+nothing. What is still not allowed is a `.shadow`-as-bloom, which walks straight
+into "no `.shadow()` on a view that fills its window", and anything that needs the
+margin to grow.
 
 A **static** glow is a different matter and is still out; see the fixed lamp
 below.
@@ -462,15 +648,19 @@ exactly that, and the two are easily confused: a still frame cannot distinguish 
 travelling segment from a fixed gradient. The beam travels; a Card gradient would
 sit still and live in `Style.swift`. Neither is the other.
 
-**It has been explicitly declined — "comet only, no fixed lamp" — and the two-layer
-glow is not it arriving by the back door.** The glow is lit only while a sweep is
-running, it travels, and it is gone in 0.55s. Worth recording because the reference
-image the glow was rebuilt against *is* the fixed lamp, so the temptation to
-satisfy it by drawing one is permanent. The measured answer is that the moving glow
-gets there on its own: Δ71–135 of halo one point outside the rim where the previous
-version had zero, falling off over 24–34pt. If a future pass concludes the lamp is
-needed after all, that is a `Style.swift` change and a separate conversation, not a
-tightening of this one.
+**It has been explicitly declined — "comet only, no fixed lamp" — and neither the
+glow layer nor the head bloom is it arriving by the back door.** Both are lit only
+while a sweep is running, both travel, and both are gone in 0.55s. Worth recording
+twice over, because the reference image the halo has now been rebuilt against
+*twice* **is** the fixed lamp, so the temptation to satisfy it by drawing one is
+permanent — and the bloom, being a soft disc of light sitting on a rim, is the
+closest thing to it that has ever been in this file. It is still not it: it is at a
+point, it moves, and it is not there at rest. The measured answer is that the
+moving halo gets there on its own: Δ167 one point outside the rim at the head and
+Δ108 eight points out, where the one-layer version had zero at every distance,
+falling off over 34pt. If a future pass concludes the lamp is needed after all,
+that is a `Style.swift` change and a separate conversation, not a tightening of
+this one.
 
 ### Verified by render, not by eye
 
@@ -503,12 +693,32 @@ the stepped falloff's opacity exponent had to be well below 1 — that was
 `Style.beamFalloff`, now deleted with the ramp it corrected — and the slices need
 `.butt` caps, because `.round` bulges half a line width past each slice's trim
 range, so nineteen joints composite twice and the beam renders as a row of beads.
-The caps are unchanged and stay `.butt`, and they matter more on the glow layer,
-whose stroke is twenty times wider than the core's.
+**That beading finding was made on the core and does not transfer, which was
+checked rather than assumed.** Re-measured on the 20pt glow with the opacity ramp
+in place, `.round` does not bead at all — 0 to 4 turnarounds in the along-beam
+profile, the same as `.butt`. It is still rejected, and for a worse reason: the
+bulges smear each slice's opacity into its neighbours and flatten the ramp back
+into the tube. Both layers keep `.butt`; on the core it protects against beads and
+on the glow it protects the falloff. A finding about a 2pt stroke was not a finding
+about a 20pt one, and the general form this sentence used to take — "the slices
+need `.butt` caps" — was doing work it had not earned.
 
-**Both comets went through the same probe. The first moved three numbers and
-missed the one measurement that mattered; the second was tuned on that
-measurement.**
+**All three comets went through the same probe, and each of the first two missed
+the measurement the next one needed.** The first moved three numbers and never
+profiled *across* the beam. The second was tuned on that profile and never
+profiled *along* it, so it shipped a constant-opacity band. The third took both
+and then rasterised the thing as a PNG and looked at it, which is what caught the
+core's flat cap and the banding in its blur ramp — neither of which appears in any
+number the first two were taking. `BorderBeamRenderTests` now carries the two
+assertions those two failures correspond to:
+`theGlowPeaksAtTheHeadAndDiesAtTheTail`, which is monotone along the beam plus a
+4× head-to-far ratio (the tube failed both), and
+`neitherEndOfTheLitSegmentIsAHardEdge`, which bounds the tangential gradient at
+both termini and requires the drain-out's peak alpha to fall by more than 3×. That
+last ratio is not decoration: with the travel-based `position` reverted but this
+pass's blur left in, the drain-out is still monotone — 218, 203, 186, 166, 149 —
+so monotone-only would have passed a terminus three times too bright at the end of
+the lap.
 
 `Style.beamStrokeWidth` is `beamWidth * 2`, which is the arithmetic — the mask
 keeps the outer half of a centred stroke — but it was probed on the assumption
@@ -594,10 +804,29 @@ falloff without breaking it. `beamMaskOutset` from three times the widest blur d
 to two makes no measurable difference (1.40 against 1.43, inside the noise) and was
 left at three for the margin. Neither is worth taking now.
 
-Still unverified, and only an eye can close it: whether 0.55s reads as a comet or
-as a smear on a real screen; whether 34pt of reach in a 48pt gutter is the right
-amount of glow or too much; whether the light appearance's *darkening* halo reads
-as blue light or as a blue shadow, which is the one thing the numbers genuinely
-cannot settle, since Δ207 of perceptual distance is Δ207 whichever side of the
-ground it falls; and whether `ringSpin` in `onAppear` yields a continuous rotation
-rather than one turn. Every number is a named constant for exactly that reason.
+**The absolute numbers in this sub-section do not transfer between passes, and
+that is now known rather than suspected.** The third pass's timing loop, rendering
+the same modifier at the same slice count, reads 3.98 ms in Release where this one
+reads 1.43 — while the *lit-pixel* figure out of the same file reproduces 8,115
+exactly, so the drawing is identical and the harness is not. Compare before and
+after inside one run and ignore the absolute. On that basis the head bloom — a
+`GeometryReader`, one `Path` build, one `trimmedPath` and one `RadialGradient` fill
+per frame — costs 3.98 → 4.03 ms in Release and 4.50 → 4.67 ms in Debug: about 1%
+and 4%, which is the cheapest thing in the effect.
+
+**The third pass closed part of that gap without getting the Panel on screen, by
+rasterising composited PNGs and looking at them.** That is not the same as seeing
+it move, and it is not the same as seeing it inside the Panel next to a Card's
+content and its shadow — but it is the difference between reading a table and
+seeing a shape, and it is what found the two artefacts no table showed. If a
+fourth pass is needed, render the picture first.
+
+Still unverified, and only an eye on the running app can close it: whether 0.55s
+reads as a comet or as a smear; whether the *travelling* bloom reads as light
+coming off the border or as a moving blue smudge, which is the one judgement the
+numbers cannot make; whether the visible comet, now roughly 200pt of the 303 that
+is stroked, is long enough to be a tail; whether the light appearance's
+*darkening* halo reads as blue light or as a blue shadow, since Δ108 of perceptual
+distance is Δ108 whichever side of the ground it falls; and whether `ringSpin` in
+`onAppear` yields a continuous rotation rather than one turn. Every number is a
+named constant for exactly that reason.

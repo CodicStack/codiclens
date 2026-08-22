@@ -94,7 +94,8 @@ Reduce Motion. Everything else changes instantly and on purpose.
 _Avoid_: transitions (Transition means one of the three), effects, FX
 
 **Border Beam**:
-A bright segment that travels once around a Card's rim when that Card becomes
+A travelling light — a soft bloom at its head with a dissolving trail behind it —
+that goes once around a Card's rim when that Card becomes
 about something new — a Phase reaching it, a Subject being replaced, a summon. It
 belongs to the Card **as a surface** and it means nothing: it is not tied to OCR,
 to searching, to loading, or to any other in-flight state, and reading it as one
