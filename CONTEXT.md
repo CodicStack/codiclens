@@ -94,12 +94,14 @@ Reduce Motion. Everything else changes instantly and on purpose.
 _Avoid_: transitions (Transition means one of the three), effects, FX
 
 **Border Beam**:
-A bright segment that travels once around a Card's rim when that Card takes the
-keyboard. It belongs to the Card **as a surface** and it means nothing — it is
-not tied to OCR, to searching, to loading, or to any other in-flight state, and
-reading it as one is the mistake this entry exists to prevent. All three Cards
-have one; the Slab does not. Shares a drawing primitive with the Loading Ring and
-nothing else.
+A bright segment that travels once around a Card's rim when that Card becomes
+about something new — a Phase reaching it, a Subject being replaced, a summon. It
+belongs to the Card **as a surface** and it means nothing: it is not tied to OCR,
+to searching, to loading, or to any other in-flight state, and reading it as one
+is the mistake this entry exists to prevent. OCR Text sweeps the Subject Card
+because the *Subject changed*, not because OCR finished. It never marks a
+selection moving — that stays instant. All three Cards have one; the Slab does
+not. Shares a drawing primitive with the Loading Ring and nothing else.
 _Avoid_: glow, edge blur, border glow, loading animation, spinner, focus ring
 
 **Loading Ring**:
