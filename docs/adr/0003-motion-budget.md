@@ -60,18 +60,47 @@ original consequences above apply to these and only these.
 ### The two members
 
 **The Border Beam** belongs to a **Card** — Subject, Action or Target — and it
-sweeps around that Card when the Card **takes the keyboard**. It means nothing.
-It is emphatically **not** tied to OCR, to `isOCRInFlight`, or to any waiting or
-in-flight state — that misreading is the single most likely way this feature gets
-wrong later, which is why it is written here and in `CONTEXT.md` both. It shares
-a drawing primitive with the Loading Ring — an animated `trim` along a stroked
-path — and nothing else.
+sweeps around that Card when the Card **becomes about something new**. It means
+nothing. It is emphatically **not** tied to OCR, to `isOCRInFlight`, or to any
+waiting or in-flight state — that misreading is the single most likely way this
+feature gets wrong later, which is why it is written here and in `CONTEXT.md`
+both. OCR Text sweeps the Subject Card because the *Subject was replaced*; that
+it happens when OCR finishes is a coincidence of the same event, and nothing in
+`BorderBeam.swift` reads an in-flight flag. It shares a drawing primitive with
+the Loading Ring — an animated `trim` along a stroked path — and nothing else.
 
-Exactly one Card holds the keyboard at a time and focus moves on every Tab,
-Shift+Tab, Enter and Escape, so "this Card just took the keyboard" is one sweep
-per Phase move on the Card that now owns it, with nothing to de-duplicate.
-`CardBeam` is that policy and `borderBeam(trigger:)` is the primitive underneath
-it; the split is deliberate, so the sweep itself knows nothing about focus.
+The trigger is a **pure function of coordinator state**: `CardBeamIdentity`
+builds a token per Card and `CardBeam` sweeps when the token changes. Three
+things move the Subject Card's token — the summon, the Phase, and the chosen
+Subject — so a Tab that advances the Phase *and* chooses a Subject is one change
+and one sweep. `CardBeam` is that policy and `borderBeam(trigger:)` is the
+primitive underneath; the split is deliberate, so the sweep itself knows nothing
+about Phases.
+
+**A selection moving must never move a token.** This is the constraint the
+tokens are shaped around, and it is the same principle as the opening argument:
+selection movement is instant on purpose, and a beam per arrow key would be a
+Panel that strobes while the user reads a list. `CardBeamIdentityTests` carries
+eight negative cases for it. The subtle one is worth naming: `moveUp`/`moveDown`
+*clear* `selectedSubject` while the Clipboard is browsed, so a token that read
+the chosen Subject in a browsing Phase would sweep on the first arrow key after
+Enter — the Phases that preview a selection deliberately contribute no Subject to
+the token at all.
+
+Two consequences of the trigger being pure, both recorded rather than hidden. A
+token cannot tell an arrival from a departure, so the Action Card sweeps as the
+keyboard *leaves* it as well as when it arrives — Tab from Action to Target
+sweeps both Cards. The alternative loses the Shift+Tab-back sweep silently, which
+is worse than one sweep too many. And `CardBeam` keeps an `onAppear` bump
+alongside `onChange`, because the Action and Target Cards are *inserted* on
+`cardCount`: a fresh view's state starts at zero and its `onChange` never fires.
+
+An earlier version of this fired on a **focus edge** instead, and missed
+everything that changes a Card without moving focus: Enter into the Clipboard
+(both Phases are ones where the Subject Card holds the keyboard), OCR Text
+landing, a transform's output, and every summon after the first. That version
+looked like it worked because the Action Card's `onAppear` was firing — the focus
+edge was doing almost nothing.
 
 **That trigger sits closer to this ADR's thesis than anything else in the
 Decoration category, and it is recorded rather than glossed.** The opening

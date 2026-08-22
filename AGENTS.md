@@ -65,14 +65,33 @@ needs no `project.pbxproj` edit.
   a transition wearing decoration's clothes and goes through the three curves. See
   `docs/adr/0003-motion-budget.md`.
 - **The Border Beam belongs to a *Card* and means nothing.** It sweeps around
-  whichever Card takes the keyboard — `cardBeam(focused:)` on all three, applied
-  *between* `.cardSurface(...)` and `.padding(Style.cardInset)`, because the
-  padding sits outside the surface and a beam applied after it draws on the wrong
-  bounds. Exactly one Card is focused at a time and focus moves on every Tab,
-  Shift+Tab, Enter and Escape, so that is one sweep per Phase move with nothing to
-  de-duplicate. `CardBeam` is the policy, `borderBeam(trigger:)` the primitive;
+  a Card that becomes about something new — `cardBeam(identity:)` on all three,
+  applied *between* `.cardSurface(...)` and `.padding(Style.cardInset)`, because
+  the padding sits outside the surface and a beam applied after it draws on the
+  wrong bounds. `CardBeam` is the policy, `borderBeam(trigger:)` the primitive;
   keep them apart. It is **not** tied to OCR, to `isOCRInFlight`, to searching, or
-  to any in-flight state; that misreading is the way this feature gets broken.
+  to any in-flight state; that misreading is the way this feature gets broken —
+  OCR Text sweeps the Subject Card because the *Subject was replaced*, and nothing
+  in `BorderBeam.swift` reads an in-flight flag.
+  **The trigger is a pure function of coordinator state — `CardBeamIdentity` —
+  and its hard rule is that a moving *selection* must never change a token.**
+  Arrowing through Results, re-ranking on a keystroke, and `mdfind` filling in
+  Targets all have to leave the tokens alone, or the Panel strobes; `AGENTS.md`
+  and ADR 0003 both say selection movement is instant on purpose.
+  `CardBeamIdentityTests` has eight negative cases pinning that, and they are the
+  half of the suite that matters. One trap in particular: `moveUp`/`moveDown`
+  **clear** `selectedSubject` while the Clipboard is browsed, so a token that read
+  it in a browsing Phase would sweep on the first arrow key after Enter —
+  `previewsASelection` is the gate that stops it.
+  A token cannot tell an arrival from a departure, so `ActionCard.holdsKeyboard`
+  changes on the way out too: Tab from Action to Target sweeps both Cards. That is
+  the one unasked-for sweep here, and it is the price of the trigger being pure —
+  the alternative silently loses the Shift+Tab-back sweep.
+  `CardBeam` keeps an unconditional `onAppear` bump as well as `onChange`, because
+  `CardContainerView` inserts the Action and Target Cards on `cardCount`, so a
+  fresh view's `@State` starts at 0 and its `onChange` never fires. That
+  `onAppear` — not the old focus edge — is why the Action Card was the only one
+  ever seen sweeping.
   **It was twice wrong before this, and neither was catchable by reading.** It was
   built on the Slab and triggered by the Slab arriving, which fires once per
   summon on the first keystroke and so was invisible in use; widening the trigger

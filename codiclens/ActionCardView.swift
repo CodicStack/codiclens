@@ -30,7 +30,7 @@ struct ActionCardView: View {
             }
         }
         .cardSurface(focused: isFocused)
-        .cardBeam(focused: isFocused)
+        .cardBeam(identity: CardBeamIdentity.action(coordinator))
         .padding(Style.cardInset)
     }
 

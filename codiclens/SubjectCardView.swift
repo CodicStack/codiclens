@@ -110,7 +110,7 @@ struct SubjectCardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottomTrailing) { corner }
         .cardSurface(focused: isFocused, writing: isWriting)
-        .cardBeam(focused: isFocused)
+        .cardBeam(identity: CardBeamIdentity.subject(coordinator))
         .padding(Style.cardInset)
     }
 
