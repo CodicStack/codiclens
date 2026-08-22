@@ -147,6 +147,42 @@ needs no `project.pbxproj` edit.
   uniform in path length — verified: `cardShape`'s path starts at the right edge's
   vertical midpoint and runs clockwise, which is why the top-left corner falls a
   little past 0.5.
+- **THE BEAM DRAWS ON THE CARD, INWARD. For four passes it drew on the user's
+  wallpaper, and that is the finding worth more than every constant in this file.**
+  The whole comet was masked to the region *outside* `Style.cardShape`, on a rule
+  that reads as obviously right — a blur spreads both ways, so cut the inward half
+  and nothing washes over the Card's icon, name and chips. Outside a Card's rim is
+  `cardInset`'s gutter and then `PanelLayout.margin`, and the Panel is a borderless,
+  transparent, non-activating `NSPanel`: **outside the rim is the desktop.** So the
+  one ground the app controls was excluded by construction and the effect's
+  visibility was staked on an unknown one. Measured on the real composite —
+  `cardSurface(focused:)`, real `Style` values, real `glassEffect` — dark
+  appearance's head read **Δ10/442 over a white desktop** against Δ270 over a
+  near-black one. A factor of twenty-seven, decided by somebody's wallpaper.
+  **"Dark appearance" does not mean "dark ground".** The appearance sets the Card's
+  tint; the desktop the beam was drawing on has nothing to do with the appearance.
+  That sentence is the whole bug: the previous pass's own results table contained
+  "dark core over a **white** ground: Δ19", it was written down, and it was read as
+  a curiosity because everyone assumed dark appearance implied a dark backdrop.
+  **A measurement against a synthetic swatch is not a measurement against the real
+  composite.** Four passes measured against flat white, mid-grey and near-black
+  rectangles, which is a fine way to characterise a colour and cannot tell you what
+  the light is landing on. The fifth composited over `cardSurface` in both
+  appearances and over four real backdrops, including the user's own wallpaper, and
+  the bug fell out in the first table.
+  The mask is `BorderBeam.inward` now, `Style.cardShape` exactly, with **no outward
+  spill** — a `.stroke` is centred on its path, so the inner half of
+  `beamStrokeWidth` is precisely the band `CardSurface`'s own `strokeBorder`
+  hairline occupies, and the beam therefore *lights the Card's own border* rather
+  than drawing a second line inside it. A spill would have put the core's outer half
+  back on the wallpaper and made the line's **width** depend on the desktop. The
+  glow and the bloom's kept halves spill inward and fade into the Card; the reach is
+  33pt on a 236 × 216 surface, so it dies well before the centre.
+  The floor went **Δ10 → Δ87** on the worst ground either appearance has, and
+  `BorderBeamRenderTests.theBeamReadsAgainstAWhiteDesktop` is that as an inequality.
+  It is not perfect independence and saying so matters: `.regular` glass transmits,
+  so dark appearance's Card still runs 22 → 166 across wallpapers. What changed is
+  that the ground is a **material with a fixed polarity** instead of a photograph.
 - **The beam is a *comet* in THREE parts: a radial bloom at the head, a glow that
   peaks under it and dies away behind, and a crisp core on top.** This is the
   shape of the thing and the part most likely to be "simplified" back into a bug.
@@ -209,7 +245,7 @@ needs no `project.pbxproj` edit.
   reach comes from the radius, so a hairline source cannot buy brightness with
   radius.
   Both strokes are `Style.beamSegments` (20) equal slices of path length, one
-  slice list drawn twice, one `BorderBeam.outward` mask over all three parts,
+  slice list drawn twice, one `BorderBeam.inward` mask over all three parts,
   because there is **no API that makes a gradient or a blur follow a path's arc
   length** and per-slice blur out of the one arc-length-uniform primitive
   (`trim`) is the only way to vary one.
@@ -237,21 +273,23 @@ needs no `project.pbxproj` edit.
   flattens back into the tube. `.round` on the glow read 153 thirty points behind
   the head against 194 at the head (a ratio of 1.3) where `.butt` reads 96 against
   175 (1.8), and raised total lit energy 53%. The falloff is what the caps protect.
-  **The ceiling on the halo is the gutter, `cardInset * 2`** — it must not reach a
-  neighbouring Card's rim. Measured reach is **34pt** against a 48pt gutter, which
-  is why `cardInset` went 12 → 24. `PanelLayout.cardWidth`/`cardHeight` went
-  260 → **284** / 240 → **264** *with* it, so the drawn surface is still 236 × 216.
-  The bloom did **not** move any of that: at diameter 96 its outer stops are
-  effectively zero past ~30pt, so the reach is still 34 and `beamSeamOffset` did
-  not need re-probing. `Style.beamMaskOutset` is now
-  `max(beamGlowTailBlur * 3 + beamGlowStrokeWidth, beamBloomDiameter)`, derived so
-  that raising either the blur or the bloom cannot quietly start clipping — a
-  clipped bloom is a new hard edge, which is the bug being fixed.
+  **The ceiling on the halo is the Card's own interior**, since the mask was
+  inverted. Measured reach is **33pt inward** on a 236 × 216 surface, so the mist
+  dies at 30% of the way to the centre and nothing more than 36pt in ever sees
+  alpha above 5. What it does cross is the bottom-trailing `KeyHintChip`, 12pt from
+  two rims, at up to alpha **77** as the head goes past — accepted, and the
+  reference does the same thing to content near its own rim. `Style.beamMaskOutset`
+  is **deleted**: it existed because the outward mask was a `Rectangle` grown past
+  the layer's bounds, and a shape entirely inside the bounds has no boundary to
+  overrun. `cardInset` is now 24 for nothing and could go back to 12 — that is
+  written up on it with the numbers and deliberately **not applied**, because
+  moving the drawn surface obliges a re-probe of `beamSeamOffset`.
   **Normal compositing, never additive.** `.plusLighter` was measured and rejected:
   over a white ground it saturates every covered pixel, so the profile at the head
   and at three points down the tail come back *identical* and the falloff stops
-  existing. In light appearance it has nowhere to go at all — nothing is brighter
-  than a light wallpaper.
+  existing. In light appearance it has nowhere to go at all — the Card's own glass
+  is lighter than any highlight, which is why that appearance's beam is a
+  *darkening*.
   `Motion.beamSweep` is 0.55s and stays `easeOut` — the visible *end* of a sweep is
   the tail draining through the seam, and easeOut spends its last frames there. It
   has not changed through either paint change: the halo got wider outward and then
@@ -261,8 +299,10 @@ needs no `project.pbxproj` edit.
   `BorderBeamTests` pins the trim geometry and passed the whole time the beam was
   invisible. `BorderBeamRenderTests` is the pixel-level counterpart and the only
   test here that looks at pixels. It pads what it rasterises by
-  `cardInset + beamGlowTailBlur`, it asserts zero beam pixels inside the rim, it
-  asserts the head has a halo *and* a crisp core, and it now asserts the two things
+  `cardInset + beamGlowTailBlur`, it asserts zero beam pixels **outside** the rim,
+  it asserts the head has a halo *and* a crisp core, it asserts the beam still
+  reads on a Card composited over a **pure white desktop** — which is the fifth
+  pass's whole finding as an inequality — and it asserts the two things
   that have each shipped broken once: **`theGlowPeaksAtTheHeadAndDiesAtTheTail`**
   (monotone along the beam, and a 4× head-to-far ratio, which the tube failed on
   both counts) and **`neitherEndOfTheLitSegmentIsAHardEdge`** (bounded tangential
@@ -271,7 +311,7 @@ needs no `project.pbxproj` edit.
   `position` reverted but this pass's blur left in, the drain-out is still monotone
   — 218, 203, 186, 166, 149 — and monotone-only would have passed a terminus three
   times too bright.
-  **This is the fourth pass, and the first three each measured something true and
+  **This is the fifth pass, and the first four each measured something true and
   irrelevant.** The first profiled the falloff *along* the beam and never across
   it, and shipped a head with no halo while reporting a monotone falloff. The
   second profiled it *across* and never along, and shipped a halo of constant
@@ -281,10 +321,16 @@ needs no `project.pbxproj` edit.
   first two passes were taking. The fourth measured the core's **absolute colour
   and its saturation** rather than a Δ, which is the measurement a delta hides: a
   saturated blue and a desaturated near-white can measure the same contrast against
-  the same ground and are not the same thing at all. **A render test proving light is on screen cannot
-  say whether it reads as the thing it is for.** The lesson is not "measure more",
-  it is *choose the measurement that corresponds to the complaint* — a visible
-  terminus is a large local gradient, and nobody had measured a local gradient.
+  the same ground and are not the same thing at all. The fifth found that all four
+  had measured the beam against **synthetic grounds** and never against the thing it
+  was actually drawn on, which turned out not to be the Card at all — see the bullet
+  above. **A render test proving light is on screen cannot
+  say whether it reads as the thing it is for**, and a render test measuring the
+  right quantity against the wrong ground cannot say anything. The lesson is not
+  "measure more", it is *choose the measurement that corresponds to the complaint*,
+  **and composite it over the real surface** — a visible terminus is a large local
+  gradient, "it should be white" is an absolute colour, and "I cannot see it" is a Δ
+  against whatever is really behind it.
 - **The rim light is WHITE. The reference's blue is in its Card's *fill*, and
   reading it as belonging to the light is what sent two passes to a saturated
   core.** The reference material — Tuna for Mac, in **dark** appearance over a
@@ -312,17 +358,24 @@ needs no `project.pbxproj` edit.
   loss for a 35% cut in saturation** — a far cheaper trade than "no pale colour
   reads on white" implied, and the high blue channel is what buys mid-grey back,
   which is why it stays at 0.98 while red and green come up.
-  **What light appearance cannot do, and nobody should try to fix again.** On a
-  ground lighter than the light the luminance delta is negative — it *darkens*, by
-  145/765 at the head over white — and nothing is brighter than a white wallpaper.
-  Over a light-*grey* wallpaper (0.86, where many light desktops sit) the new core
-  measures about Δ60/442; the pale blue this project shipped and withdrew measured
-  Δ30 there, so the margin over invisible is a factor of two, not ten. Rendered
-  and looked at: over white the line is present but quiet and the **mist** is what
-  carries the effect. **1:1 with the reference is a dark-appearance result**, and
-  the user is in light appearance. Do not close that gap by saturating the core
-  again, and do not close it with a static lit rim — that is the fixed lamp, and it
-  has been declined.
+  **The ground is the Card's own glass, and the polarity follows it.** Dark
+  appearance's core is white — un-premultiplied (248, 251, 255), own-colour
+  saturation 0.026 — which is the reference material exactly, because dark
+  appearance's Card is darker than the light at every wallpaper this was measured
+  over. Light appearance's Card is *lighter* than any highlight: it measures
+  (247, 247, 247) over a white desktop, so a near-white line on it is Δ5/442. So
+  light's core is a dark cool line, (58, 68, 82) at saturation 0.293 — the same
+  polarity as `Palette.light.cardRim` (black 0.10) and every other edge in that
+  appearance. Composited over the Card, dark reads Δ87 / Δ104 / Δ174 / Δ256 and
+  light reads Δ169 / Δ154 / Δ93 / Δ40 over a white desktop, a hazy grey-white one,
+  a photograph and a near-black one.
+  **Light appearance's floor is arithmetic, not a hope.** Its Card spans 110 → 247
+  across wallpapers, so any colour on the grey axis is at most 68 units from one end
+  and a 1pt core keeps about 0.7 of that: **~46 is the best worst case a desaturated
+  light core can have, and this one measures 40**, with its strong end at 169. Only
+  saturation leaves that axis, and a saturated blue is what shipped and was withdrawn
+  twice. Do not close the gap by saturating the core again, and do not close it with
+  a static lit rim — that is the fixed lamp, and it has been declined.
 - **"Less opacity at the start, more misty" is two dials, and the exponent alone is
   the wrong half.** `Style.beamGlowRamp` 1.4 → **2.4** thins the *body* of the
   tail: near-rim alpha 4pt out at the head and 15/30/60/90pt behind it went
@@ -350,16 +403,15 @@ needs no `project.pbxproj` edit.
   4pt out, **1.30 → 1.59**. Before this pass the bloom was brighter than the core
   it sat under, so the crisp line was inside the brightest thing on screen and
   could not be seen as a line at all.
-- **The Card's own black shadow does not eat the glow, and this was measured before
-  being left alone.** `Style.shadowRadius` 16 of black falloff sits in exactly the
-  band the glow lives in, which looks like a problem and is not. Head contrast on a
-  white ground: Δ239 with no shadow, Δ207 at the shipping 0.20, Δ174 at 0.44 — so
-  the shadow costs about 13% there. Everywhere else it *helps*: on mid-grey it goes
-  the other way (Δ144 → Δ149 → Δ158), on near-black it is noise, and dark
-  appearance's white head over a *light* backdrop measures Δ1 with no shadow
-  against Δ91 with it, which makes the shadow load-bearing rather than harmful.
-  Do not suppress a Card's shadow while its beam sweeps; the numbers do not support
-  it and it would couple `Style` to a decoration's state.
+- **The Card's own black shadow and the beam no longer share any pixels, and the
+  old argument about them is deleted rather than kept.** `Style.shadowRadius` 16 of
+  black falloff sits *outside* the rim, and the beam is masked inside it, so there
+  is nothing to interact. The measurement that used to live here — the shadow
+  costing the outward halo 13% on white and *buying* it Δ91 over a light backdrop,
+  which made it load-bearing — was true of the outward beam and is now about a band
+  the beam does not enter. The conclusion survives for a different reason: still do
+  not suppress a Card's shadow while its beam sweeps, because it would couple
+  `Style` to a decoration's state for no gain at all.
 - **The Loading Ring is not a progress indicator.** A constant-length 270° arc that
   turns, in both of the Panel's waiting states. Neither Vision nor `mdfind` reports
   progress, so a ring that *fills* would be claiming something the app cannot back.
@@ -682,7 +734,7 @@ User types query → Enter
 | `EmojiGridView.swift` | Results Slab in grid Mode |
 | `Style.swift` | Every radius, material, tint and rim, and all three of the Border Beam's parts — the two strokes' widths, blurs and ramps, and `BeamBloom`. The only `colorScheme` branch |
 | `Motion.swift` | The three transition curves, the two decorations, the Reduce Motion and Reduce Transparency reads, entrance/shake/hardCut |
-| `BorderBeam.swift` | A Card's one-lap comet: over-travel geometry, slicing and the travel-based `position`, the head point the bloom is placed on, the outward mask, `CardBeam`'s identity policy |
+| `BorderBeam.swift` | A Card's one-lap comet: over-travel geometry, slicing and the travel-based `position`, the head point the bloom is placed on, the inward mask, `CardBeam`'s identity policy |
 | `LoadingRing.swift` | The app's own spinner, in place of a system `ProgressView` |
 | `AppIndex.swift` | The app Index: background scan, atomic swap, lazy icons |
 | `AppDirectoryWatcher.swift` | FSEvents watch over the application directories |
@@ -739,6 +791,19 @@ Real, unfixed, none urgent.
   back to 12 after being tried at 15. Those absolutes are again not comparable with
   the figures above; the *lit-pixel* count out of the same file reproduced the old
   5,197 exactly, which is how the harness was checked rather than assumed.
+  **The fifth pass cost nothing either, and it deleted a compositing group.**
+  Measured in one run with the mask flipped between them, the inward mask reads
+  **0.97–1.00 ms Release / 1.10 ms Debug** against the outward mask's
+  **0.97–1.00 / 1.11–1.13** — identical inside the noise, which is the expected
+  answer: `Style.cardShape` on its own replaces a `Rectangle`, a
+  `.blendMode(.destinationOut)` shape and a `.compositingGroup()`. Those absolutes
+  are a *third* harness and comparable with neither set above; the standing
+  instruction is to measure before and after in one run and ignore the number.
+  One thing about that harness is worth recording: the composited Δ over a white
+  desktop came out **87 in Debug and 68 in Release** for the same code, so
+  `glassEffect`'s rasterisation is not configuration-independent under
+  `ImageRenderer`. Every Δ quoted for the fifth pass is a Debug figure, and the test
+  floor is set at 50 to clear both.
 - **Release-configuration tests fail and have nothing to do with the Panel.** Run
   with `-configuration Release SWIFT_ENABLE_TESTABILITY=YES` (Release lacks
   testability, so `@testable import` will not resolve without it), the
