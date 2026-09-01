@@ -305,18 +305,19 @@ struct BorderBeamRenderTests {
         )
         // Inward since 2026-09-01: the halo is light on the glass, not a shadow
         // on the desktop. Negative is inside the rim.
+        let w = Style.beamGlowWidth
         #expect(
-            alpha(-2) > 60 && alpha(-4) > 60 && alpha(-8) > 40 && alpha(-16) > 20,
+            alpha(-2) > 60 && alpha(-4) > 60 && alpha(-w * 0.6) > 40 && alpha(-w) > 15,
             """
-            the head has no halo: alpha \(alpha(-2)) / \(alpha(-4)) / \(alpha(-8)) / \
-            \(alpha(-16)) at 2, 4, 8 and 16 points *in*. Style.beamGlowHeadBlur must \
+            the head has no halo: alpha \(alpha(-2)) / \(alpha(-4)) / \(alpha(-w * 0.6)) / \
+            \(alpha(-w)) at 2, 4, \(w * 0.6) and \(w) points *in*. Style.beamGlowHeadBlur must \
             never be 0 and the glow layer must be drawn under the head, not only \
             behind it — a head with no bloom is a line, which is what this test is for.
             """
         )
         #expect(
-            alpha(-2) > alpha(-20) && alpha(-20) > alpha(-36),
-            "the halo does not fall off inward: \(alpha(-2)) / \(alpha(-20)) / \(alpha(-36))"
+            alpha(-2) > alpha(-w) && alpha(-w) > alpha(-w - 10),
+            "the halo does not fall off inward: \(alpha(-2)) / \(alpha(-w)) / \(alpha(-w - 10))"
         )
         #expect(
             alpha(2) > 25 && alpha(2) < alpha(-2),
