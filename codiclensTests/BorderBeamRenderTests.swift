@@ -64,7 +64,7 @@ import Testing
 /// this file and it survived the halo moving back outside**, because the core now
 /// straddles the rim: 1pt of the line is always on Liquid Glass.
 ///
-/// `theCoreIsADesaturatedHighlight` came from the three-part comet, whose core was a
+/// `theCoreIsWhiteHot` came from the three-part comet, whose core was a
 /// **saturated** blue line, and it now bounds the core's saturation from **both**
 /// sides. Above 0.60 is the saturated primary that was rejected twice as "too
 /// dense" and a "blue blob"; below 0.20 is the near-white that was rejected once for
@@ -346,7 +346,7 @@ struct BorderBeamRenderTests {
     /// read off the premultiplied channels directly: `(max - min) / max` is
     /// invariant under multiplication by alpha. The polarity check has to
     /// un-premultiply, which is why it divides by alpha.
-    @Test func theCoreIsADesaturatedHighlight() {
+    @Test func theCoreIsWhiteHot() {
         let y = Int(((pad + size.height / 2) * Self.scale).rounded(.down))
         // Just *inside* the rim: the core lies in `[rim - beamWidth, rim]` now.
         let x = Int(((pad + size.width - 0.25) * Self.scale).rounded(.down))
@@ -358,14 +358,15 @@ struct BorderBeamRenderTests {
             }
             let saturation = bitmap.saturation(x: x, y: y)
             #expect(
-                saturation < 0.60 && saturation > 0.20,
+                saturation < 0.20,
                 """
-                the core's colour is out of bounds in \(dark ? "dark" : "light") \
-                appearance: saturation \(saturation) at the head's rim, against 0.50 \
-                shipping. Above 0.60 is the saturated primary that was rejected twice \
-                as "too dense" and a "blue blob"; below 0.20 is the near-white that \
-                measured Δ10/442 over a bright wallpaper, because half of the core \
-                composites against the desktop — see Palette.beamHead.
+                the core is not white in \(dark ? "dark" : "light") appearance: \
+                saturation \(saturation) at the head's rim, against 0.00 shipping. \
+                Since 2026-09-01 the core is white-hot and the *halo* is the blue — a \
+                blue line on a blue halo had no internal contrast and read as a smear. \
+                The near-white core that measured Δ10/442 in pass five was alone on \
+                the desktop; this one sits on a chromatic glow. See Palette.beamHead, \
+                and theBeamReadsAgainstAWhiteDesktop, which is the test that decides.
                 """
             )
 
@@ -374,13 +375,13 @@ struct BorderBeamRenderTests {
             let brightest = Double(max(colour.r, max(colour.g, colour.b))) / Double(alpha)
             let dimmest = Double(min(colour.r, min(colour.g, colour.b))) / Double(alpha)
             #expect(
-                brightest > 0.85 && dimmest > 0.30,
+                brightest > 0.90 && dimmest > 0.80,
                 """
-                the core is not a *light* blue in \(dark ? "dark" : "light") \
+                the core is not white-hot in \(dark ? "dark" : "light") \
                 appearance: brightest channel \(brightest), dimmest \(dimmest), \
-                against 1.00 and 0.50 shipping. It has to read as light rather than \
-                as a colour — the same value in both appearances, because the halo \
-                lands on a desktop and not on the Card's tint.
+                against 1.00 and 1.00 shipping. Every channel high is what white \
+                means; a dimmest channel falling towards 0.5 is the light-blue core \
+                coming back.
                 """
             )
         }

@@ -223,6 +223,12 @@ struct BorderBeam: ViewModifier, Animatable {
                             bloom
                         }
                         .mask { Self.outward }
+                        // The spill: the halo bleeding a few points onto the
+                        // Card's own glass. Its own mask, a band just inside the
+                        // rim — see `inward` and `Style.beamSpillWidth`. Part of
+                        // the halo, so it goes with it under Reduce Transparency.
+                        layer(.spill)
+                            .mask { Self.inward }
                     }
                     layer(.core)
                 }
@@ -346,6 +352,22 @@ struct BorderBeam: ViewModifier, Animatable {
         return (first, atan2(Double(last.y - first.y), Double(last.x - first.x)))
     }
 
+    // MARK: - Inward, a band
+
+    /// The region the spill may light: inside the rim, and no deeper than
+    /// `Style.beamSpillWidth`. The Card's shape with a smaller copy of itself
+    /// punched out of the middle. Nothing about it depends on the layout size
+    /// beyond the shape, so unlike `outward` it needs no outset.
+    private static var inward: some View {
+        Style.cardShape
+            .overlay {
+                Style.cardShape
+                    .inset(by: Style.beamSpillWidth)
+                    .blendMode(.destinationOut)
+            }
+            .compositingGroup()
+    }
+
     // MARK: - Outward, except the core
 
     /// Everything outside the Card's rim, and nothing inside it — the mask over the
@@ -411,6 +433,16 @@ struct BorderBeam: ViewModifier, Animatable {
     }
 }
 
+// MARK: - The design-time loop
+
+/// The `UserDefaults` switch that makes every Card sweep on a fixed period. See
+/// `CardBeam` for what it is for and why it is not a timing hack. Kept outside
+/// `CardBeam` because a generic type cannot hold a static stored property.
+enum BeamLoop {
+    static let key = "beamLoop"
+    static let period: Double = 1.6
+}
+
 // MARK: - The Card-level policy
 
 /// When a Card sweeps: once, each time it becomes about something new.
@@ -465,6 +497,21 @@ private struct CardBeam<ID: Equatable>: ViewModifier {
             .borderBeam(trigger: trigger)
             .onChange(of: identity) { sweep() }
             .onAppear { sweep() }
+            // A design-time loop and nothing else: with
+            // `defaults write <bundle id> beamLoop -bool YES` every Card sweeps
+            // on a fixed period so the beam can be judged on screen without
+            // re-summoning the Panel between looks. This is the one timed loop
+            // in the app and it is *not* an exception to the no-timing-hacks
+            // rule, because it is not fixing anything: a loop is timed by
+            // definition. It has no UI, ships inert, and reads the key once per
+            // Card appearance.
+            .task {
+                guard UserDefaults.standard.bool(forKey: BeamLoop.key) else { return }
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(BeamLoop.period))
+                    sweep()
+                }
+            }
     }
 
     private func sweep() {

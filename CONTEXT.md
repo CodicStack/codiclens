@@ -114,11 +114,15 @@ beam was masked outside the rim, which is the gutter and then the Panel's transp
 margin — the user's **desktop** — so it never composited against anything the app
 draws and whether it could be seen was decided by somebody's wallpaper. A near-white
 beam in dark appearance over a white desktop measured Δ10/442: nothing. **"Dark
-appearance" does not mean "dark ground".** That is exactly why the light is now a
-**light blue** rather than a near-white, and one colour in both appearances: only a
-chromatic colour has distance from a bright sky *and* a dark desktop. A pass in
-between masked everything *inward*, which fixed the ground and put the halo over the
-Card's content; that was rejected.
+appearance" does not mean "dark ground".** That is why the *halo* is a **light
+blue**, one colour in both appearances: only a chromatic colour has distance from a
+bright sky *and* a dark desktop. The **core is white** — a comet is a white light
+inside a coloured halo, and a blue line on a blue halo read as a smear — and it may
+be white only because the halo under it, not the wallpaper, is what it composites
+against. A pass in between masked everything *inward*, which fixed the ground and
+put the halo over the Card's content; that was rejected. What survives of it is the
+**spill**: a few points of the halo bleeding onto the Card's glass just inside the
+rim, never reaching the content.
 The nucleus is an ellipse elongated **along** the rim, not a circle — a circle
 centred on a line reads as a dot on it. The reference material's blue belongs to its
 Card's *fill* rather than to its rim light, and reading it the other way made this a
