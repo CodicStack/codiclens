@@ -158,8 +158,17 @@ needs no `project.pbxproj` edit.
   uniform in path length — verified: `cardShape`'s path starts at the right edge's
   vertical midpoint and runs clockwise, which is why the top-left corner falls a
   little past 0.5.
-- **THE HALO IS OUTSIDE THE RIM AND THE CORE STRADDLES IT, AND THE COLOUR IS WHY
-  THAT IS ALLOWED.** For four passes the whole comet was masked *outside*
+- **THE HALO IS INSIDE THE RIM (since 2026-09-01), THE CORE STRADDLES IT, AND A THIN
+  FEATHER IS ALL THAT IS OUTSIDE.** On screen the outward halo — the design the rest
+  of this bullet records — read as "a drop shadow, which looks really bad", because
+  a blurred coloured band outside a surface is one. Light in glass is brightest at
+  the edge and bleeds *across the surface*, so glow and bloom now sit under
+  `BorderBeam.inward`, a `Style.beamGlowWidth` band inside the rim, and the glow's
+  width is modulated by a slow travelling wave (`Style.beamWave`) so it reads as
+  liquid rather than as a band. `nothingIsLitDeepInsideTheRim` bounds the reach;
+  `theHeadHasAHaloAndACrispCore` samples *inward*. The history below is kept because
+  the ground argument still decides the *feather's* colour and the core's.
+  **The record of the outward design:** For four passes the whole comet was masked *outside*
   `Style.cardShape`, on a rule that reads as obviously right — a blur spreads both
   ways, so cut the inward half and nothing washes over the Card's icon, name and
   chips. Outside a Card's rim is `cardInset`'s gutter and then `PanelLayout.margin`,

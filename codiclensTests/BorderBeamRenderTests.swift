@@ -297,22 +297,34 @@ struct BorderBeamRenderTests {
             return bitmap.alpha(x: x, y: y)
         }
 
+        // 150 shipping: the core's own alpha plus the feather's. It was 175 while
+        // the glow was outside and added to it; now the glow is inside.
         #expect(
-            alpha(0) > 155,
+            alpha(0) > 120,
             "the core is not crisp at the rim: alpha \(alpha(0)). Style.beamWidth is the core's stroked width."
         )
+        // Inward since 2026-09-01: the halo is light on the glass, not a shadow
+        // on the desktop. Negative is inside the rim.
         #expect(
-            alpha(1) > 60 && alpha(4) > 60 && alpha(8) > 40 && alpha(16) > 20,
+            alpha(-2) > 60 && alpha(-4) > 60 && alpha(-8) > 40 && alpha(-16) > 20,
             """
-            the head has no halo: alpha \(alpha(1)) / \(alpha(4)) / \(alpha(8)) / \
-            \(alpha(16)) at 1, 4, 8 and 16 points out. Style.beamGlowHeadBlur must \
+            the head has no halo: alpha \(alpha(-2)) / \(alpha(-4)) / \(alpha(-8)) / \
+            \(alpha(-16)) at 2, 4, 8 and 16 points *in*. Style.beamGlowHeadBlur must \
             never be 0 and the glow layer must be drawn under the head, not only \
             behind it — a head with no bloom is a line, which is what this test is for.
             """
         )
         #expect(
-            alpha(1) > alpha(12) && alpha(12) > alpha(28),
-            "the halo does not fall off outward: \(alpha(1)) / \(alpha(12)) / \(alpha(28))"
+            alpha(-2) > alpha(-20) && alpha(-20) > alpha(-36),
+            "the halo does not fall off inward: \(alpha(-2)) / \(alpha(-20)) / \(alpha(-36))"
+        )
+        #expect(
+            alpha(2) > 25 && alpha(2) < alpha(-2),
+            """
+            the rim is cut off flat on the outside, or the halo is back on the \
+            desktop: alpha \(alpha(2)) 2pt out against \(alpha(-2)) 2pt in. The \
+            feather (Style.beamFeatherWidth) should be present and smaller than the glow.
+            """
         )
     }
 
@@ -357,8 +369,11 @@ struct BorderBeamRenderTests {
                 return
             }
             let saturation = bitmap.saturation(x: x, y: y)
+            // The sample is a composite: the white core over the glow's head, which
+            // is saturated teal and *inside* the rim since the halo moved in. 0.35
+            // shipping is white over teal; a coloured core would read above 0.6.
             #expect(
-                saturation < 0.20,
+                saturation < 0.50,
                 """
                 the core is not white in \(dark ? "dark" : "light") appearance: \
                 saturation \(saturation) at the head's rim, against 0.00 shipping. \
@@ -375,7 +390,7 @@ struct BorderBeamRenderTests {
             let brightest = Double(max(colour.r, max(colour.g, colour.b))) / Double(alpha)
             let dimmest = Double(min(colour.r, min(colour.g, colour.b))) / Double(alpha)
             #expect(
-                brightest > 0.90 && dimmest > 0.72,
+                brightest > 0.90 && dimmest > 0.55,
                 """
                 the core is not white-hot in \(dark ? "dark" : "light") \
                 appearance: brightest channel \(brightest), dimmest \(dimmest), \
@@ -447,20 +462,32 @@ struct BorderBeamRenderTests {
             return
         }
 
-        let outward: CGFloat = 4
+        // Inside the rim since the halo moved onto the glass, and the *peak*
+        // across the band's depth rather than one fixed depth: the glow's width
+        // is a travelling wave now (Style.beamWave), so alpha at any single depth
+        // rises and falls along the beam by design. What must still fall off is
+        // the light itself.
         func alpha(x: CGFloat, y: CGFloat) -> Int {
             bitmap.alpha(
                 x: Int(((x + 0.25) * Self.scale).rounded(.down)),
                 y: Int(((y + 0.25) * Self.scale).rounded(.down))
             )
         }
+        func peakInward(onRightEdgeAt y: CGFloat) -> Int {
+            stride(from: CGFloat(2), through: Style.beamGlowWidth, by: 1)
+                .map { alpha(x: right - $0, y: y) }.max() ?? 0
+        }
+        func peakInward(onTopEdgeAt x: CGFloat) -> Int {
+            stride(from: CGFloat(2), through: Style.beamGlowWidth, by: 1)
+                .map { alpha(x: x, y: pad + $0) }.max() ?? 0
+        }
 
         let right = pad + size.width
         let midY = pad + size.height / 2
-        let head = alpha(x: right + outward, y: midY)
-        let behind = alpha(x: right + outward, y: midY - 60)
-        let far = alpha(x: right - Style.cardRadius - 60, y: pad - outward)
-        let furthest = alpha(x: right - Style.cardRadius - 160, y: pad - outward)
+        let head = peakInward(onRightEdgeAt: midY)
+        let behind = peakInward(onRightEdgeAt: midY - 60)
+        let far = peakInward(onTopEdgeAt: right - Style.cardRadius - 60)
+        let furthest = peakInward(onTopEdgeAt: right - Style.cardRadius - 160)
 
         #expect(
             head > behind && behind > far && far > furthest,
@@ -684,18 +711,21 @@ struct BorderBeamRenderTests {
                     let alpha = bitmap.alpha(x: x, y: y)
                     guard alpha > 0 else { continue }
                     let d = distanceFromTheRim(x: x, y: y)
-                    if d < -10 { worstPast10 = max(worstPast10, alpha) }
-                    if d < -16 { worstPast16 = max(worstPast16, alpha) }
+                    if d < -(Style.beamGlowWidth + 8) { worstPast10 = max(worstPast10, alpha) }
+                    if d < -(Style.beamGlowWidth + 18) { worstPast16 = max(worstPast16, alpha) }
                 }
             }
 
             #expect(
                 worstPast10 < 20 && worstPast16 == 0,
                 """
-                the beam put alpha \(worstPast10) more than 10pt inside the rim and \
-                \(worstPast16) more than 16pt in, at phase \(phase). The glow and \
-                the bloom must stay under BorderBeam.outward — only the core's own \
-                inner half belongs inside the Card, and it dies by 13pt.
+                the beam put alpha \(worstPast10) more than \(Int(Style.beamGlowWidth + 8))pt \
+                inside the rim and \(worstPast16) more than \(Int(Style.beamGlowWidth + 18))pt \
+                in, at phase \(phase). The glow and the bloom are under \
+                BorderBeam.inward, a Style.beamGlowWidth band; Style.padding and the \
+                content's own inset are what keep the light off the icon and the name, \
+                and this is the bound that says it stayed a band and did not become a \
+                fill — pass five's failure.
                 """
             )
         }
