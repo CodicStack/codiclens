@@ -516,11 +516,11 @@ enum Style {
     // MARK: - The beam's colour
 
     /// The beam's colour at a point along the comet, `position` 1 at the head and
-    /// 0 at the tail. A ramp through `BeamPalette.current.hues`, head first,
+    /// 0 at the tail. A ramp through `BeamPalette.hues`, head first,
     /// evaluated per slice — so it follows arc length exactly as the slices do.
     /// See `Palette` for why the colours live here and not there.
     static func beamHue(at position: Double) -> Color {
-        let hues = BeamPalette.current.hues
+        let hues = BeamPalette.hues
         guard hues.count > 1 else { return hues.first ?? .white }
         let p = min(max(position, 0), 1)
         let t = (1 - p) * Double(hues.count - 1)
@@ -1220,41 +1220,23 @@ extension View {
 
 // MARK: - The beam's hues
 
-/// The hues the Border Beam ramps through, head first. Two candidates while the
-/// colour is being chosen on screen; `defaults write <bundle id> beamPalette
-/// -string aurora|intelligence` switches live. Both are saturated on purpose:
-/// a pastel has one distance from the ground and a light desktop eats it, a ramp
-/// through saturated hues always has a stop far from whatever is behind it.
-enum BeamPalette: String {
-    /// Northern lights: teal at the head into green, violet, a pink tail.
-    case aurora
-    /// The Apple Intelligence glow: blue at the head into violet, magenta, an
-    /// orange tail.
-    case intelligence
-
-    static let key = "beamPalette"
-
-    static var current: BeamPalette {
-        BeamPalette(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .aurora
-    }
-
-    var hues: [Color] {
-        switch self {
-        // No near-white stop at the head. The *core* is white; the halo under
-        // it must already be saturated, or the head is a white halo over a white
-        // desktop — `theBeamReadsAgainstAWhiteDesktop` measured Δ36 with one.
-        case .aurora: [
-            Color(red: 0.20, green: 0.88, blue: 0.95),
-            Color(red: 0.30, green: 0.95, blue: 0.55),
-            Color(red: 0.55, green: 0.40, blue: 1.00),
-            Color(red: 0.95, green: 0.40, blue: 0.85)
-        ]
-        case .intelligence: [
-            Color(red: 0.28, green: 0.58, blue: 1.00),
-            Color(red: 0.62, green: 0.35, blue: 1.00),
-            Color(red: 1.00, green: 0.35, blue: 0.65),
-            Color(red: 1.00, green: 0.58, blue: 0.25)
-        ]
-        }
-    }
+/// The hues the Border Beam ramps through, head first: **aurora**. Teal at the
+/// head into green, violet, a pink tail. Chosen on screen on 2026-09-01 against an
+/// Apple Intelligence ramp (blue, violet, magenta, orange), which borrowed Apple's
+/// identity; this one is the app's. The order is fixed — the ramp does not drift
+/// between sweeps — because northern lights read as a *thing* with a colour order,
+/// and a different lead colour every lap makes each sweep a different object.
+///
+/// All saturated, on purpose: a pastel has one distance from the ground and a
+/// light desktop eats it, a ramp through saturated hues always has a stop far from
+/// whatever is behind it. **No near-white stop at the head.** The *core* is the
+/// white; a white halo over a white desktop is the Δ10 failure again — measured
+/// Δ36 with one, against `theBeamReadsAgainstAWhiteDesktop`'s floor of 50.
+enum BeamPalette {
+    static let hues: [Color] = [
+        Color(red: 0.20, green: 0.88, blue: 0.95),
+        Color(red: 0.30, green: 0.95, blue: 0.55),
+        Color(red: 0.55, green: 0.40, blue: 1.00),
+        Color(red: 0.95, green: 0.40, blue: 0.85)
+    ]
 }

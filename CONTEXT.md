@@ -116,7 +116,8 @@ draws and whether it could be seen was decided by somebody's wallpaper. A near-w
 beam in dark appearance over a white desktop measured Δ10/442: nothing. **"Dark
 appearance" does not mean "dark ground".** That is why the *halo* is chromatic, and
 since 2026-09-01 it is a **ramp of several saturated hues along the comet's length**
-— aurora or Apple Intelligence, chosen on screen — the same in both appearances:
+— the aurora: teal, green, violet, pink, in that order every time — the same in
+both appearances:
 one pastel blue had one distance from the ground and a light desktop ate it; a ramp
 always has some stop far from whatever is behind it. The **core is white** — a
 comet is a white light inside a coloured halo — and it may be white only because
