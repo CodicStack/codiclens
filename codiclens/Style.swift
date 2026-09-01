@@ -13,12 +13,26 @@ import SwiftUI
 ///   which is deliberate rather than forgotten — it was wired up once, while the
 ///   Border Beam lived on the Slab and wanted an edge to run along, and reverted
 ///   when the beam moved to the Cards. `slabSurface()`.
-/// - **raised** — the focused Card. Brighter and a touch more defined at the
-///   edge than its neighbours. No accent colour: brightness is the focus
-///   signal. `cardSurface(focused: true)`.
+/// - **raised** — the focused Card. Its **Lamp** is turned up: the static,
+///   monochrome light along the top of the rim that every Card carries. No
+///   accent colour, and no brighter fill: lamp weight is the focus signal.
+///   `cardSurface(focused: true)`.
 /// - **recessed** — an unfocused Card, and every Result row or grid cell.
-///   A neutral well sunk into the Slab. `cardSurface(focused: false)` and
-///   `resultSurface(selected:)`.
+///   A neutral well sunk into the Slab; a Card's Lamp is turned down, not off.
+///   `cardSurface(focused: false)` and `resultSurface(selected:)`.
+///
+/// **A Card's glass has depth, and the depth is three overlays on native Liquid
+/// Glass, not a hand-rolled material.** `docs/adr/0002` bans re-implementing the
+/// *blur*; it says nothing about light. `.glassEffect` alone rendered a flat grey
+/// rectangle with a faint lensing edge — measured over a flat 0.82 grey ground, the
+/// focused and unfocused Cards were two greys and nothing else. So a Card is
+/// `.glassEffect` plus: a **specular** wash behind the glass across its top
+/// (`Style.specularReach`), an **inner shadow** behind the glass along its bottom
+/// (`Style.innerShadowStart`), and the **Lamp** on the rim (`Style.lampReach`), all
+/// lit from the top, all static, all monochrome. Together they are what the
+/// reference (Tuna for Mac) reads as expensive; the Border Beam was asked to carry
+/// that on its own for six passes and could not, because a light that is gone in
+/// 0.55s is not what a surface *is*.
 ///
 /// Slabs and Cards both use `.glassEffect`, because both are top-level surfaces
 /// floating over the desktop. Results are the one flat tier: they sit *inside*
@@ -55,6 +69,34 @@ enum Style {
 
     /// One device pixel's worth of rim at 1x, which is what a hairline means.
     static let hairline: CGFloat = 1
+
+    // MARK: - Glass depth
+
+    /// How far down the Card the Lamp reaches, as a fraction of its height. The
+    /// rim's light is full at the top edge and gone by here; below it only the
+    /// base rim (`Palette.cardRim` / `raisedRim`) defines the edge. Past about
+    /// 0.7 the gradient reads as a lit rim with a dim bottom rather than a lit
+    /// *top*, which is the lamp becoming a border again.
+    static let lampReach: CGFloat = 0.62
+
+    /// How far down the Card the specular wash reaches. Shorter than the Lamp on
+    /// purpose: a wash across the whole top half is a fill, and a fill across a
+    /// Card is what the accent ban was written against.
+    static let specularReach: CGFloat = 0.42
+
+    /// Where the inner shadow begins, as a fraction of the Card's height from the
+    /// top. It is full at the bottom edge. What it is for: a sheet of glass lit from
+    /// above is darker where the light has to travel through it, and without it the
+    /// specular reads as a stain on a flat card rather than as depth.
+    ///
+    /// The ramp is **eased** — see `CardSurface` — with a mid stop at
+    /// `innerShadowMid` of the full weight. A linear ramp from zero at this point
+    /// rendered as a horizontal *line* across the Card where it began, because the
+    /// eye finds the kink in a gradient's first derivative; and at 0.38 alpha in dark
+    /// it turned the bottom two fifths of the Card into a flat band rather than a
+    /// falloff. Measured over a 0.82 grey ground and a 0.08 one.
+    static let innerShadowStart: CGFloat = 0.40
+    static let innerShadowMid: Double = 0.30
 
     /// Half the gap between two Cards, because it is a padding *outside* each
     /// Card's drawn surface: two adjacent Cards contribute one each, so the
@@ -577,10 +619,10 @@ enum Style {
 /// instead, so its tint stays thin and its rim is a light catch along the edge
 /// rather than a border.
 ///
-/// **There is no accent colour here, deliberately.** Focus and selection are
-/// signalled by brightness and rim weight alone. An accent fill across a whole
-/// Card turned the Panel into a coloured box, and a tinted selection fought
-/// every app icon it sat next to.
+/// **There is no accent colour here, deliberately.** Focus is signalled by the
+/// Lamp's weight and the rim's weight; selection by a neutral lift. An accent
+/// fill across a whole Card turned the Panel into a coloured box, and a tinted
+/// selection fought every app icon it sat next to.
 ///
 /// The Border Beam's two colours are the one exception, and a deliberate one.
 /// The ban `CONTEXT.md` records is on a *static* accent — something on screen
@@ -604,15 +646,37 @@ private struct Palette {
     /// precisely so it cannot drift into a different material again.
     let base: Double
 
-    /// The focused Card's brightening, laid *over* the glass rather than mixed
-    /// into its tint.
+    /// The **Lamp**: the static light along the top of a Card's rim, at the
+    /// weight the focused Card carries. White in both appearances — it is light,
+    /// and light does not flip polarity with the tint.
     ///
-    /// It has to be a separate overlay, not a delta on `base`, because `tint`
-    /// changes polarity between appearances. Adding to the tint brightens a
-    /// white-tinted light Slab but *darkens* a black-tinted dark one — so
-    /// `base + focusLift` made a focused Card in dark mode dimmer than its
-    /// unfocused neighbour, which is backwards. Light brightens both.
-    let highlight: Color
+    /// This replaces the focused Card's brighter *fill* (`highlight`, deleted).
+    /// The fill was propping up what the rim could not carry: with a Lamp on the
+    /// rim, a lifted fill underneath it was two focus signals saying the same
+    /// thing, and the fill was the one that turned the Card into a lighter grey
+    /// box. Focus is now the Lamp's weight and the base rim's weight, nothing
+    /// else.
+    ///
+    /// **This is the "fixed lamp" that was declined on 2026-08-22 and reopened on
+    /// 2026-09-01.** The decline was made while the Border Beam was expected to
+    /// carry the reference's look alone; the reopening is the finding that it
+    /// cannot. The ban `CONTEXT.md` records is on a static *accent colour*, and a
+    /// monochrome light is not one.
+    let lamp: Color
+
+    /// The Lamp on an unfocused Card: turned down, never off. An unlit Card
+    /// beside a lit one reads as switched off rather than as not selected.
+    let lampDim: Color
+
+    /// The specular wash behind the glass across a Card's top. Sits *behind* the
+    /// glass, as `highlight` did, so the material carries it and nothing washes
+    /// over the Card's content. Alpha is higher than it looks like it needs to be
+    /// because translucent glass eats most of it.
+    let specular: Color
+
+    /// The inner shadow behind the glass along a Card's bottom. Black in both
+    /// appearances, like `shadow`, and for the same reason.
+    let innerShadow: Color
 
     /// Added for a Card holding editable body text.
     ///
@@ -784,12 +848,15 @@ private struct Palette {
         // under clear glass, though: 0.58 was propping up legibility that the
         // material now provides, and it read as opaque rather than as glass.
         base: 0.26,
-        // Deliberately faint. In dark appearance a white highlight is the one
-        // thing that can lift a Card off the tint it shares with the Slab, and
-        // a Card that reads lighter than the Slab both breaks that shared-sheet
-        // look and takes white text back towards unreadable. The rim carries
-        // most of the focus signal here instead.
-        highlight: .white.opacity(0.06),
+        // Dark appearance has contrast for free, so the Lamp can be a real light
+        // catch without the Card reading as lighter than the Slab: it is on the
+        // rim, not in the fill. The specular is faint for the reason `highlight`
+        // used to be — a wash that lifts the whole top of a dark Card takes white
+        // text back towards unreadable.
+        lamp: .white.opacity(0.72),
+        lampDim: .white.opacity(0.30),
+        specular: .white.opacity(0.14),
+        innerShadow: .black.opacity(0.24),
         writingLift: 0.14,
         slabRim: .white.opacity(0.10),
         cardRim: .white.opacity(0.12),
@@ -814,7 +881,15 @@ private struct Palette {
     static let light = Palette(
         tint: .white,
         base: 0.15,
-        highlight: .white.opacity(0.30),
+        // A white Lamp over a light Card is nearly invisible against a light
+        // desktop, and that is accepted rather than fought: in light appearance
+        // the top edge *dissolving* into the light is the lamp, and the darker
+        // base rim at the bottom is what defines the edge. The specular does the
+        // rest of the work here, which is why it is four times dark's.
+        lamp: .white.opacity(0.95),
+        lampDim: .white.opacity(0.55),
+        specular: .white.opacity(0.55),
+        innerShadow: .black.opacity(0.07),
         writingLift: 0.18,
         slabRim: .black.opacity(0.08),
         cardRim: .black.opacity(0.10),
@@ -884,22 +959,62 @@ private struct CardSurface: ViewModifier {
         let palette = Palette.of(scheme)
         let fill = writing ? palette.writingTint : palette.surfaceTint
         let rim = focused ? palette.raisedRim : palette.cardRim
+        let lamp = focused ? palette.lamp : palette.lampDim
         return content
             .glassEffect(glass(fill), in: Style.cardShape)
-            // Focus brightens the Card by sitting a light fill *behind* the
-            // glass, so the glass carries it and the Card's own content is not
-            // washed over. Never by tinting the glass instead: the tint's
-            // polarity flips between appearances and would dim the Card in dark
-            // mode. Alpha is higher than it looks like it needs to be because
-            // translucent glass eats most of it.
+            // Depth sits *behind* the glass, so the material carries it and the
+            // Card's own content is not washed over. Never by tinting the glass
+            // instead: the tint's polarity flips between appearances and would
+            // dim the Card in dark mode. Both are static and monochrome — see the
+            // file header for why they exist and `Palette.lamp` for why the
+            // focused Card's brighter fill does not any more.
             .background {
-                if focused {
-                    Style.cardShape.fill(palette.highlight)
-                }
+                Style.cardShape.fill(
+                    LinearGradient(
+                        stops: [
+                            .init(color: palette.specular, location: 0),
+                            .init(color: palette.specular.opacity(0), location: Style.specularReach)
+                        ],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+            }
+            .background {
+                Style.cardShape.fill(
+                    LinearGradient(
+                        stops: [
+                            .init(color: palette.innerShadow.opacity(0), location: Style.innerShadowStart),
+                            .init(
+                                color: palette.innerShadow.opacity(Style.innerShadowMid),
+                                location: Style.innerShadowStart + (1 - Style.innerShadowStart) * 0.55
+                            ),
+                            .init(color: palette.innerShadow, location: 1)
+                        ],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
             }
             .clipShape(Style.cardShape)
+            // The base rim first, uniform, then the Lamp over it: a second
+            // hairline whose light is full at the top edge and gone by
+            // `lampReach`. Two strokes rather than one gradient so the bottom
+            // edge is always defined by the base rim whatever the Lamp does —
+            // a single gradient from light to nothing left the bottom edge
+            // undrawn against a matching ground.
             .overlay {
                 Style.cardShape.strokeBorder(rim, lineWidth: Style.hairline)
+            }
+            .overlay {
+                Style.cardShape.strokeBorder(
+                    LinearGradient(
+                        stops: [
+                            .init(color: lamp, location: 0),
+                            .init(color: lamp.opacity(0), location: Style.lampReach)
+                        ],
+                        startPoint: .top, endPoint: .bottom
+                    ),
+                    lineWidth: Style.hairline
+                )
             }
             .shadow(color: palette.shadow, radius: Style.shadowRadius, y: Style.shadowY)
     }
