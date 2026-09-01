@@ -256,7 +256,13 @@ enum Style {
     /// still falls off over tens of points. Brightness near the source and reach
     /// away from it are set by the band's width and the blur radius separately,
     /// and that is the whole reason there is a width here at all.
-    static let beamGlowWidth: CGFloat = 30
+    static let beamGlowWidth: CGFloat = 12
+
+    /// **12, not 30.** The first inward pass bled 30pt onto the glass, Apple's edge
+    /// glow depth, and on a 236pt Card that is a quarter of the width — "why is it
+    /// going inside?" So the light hugs the rim: a 12pt band in, the 6pt feather
+    /// out, the liquid wave swelling within that. Still biased inward, so it never
+    /// reads as a shadow; thin enough to be an edge.
 
     /// **Since 2026-09-01 the glow is INSIDE the rim, and `beamGlowWidth` is how far
     /// in it reaches.** Six passes and the aurora repaint all drew the halo outside
@@ -287,11 +293,11 @@ enum Style {
     /// The glow's nominal reach inside the rim before the wave, in points. Less
     /// than `beamGlowWidth` (the mask) so the wave has room to swell into without
     /// being cut flat by the band's inner edge.
-    static let beamGlowBodyWidth: CGFloat = 20
+    static let beamGlowBodyWidth: CGFloat = 8
 
     /// The blur on the inward band's edges — see `BorderBeam.inward`. Softens the
     /// inner edge so the glow melts into the glass instead of stopping at a line.
-    static let beamGlowEdgeBlur: CGFloat = 6
+    static let beamGlowEdgeBlur: CGFloat = 4
 
     /// **The glow is liquid, not a band.** Asked for by name on 2026-09-01 — "it
     /// would be cooler if it looked more like a liquid" — once the halo had moved
@@ -335,7 +341,7 @@ enum Style {
     /// the *line*'s contrast no longer comes out of the halo's budget, and the
     /// colour is chromatic in both appearances instead of a near-white that only
     /// read on a dark ground.
-    static let beamGlowHeadBlur: CGFloat = 12
+    static let beamGlowHeadBlur: CGFloat = 6
 
     /// The glow's blur radius at the very end of the tail.
     ///
@@ -354,7 +360,7 @@ enum Style {
     /// Raise this and re-measure the reach against the gutter rather than assuming
     /// it scales with the radius: the reach is where alpha falls under 8, and the
     /// glow's opacity ramp moves it as much as the blur does.
-    static let beamGlowTailBlur: CGFloat = 20
+    static let beamGlowTailBlur: CGFloat = 10
 
     /// The exponent that turns the glow from a **tube** into a **coma**.
     ///
@@ -505,13 +511,13 @@ enum Style {
     /// Half of it is thrown away by the outward mask, which is correct — the light is
     /// on the Card's edge, blooming away from it — and it is why the alpha is higher
     /// than an ellipse drawn whole would need.
-    static let beamBloomLength: CGFloat = 200
+    static let beamBloomLength: CGFloat = 160
 
     /// The bloom's extent **across** the rim: the axis the gutter bounds.
     ///
     /// See `beamBloomLength`. This is the one of the two that has a hard constraint
     /// on it, and it is why the elongation was bought along the rim instead.
-    static let beamBloomThickness: CGFloat = 64
+    static let beamBloomThickness: CGFloat = 40
 
     /// How far past the layer's own bounds the outward mask reaches.
     ///
@@ -873,8 +879,8 @@ private struct Palette {
         // hoisted out of `Palette` because a colour belongs to a palette here, and a
         // future pass that has to split them again should not have to move them
         // back in first.
-        beamGlowHeadAlpha: 0.72,
-        beamGlowTailAlpha: 0.34,
+        beamGlowHeadAlpha: 0.85,
+        beamGlowTailAlpha: 0.40,
         beamBloomAlpha: 0.78,
         beamFeatherAlpha: 0.42,
         beamCoreTailAlpha: 0.55
@@ -905,8 +911,8 @@ private struct Palette {
         // lighter than any highlight) belonged to the inward mask and is deleted with
         // it. Outside the rim there is no such ceiling, and a light blue is far from
         // a light desktop as well as a dark one.
-        beamGlowHeadAlpha: 0.72,
-        beamGlowTailAlpha: 0.34,
+        beamGlowHeadAlpha: 0.85,
+        beamGlowTailAlpha: 0.40,
         beamBloomAlpha: 0.78,
         beamFeatherAlpha: 0.42,
         beamCoreTailAlpha: 0.55
