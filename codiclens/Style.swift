@@ -256,7 +256,19 @@ enum Style {
     /// still falls off over tens of points. Brightness near the source and reach
     /// away from it are set by the band's width and the blur radius separately,
     /// and that is the whole reason there is a width here at all.
-    static let beamGlowWidth: CGFloat = 12
+    static let beamGlowWidth: CGFloat = 10
+
+    /// **Outward again, and this time it is an edge, not a band.** The inward pass
+    /// was the wrong reading of "drop shadow": the complaint was never the *side*
+    /// of the rim, it was a wide soft blur. "I want it to only hit the outer edge,
+    /// and the outer edge is where the light is the brightest — that is where it
+    /// cannot pass through." So: nothing inside the rim but the core's own inner
+    /// half; the rim at full brightness; a decay of about `beamGlowWidth` points
+    /// *outward*, tight blur, high alpha at the rim; the liquid wave on that outer
+    /// edge; a faint wider feather beyond so the decay does not stop dead. Compare
+    /// the design that read as a shadow: a 10pt band blurred 16–28, at 0.7 alpha,
+    /// with its brightest point 5pt off the rim. Brightest-at-the-rim is the whole
+    /// difference. `nothingIsLitDeepInsideTheRim` now holds the *inside* to the core.
 
     /// **12, not 30.** The first inward pass bled 30pt onto the glass, Apple's edge
     /// glow depth, and on a 236pt Card that is a quarter of the width — "why is it
@@ -293,11 +305,8 @@ enum Style {
     /// The glow's nominal reach inside the rim before the wave, in points. Less
     /// than `beamGlowWidth` (the mask) so the wave has room to swell into without
     /// being cut flat by the band's inner edge.
-    static let beamGlowBodyWidth: CGFloat = 8
+    static let beamGlowBodyWidth: CGFloat = 7
 
-    /// The blur on the inward band's edges — see `BorderBeam.inward`. Softens the
-    /// inner edge so the glow melts into the glass instead of stopping at a line.
-    static let beamGlowEdgeBlur: CGFloat = 4
 
     /// **The glow is liquid, not a band.** Asked for by name on 2026-09-01 — "it
     /// would be cooler if it looked more like a liquid" — once the halo had moved
@@ -341,7 +350,7 @@ enum Style {
     /// the *line*'s contrast no longer comes out of the halo's budget, and the
     /// colour is chromatic in both appearances instead of a near-white that only
     /// read on a dark ground.
-    static let beamGlowHeadBlur: CGFloat = 6
+    static let beamGlowHeadBlur: CGFloat = 3
 
     /// The glow's blur radius at the very end of the tail.
     ///
@@ -360,7 +369,7 @@ enum Style {
     /// Raise this and re-measure the reach against the gutter rather than assuming
     /// it scales with the radius: the reach is where alpha falls under 8, and the
     /// glow's opacity ramp moves it as much as the blur does.
-    static let beamGlowTailBlur: CGFloat = 10
+    static let beamGlowTailBlur: CGFloat = 7
 
     /// The exponent that turns the glow from a **tube** into a **coma**.
     ///
@@ -398,6 +407,12 @@ enum Style {
     /// | at 1.25 | 1.00 | 0.70 | 0.42 | 0.177 |
     /// | at 1.5 | 1.00 | 0.65 | 0.35 | 0.125 |
     /// | at 1.8 | 1.00 | 0.60 | 0.29 | 0.082 |
+    /// | at 2.0 | 1.00 | 0.56 | 0.25 | 0.063 |
+    ///
+    /// **2.0 with the light at the rim.** The rim's alpha went up (0.95 head, 0.50
+    /// tail) so the edge reads as the brightest point, and the tail rose with it:
+    /// 227 at the head against 61 at 280pt behind, 3.7×. 2.0 brings the far tail
+    /// back under the 4× floor without touching the head.
     ///
     /// **1.8 with the liquid wave.** The wave swells the glow's width by up to 42%
     /// at points along the tail, and `theGlowPeaksAtTheHeadAndDiesAtTheTail` now
@@ -442,7 +457,7 @@ enum Style {
     /// `beamCoreTailBlur`. Measured at the trailing terminus, alpha 1pt out only
     /// moved 22 → 14 when `beamTail`'s own alpha came down 0.70 → 0.42. This
     /// exponent sets the *body* of the tail; `beamTail`'s alpha sets its end.
-    static let beamGlowRamp: Double = 1.8
+    static let beamGlowRamp: Double = 2.0
 
     /// The glow's opacity multiplier for a slice at `position`.
     ///
@@ -511,13 +526,13 @@ enum Style {
     /// Half of it is thrown away by the outward mask, which is correct — the light is
     /// on the Card's edge, blooming away from it — and it is why the alpha is higher
     /// than an ellipse drawn whole would need.
-    static let beamBloomLength: CGFloat = 160
+    static let beamBloomLength: CGFloat = 140
 
     /// The bloom's extent **across** the rim: the axis the gutter bounds.
     ///
     /// See `beamBloomLength`. This is the one of the two that has a hard constraint
     /// on it, and it is why the elongation was bought along the rim instead.
-    static let beamBloomThickness: CGFloat = 40
+    static let beamBloomThickness: CGFloat = 30
 
     /// How far past the layer's own bounds the outward mask reaches.
     ///
@@ -539,9 +554,9 @@ enum Style {
     /// (1.40ms against 1.43 in an older harness, inside the noise) and is not worth
     /// the margin.
     static var beamMaskOutset: CGFloat {
-        // Only the feather is outside now; the glow and the bloom are under
-        // `inward`, which has no boundary to overrun.
-        beamFeatherBlur * 3 + beamFeatherWidth * 2
+        // Everything but the core is outside and under `outward`, so the mask
+        // has to reach past the widest of them.
+        max(beamGlowStrokeWidth + beamGlowTailBlur * 3, beamFeatherWidth * 2 + beamFeatherBlur * 3, beamBloomThickness)
     }
 
     /// Whether the glow layer is drawn at all.
@@ -568,12 +583,12 @@ enum Style {
     /// is 12, so a 6pt band never reaches anything the Card draws, and
     /// `BorderBeamRenderTests.nothingIsLitDeepInsideTheRim` keeps it there. It is
     /// part of the halo: gone with it under Reduce Transparency.
-    static let beamFeatherWidth: CGFloat = 6
+    static let beamFeatherWidth: CGFloat = 9
 
     /// The spill's blur. Small on purpose — the band's own falloff is the
     /// `beamSpill` alpha, and a blur wider than the band pushes light past
     /// `beamSpillWidth` into the Card, which the render test forbids.
-    static let beamFeatherBlur: CGFloat = 6
+    static let beamFeatherBlur: CGFloat = 9
 
     // MARK: - The beam's colour
 
@@ -879,11 +894,11 @@ private struct Palette {
         // hoisted out of `Palette` because a colour belongs to a palette here, and a
         // future pass that has to split them again should not have to move them
         // back in first.
-        beamGlowHeadAlpha: 0.85,
-        beamGlowTailAlpha: 0.40,
-        beamBloomAlpha: 0.78,
-        beamFeatherAlpha: 0.42,
-        beamCoreTailAlpha: 0.55
+        beamGlowHeadAlpha: 0.95,
+        beamGlowTailAlpha: 0.50,
+        beamBloomAlpha: 0.85,
+        beamFeatherAlpha: 0.22,
+        beamCoreTailAlpha: 0.70
     )
 
     static let light = Palette(
@@ -911,11 +926,11 @@ private struct Palette {
         // lighter than any highlight) belonged to the inward mask and is deleted with
         // it. Outside the rim there is no such ceiling, and a light blue is far from
         // a light desktop as well as a dark one.
-        beamGlowHeadAlpha: 0.85,
-        beamGlowTailAlpha: 0.40,
-        beamBloomAlpha: 0.78,
-        beamFeatherAlpha: 0.42,
-        beamCoreTailAlpha: 0.55
+        beamGlowHeadAlpha: 0.95,
+        beamGlowTailAlpha: 0.50,
+        beamBloomAlpha: 0.85,
+        beamFeatherAlpha: 0.22,
+        beamCoreTailAlpha: 0.70
     )
 
     static func of(_ scheme: ColorScheme) -> Palette {
