@@ -114,12 +114,13 @@ beam was masked outside the rim, which is the gutter and then the Panel's transp
 margin — the user's **desktop** — so it never composited against anything the app
 draws and whether it could be seen was decided by somebody's wallpaper. A near-white
 beam in dark appearance over a white desktop measured Δ10/442: nothing. **"Dark
-appearance" does not mean "dark ground".** That is why the *halo* is a **light
-blue**, one colour in both appearances: only a chromatic colour has distance from a
-bright sky *and* a dark desktop. The **core is white** — a comet is a white light
-inside a coloured halo, and a blue line on a blue halo read as a smear — and it may
-be white only because the halo under it, not the wallpaper, is what it composites
-against. A pass in between masked everything *inward*, which fixed the ground and
+appearance" does not mean "dark ground".** That is why the *halo* is chromatic, and
+since 2026-09-01 it is a **ramp of several saturated hues along the comet's length**
+— aurora or Apple Intelligence, chosen on screen — the same in both appearances:
+one pastel blue had one distance from the ground and a light desktop ate it; a ramp
+always has some stop far from whatever is behind it. The **core is white** — a
+comet is a white light inside a coloured halo — and it may be white only because
+the halo under it, not the wallpaper, is what it composites against. A pass in between masked everything *inward*, which fixed the ground and
 put the halo over the Card's content; that was rejected. What survives of it is the
 **spill**: a few points of the halo bleeding onto the Card's glass just inside the
 rim, never reaching the content.

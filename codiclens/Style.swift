@@ -513,6 +513,21 @@ enum Style {
     /// `beamSpillWidth` into the Card, which the render test forbids.
     static let beamSpillBlur: CGFloat = 3
 
+    // MARK: - The beam's colour
+
+    /// The beam's colour at a point along the comet, `position` 1 at the head and
+    /// 0 at the tail. A ramp through `BeamPalette.current.hues`, head first,
+    /// evaluated per slice — so it follows arc length exactly as the slices do.
+    /// See `Palette` for why the colours live here and not there.
+    static func beamHue(at position: Double) -> Color {
+        let hues = BeamPalette.current.hues
+        guard hues.count > 1 else { return hues.first ?? .white }
+        let p = min(max(position, 0), 1)
+        let t = (1 - p) * Double(hues.count - 1)
+        let i = min(Int(t), hues.count - 2)
+        return hues[i].mix(with: hues[i + 1], by: t - Double(i))
+    }
+
     /// The lit segment's length, as a fraction of the Card's perimeter.
     ///
     /// A fraction rather than a length, and it stays one now that the beam runs
@@ -737,152 +752,31 @@ private struct Palette {
     /// without turning into a halo on a light one.
     let shadow: Color
 
-    /// The Border Beam **core**'s bright leading edge, and the colour it fades
-    /// out through.
+    /// The Border Beam's **weights** — alphas only. Its **colours** are not in the
+    /// Palette at all: since 2026-09-01 the beam is a *hue ramp* along its own
+    /// length, `Style.beamHue(at:)`, the same in both appearances, and a Palette
+    /// is where light and dark diverge.
     ///
-    /// **White-hot, since 2026-09-01, and the halo is what makes that allowed.**
-    /// A comet is a white core inside a chromatic halo; a blue line on a blue halo
-    /// has no internal contrast and read as a smear. The near-white core that
-    /// failed in pass five (Δ10/442, below) failed because it was *alone* on the
-    /// desktop. It is not alone now: the glow and the bloom underneath it are the
-    /// blue, they carry the beam's visibility against any ground, and the core
-    /// only has to be brighter than them. `theCoreIsWhiteHot` bounds it.
-    /// `theBeamReadsAgainstAWhiteDesktop` is still the test that decides whether
-    /// this is true — if it ever fails, the fallback agreed is a blue-white
-    /// (0.85, 0.92, 1.0) core in light appearance, not a return to blue in both.
+    /// The record of how the colour got here is worth keeping in one paragraph.
+    /// It was near-white and vanished over a bright wallpaper (Δ10/442, pass five),
+    /// because outside the rim is the desktop. It became one light blue, chosen
+    /// for distance from both a white sky and a dark desktop. Then a white core on
+    /// a blue halo, the comet's natural order. On screen over a light desktop in
+    /// light appearance that read as "the blue does not do the job": a single
+    /// pastel has one distance from the ground, and a light ground eats it. A ramp
+    /// through several saturated hues always has *some* stop far from any ground,
+    /// which is the aurora / Apple Intelligence look asked for by name — and it is
+    /// spatial, per slice, along arc length: not a conic gradient, which ADR 0003
+    /// bans for racing the long edges, and not a gradient in a stroke, which does
+    /// not follow a path. The slices were always the way to do this.
     ///
-    /// What follows is the record of the light-blue core it replaces, kept because
-    /// every number in it is still the reason the *halo* is chromatic.
-    ///
-    /// **One light blue, the same in both appearances, and the reason it is
-    /// chromatic is the most important sentence in this file.** The core straddles
-    /// the rim — see `Style.beamWidth` — so its outer half composites against the
-    /// user's desktop, and the fifth pass proved what that costs a *near-white*
-    /// light: masked outward, dark appearance's white head over a **white** desktop
-    /// measured **Δ10/442**. Invisible, and invisible for a reason no amount of
-    /// retuning could reach, because "dark appearance" does not mean "dark ground" —
-    /// the appearance sets the Card's tint and has nothing to do with the wallpaper.
-    /// That finding is why the light cannot be white. **A near-white colour has no
-    /// distance from a bright sky and a near-black one has none from a dark desktop;
-    /// a chromatic colour has real distance from both.** The beam is outside the Card
-    /// again *only because* the colour changed.
-    ///
-    /// The arithmetic, in the same RGB metric the rest of this file uses (out of
-    /// 442). Contrast against a ground is about `0.7 × dist(colour, ground)` — 0.7
-    /// being the coverage a thin core keeps through its own head blur — so what binds
-    /// is the **worst** ground, not the best:
-    ///
-    /// | | white | mid-grey | near-black |
-    /// |---|---|---|---|
-    /// | white@1.0 (the fifth pass) | **0** | 128 | 239 |
-    /// | (0.20, 0.45, 1.00), the withdrawn saturated blue | 178 | **112** | 213 |
-    /// | (0.50, 0.68, 1.00), this one | 152 | **135** | 307 |
-    ///
-    /// Own-colour saturation is **0.50**, against 0.80 for the withdrawn blue and
-    /// 0.026 for the near-white. That is the band this has to stay in and both edges
-    /// of it are prior rejections on screen: a saturated primary was "too dense" and
-    /// a "blue blob", and a near-white was invisible. It is a *light* blue reading as
-    /// light, which is what was asked for — "ofc a light blue for both white and
-    /// black" — and `BorderBeamRenderTests.theCoreIsADesaturatedHighlight` bounds it
-    /// from both sides for that reason.
-    ///
-    /// **The same colour in both appearances, which is new and is the simpler
-    /// answer.** The two appearances used to need opposite polarities, and the reason
-    /// was that the beam was masked *inward*: light appearance's Card measures
-    /// (247, 247, 247) over a white desktop, so a near-white line drawn on it was
-    /// Δ5 and the only way out was a dark line. A chromatic colour does not have
-    /// that problem — it is far from a light Card *and* from a dark one:
-    ///
-    /// | | white | hazy | photo | near-black |
-    /// |---|---|---|---|---|
-    /// | dark appearance's Card | 166 | 145 | 62 | 22 |
-    /// | light appearance's Card | 247 | 222 | 146 | 110 |
-    ///
-    /// (`.regular` glass transmits, so neither row is a constant. That is the second
-    /// half of why the polarity flip is gone: it was pinned to the rows not
-    /// overlapping, and a blue does not care whether they do.)
-    ///
-    /// The reference material's own rim light is near-white, and that is recorded
-    /// rather than followed: Tuna for Mac is in dark appearance over a dark wallpaper
-    /// — its Card's rim highlight sits around (150–185, 190–215, 225–248) over a
-    /// **fill** of roughly (70, 120, 170) — so its white reads because *its* ground
-    /// is known and dark. Ours is a desktop we do not own. Reading its blue as
-    /// belonging to the light sent two passes to a saturated core; reading its white
-    /// as portable sent one to an invisible beam. The light blue is the colour that is
-    /// nearest to it and survives an unknown ground.
-    ///
-    /// Do not "fix" a weak ground by saturating this again — that is the loop these
-    /// comments exist to break — and do not fix one with a static lit rim, which is
-    /// the fixed lamp and has been declined.
-    let beamHead: Color
-    let beamTail: Color
-
-    /// The Border Beam **glow**'s colours — the halo under and behind the core.
-    ///
-    /// A second pair rather than the core's pair at a lower alpha, because the
-    /// glow is a wider band and wants less saturation and less weight per pixel
-    /// than the line at its centre.
-    ///
-    /// **Since 2026-09-01 the halo carries the colour and the visibility, and the
-    /// core carries neither** — see `beamHead`. That is why both alphas went back
-    /// *up* (0.70 → 0.80, 0.30 → 0.40) after coming down twice: the "too dense"
-    /// they came down for was a blue halo under a blue core, which is blue twice.
-    /// Under a white core the same halo is the comet's colour once.
-    ///
-    /// **Both alphas came down twice, because "too dense" was said twice**, and they
-    /// have not gone back up. 0.80 → 0.55, then 0.72 → 0.46, and they are
-    /// **0.52 → 0.18** now, in both appearances. The tail's is the one that moved
-    /// furthest, on purpose: "the opacity of the start should be less so that it just
-    /// looks more misty" is a statement about the trailing end, and the head's halo
-    /// is the part that has to stay. The tail's went 0.16 → 0.18 with this pass and
-    /// nothing else did — `Style.beamGlowRamp` coming down from 2.4 to 1.25 raises the
-    /// *body* of the tail a long way on its own, so the halo got its length out of the
-    /// exponent rather than out of the alphas.
-    ///
-    /// **The colour is a light blue rather than the near-white it was**, and the
-    /// reason is `beamHead`'s: half of this lands on the desktop, and near-white light
-    /// on a bright sky is the fifth pass's Δ10. It is *less* saturated than the core —
-    /// (0.62, 0.78, 1.00) at the head — because a halo covers the most pixels and is
-    /// where a colour is most obvious. The reference has no dense coloured halo
-    /// anywhere in it, which is the constraint this pair keeps failing and being
-    /// pulled back from.
-    ///
-    /// **One pair for both appearances, where there used to be two of opposite
-    /// polarity.** Light appearance's halo was a *darkening* while the beam was masked
-    /// inward, because a light Card is lighter than any highlight. Outside the rim
-    /// there is no such ceiling, and a blue is far from a light desktop as well as a
-    /// dark one.
-    ///
-    /// A ramp *is* multiplied over these now, and only over these:
-    /// `Style.beamGlowIntensity(at:)`. That is a deliberate reversal of the "no
-    /// computed ramp" rule, which was right while the glow was the whole beam and
-    /// wrong once it was the bloom around a core. See `Style.beamGlowRamp` for why
-    /// it is not the deleted `beamFalloff` returning.
-    let beamGlowHead: Color
-    let beamGlowTail: Color
-
-    /// The **head bloom**'s colour: the light the comet comes out of.
-    ///
-    /// One colour rather than a pair, because a bloom has no head and tail — it is
-    /// an ellipse. Its falloff is the gradient's own stops, in `BeamBloom`.
-    ///
-    /// The least saturated of the three and deliberately so: this is the widest,
-    /// softest thing the beam draws, and a saturated wash across 40pt is the blue
-    /// *paint* two earlier versions were rejected for. It carries the least per pixel
-    /// for the same reason — the widest soft thing is the one that reads as mud first.
-    ///
-    /// **0.76 → 0.48 is the single biggest reason the head stopped being a blob**,
-    /// and 0.46 is where it sits now. At 0.76 the disc was brighter than the core it
-    /// sat under, so the crisp line was *inside* the brightest thing on screen and
-    /// could not be seen as a line at all. The number that says the line reads is the
-    /// rim's alpha against the alpha 4pt out, which must stay above about 1.3.
-    let beamBloom: Color
-
-    /// The **spill**: the halo's colour where it bleeds onto the Card's own glass,
-    /// inside the rim. The glow's head colour at a lower alpha, because it lands on
-    /// a surface the app owns and needs far less to read there than the glow
-    /// needs against the desktop. See `Style.beamSpillWidth`.
-    let beamSpill: Color
+    /// The core's leading edge is still white. `theCoreIsWhiteHot` bounds it.
+    let beamGlowHeadAlpha: Double
+    let beamGlowTailAlpha: Double
+    let beamBloomAlpha: Double
+    let beamSpillAlpha: Double
+    /// The core's alpha at its trailing end; it is 1 at the head.
+    let beamCoreTailAlpha: Double
 
     // MARK: Derived surface tints
 
@@ -923,12 +817,11 @@ private struct Palette {
         // hoisted out of `Palette` because a colour belongs to a palette here, and a
         // future pass that has to split them again should not have to move them
         // back in first.
-        beamHead: Color(red: 1.0, green: 1.0, blue: 1.0).opacity(1.0),
-        beamTail: Color(red: 0.90, green: 0.95, blue: 1.0).opacity(0.55),
-        beamGlowHead: Color(red: 0.55, green: 0.74, blue: 1.0).opacity(0.80),
-        beamGlowTail: Color(red: 0.70, green: 0.84, blue: 1.0).opacity(0.40),
-        beamBloom: Color(red: 0.60, green: 0.78, blue: 1.0).opacity(0.72),
-        beamSpill: Color(red: 0.55, green: 0.74, blue: 1.0).opacity(0.28)
+        beamGlowHeadAlpha: 0.88,
+        beamGlowTailAlpha: 0.45,
+        beamBloomAlpha: 0.78,
+        beamSpillAlpha: 0.30,
+        beamCoreTailAlpha: 0.55
     )
 
     static let light = Palette(
@@ -956,12 +849,11 @@ private struct Palette {
         // lighter than any highlight) belonged to the inward mask and is deleted with
         // it. Outside the rim there is no such ceiling, and a light blue is far from
         // a light desktop as well as a dark one.
-        beamHead: Color(red: 1.0, green: 1.0, blue: 1.0).opacity(1.0),
-        beamTail: Color(red: 0.90, green: 0.95, blue: 1.0).opacity(0.55),
-        beamGlowHead: Color(red: 0.55, green: 0.74, blue: 1.0).opacity(0.80),
-        beamGlowTail: Color(red: 0.70, green: 0.84, blue: 1.0).opacity(0.40),
-        beamBloom: Color(red: 0.60, green: 0.78, blue: 1.0).opacity(0.72),
-        beamSpill: Color(red: 0.55, green: 0.74, blue: 1.0).opacity(0.28)
+        beamGlowHeadAlpha: 0.88,
+        beamGlowTailAlpha: 0.45,
+        beamBloomAlpha: 0.78,
+        beamSpillAlpha: 0.30,
+        beamCoreTailAlpha: 0.55
     )
 
     static func of(_ scheme: ColorScheme) -> Palette {
@@ -1165,13 +1057,24 @@ struct BeamSlice: View {
         // turns a constant-opacity band into a coma with a peak — see
         // `Style.beamGlowRamp` for why it is safe here and was not safe as
         // `beamFalloff`.
-        case .glow: palette.beamGlowTail.mix(with: palette.beamGlowHead, by: position)
-            .opacity(Style.beamGlowIntensity(at: position))
-        case .core: palette.beamTail.mix(with: palette.beamHead, by: position)
+        case .glow: Style.beamHue(at: position)
+            .opacity(
+                (palette.beamGlowTailAlpha
+                    + (palette.beamGlowHeadAlpha - palette.beamGlowTailAlpha) * position)
+                    * Style.beamGlowIntensity(at: position)
+            )
+        // Pure white for the leading 12% of the comet, then taking on the
+        // trail's hue behind it, so the line belongs to the halo it rides on
+        // rather than reading as a separate white wire. `theCoreIsWhiteHot`
+        // samples the head slice, which is a little behind position 1.
+        case .core: Color.white
+            .mix(with: Style.beamHue(at: position), by: max(0, 0.88 - position) / 0.88 * 0.7)
+            .opacity(palette.beamCoreTailAlpha + (1 - palette.beamCoreTailAlpha) * position)
         // The same ramp as the glow: the spill is the glow's inner edge, and it
         // has to die behind the head at the same rate or it reads as a second,
         // stationary rim inside the first.
-        case .spill: palette.beamSpill.opacity(Style.beamGlowIntensity(at: position))
+        case .spill: Style.beamHue(at: position)
+            .opacity(palette.beamSpillAlpha * Style.beamGlowIntensity(at: position))
         }
         let width = switch layer {
         // The glow's is doubled because the glow is masked outward and a `.stroke`
@@ -1259,15 +1162,19 @@ struct BeamBloom: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let bloom = Palette.of(scheme).beamBloom
+        let a = Palette.of(scheme).beamBloomAlpha
+        // The head's hue at the centre, drifting a little way down the ramp at
+        // the edge, so the bloom is not a flat disc of one colour.
+        let inner = Style.beamHue(at: 1.0)
+        let outer = Style.beamHue(at: 0.7)
         return EllipticalGradient(
             stops: [
-                .init(color: bloom, location: 0),
-                .init(color: bloom.opacity(0.62), location: 0.16),
-                .init(color: bloom.opacity(0.30), location: 0.34),
-                .init(color: bloom.opacity(0.11), location: 0.56),
-                .init(color: bloom.opacity(0.02), location: 0.78),
-                .init(color: bloom.opacity(0), location: 1)
+                .init(color: inner.opacity(a), location: 0),
+                .init(color: inner.opacity(a * 0.62), location: 0.16),
+                .init(color: inner.mix(with: outer, by: 0.5).opacity(a * 0.30), location: 0.34),
+                .init(color: outer.opacity(a * 0.11), location: 0.56),
+                .init(color: outer.opacity(a * 0.02), location: 0.78),
+                .init(color: outer.opacity(0), location: 1)
             ],
             center: .center,
             startRadiusFraction: 0,
@@ -1308,5 +1215,46 @@ extension View {
     /// hints, counts, section labels.
     func chipSurface() -> some View {
         modifier(ChipSurface())
+    }
+}
+
+// MARK: - The beam's hues
+
+/// The hues the Border Beam ramps through, head first. Two candidates while the
+/// colour is being chosen on screen; `defaults write <bundle id> beamPalette
+/// -string aurora|intelligence` switches live. Both are saturated on purpose:
+/// a pastel has one distance from the ground and a light desktop eats it, a ramp
+/// through saturated hues always has a stop far from whatever is behind it.
+enum BeamPalette: String {
+    /// Northern lights: teal at the head into green, violet, a pink tail.
+    case aurora
+    /// The Apple Intelligence glow: blue at the head into violet, magenta, an
+    /// orange tail.
+    case intelligence
+
+    static let key = "beamPalette"
+
+    static var current: BeamPalette {
+        BeamPalette(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .aurora
+    }
+
+    var hues: [Color] {
+        switch self {
+        // No near-white stop at the head. The *core* is white; the halo under
+        // it must already be saturated, or the head is a white halo over a white
+        // desktop — `theBeamReadsAgainstAWhiteDesktop` measured Δ36 with one.
+        case .aurora: [
+            Color(red: 0.20, green: 0.88, blue: 0.95),
+            Color(red: 0.30, green: 0.95, blue: 0.55),
+            Color(red: 0.55, green: 0.40, blue: 1.00),
+            Color(red: 0.95, green: 0.40, blue: 0.85)
+        ]
+        case .intelligence: [
+            Color(red: 0.28, green: 0.58, blue: 1.00),
+            Color(red: 0.62, green: 0.35, blue: 1.00),
+            Color(red: 1.00, green: 0.35, blue: 0.65),
+            Color(red: 1.00, green: 0.58, blue: 0.25)
+        ]
+        }
     }
 }

@@ -173,8 +173,17 @@ needs no `project.pbxproj` edit.
   exactly **why the halo must be chromatic rather than near-white**: only a colour
   with real distance from a white sky *and* from a near-black desktop can be drawn
   outside the rim at all. That causal link is the load-bearing sentence here.
-  **Since 2026-09-01 the core is white and the halo is the blue**, which is the
-  comet's natural order and the reverse of what six passes did. The Δ10 near-white
+  **Since 2026-09-01 the core is white and the halo is a hue ramp** — `Style.beamHue(at:)`
+  through `BeamPalette.current.hues`, head first, evaluated per slice so it follows
+  arc length. This is *not* the conic gradient ADR 0003 bans (that races the long
+  edges) and not a gradient in a stroke (that does not follow a path): the slices
+  were always the way to do it. The beam's colours live in `BeamPalette`, not in
+  `Palette`, because they are the same in both appearances. `beamPalette`
+  (`UserDefaults`, `aurora` | `intelligence`) switches live while the choice is
+  open. No near-white stop at the head of the ramp: the core is the white, and a
+  white halo over a white desktop is the Δ10 failure again (measured Δ36 with one).
+  The white core on a coloured halo is the comet's natural order and the reverse
+  of what six passes did. The Δ10 near-white
   failure was a white core *alone* on the desktop; a white core on a blue glow is
   not alone, and `theCoreIsWhiteHot` plus `theBeamReadsAgainstAWhiteDesktop` are
   the pair that keep both halves honest. Do not fix a weak ground by making the
