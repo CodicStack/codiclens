@@ -170,9 +170,21 @@ needs no `project.pbxproj` edit.
   "dark ground"** — the appearance sets the Card's tint and has nothing to do with
   the wallpaper — and **a measurement against a synthetic swatch is not a measurement
   against the real composite**. Both of those still hold, and together they are
-  exactly **why the light must be chromatic rather than near-white**: only a colour
+  exactly **why the halo must be chromatic rather than near-white**: only a colour
   with real distance from a white sky *and* from a near-black desktop can be drawn
   outside the rim at all. That causal link is the load-bearing sentence here.
+  **Since 2026-09-01 the core is white and the halo is the blue**, which is the
+  comet's natural order and the reverse of what six passes did. The Δ10 near-white
+  failure was a white core *alone* on the desktop; a white core on a blue glow is
+  not alone, and `theCoreIsWhiteHot` plus `theBeamReadsAgainstAWhiteDesktop` are
+  the pair that keep both halves honest. Do not fix a weak ground by making the
+  core blue again — turn the *halo* up.
+  **The halo also spills a few points onto the Card's glass** — `BeamLayer.spill`,
+  under `BorderBeam.inward`, a `Style.beamSpillWidth` band inside the rim. This is
+  not pass five returning: pass five put the *whole* halo inward and over the
+  content; the spill is a 6pt band and `Style.padding` is 12.
+  **`beamLoop`** — a `UserDefaults` key, no UI — makes every Card sweep on a fixed
+  period so the beam can be judged live. It ships inert.
   The fifth pass answered the Δ10 by masking everything **inward**, onto the Card's
   own glass. That fixed the number and was rejected on sight — the halo over the
   Card's content "looks ass" — with the glow wanted outside, bigger, blue, and the

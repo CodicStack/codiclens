@@ -289,7 +289,7 @@ enum Style {
     /// the *line*'s contrast no longer comes out of the halo's budget, and the
     /// colour is chromatic in both appearances instead of a near-white that only
     /// read on a dark ground.
-    static let beamGlowHeadBlur: CGFloat = 14
+    static let beamGlowHeadBlur: CGFloat = 16
 
     /// The glow's blur radius at the very end of the tail.
     ///
@@ -308,7 +308,7 @@ enum Style {
     /// Raise this and re-measure the reach against the gutter rather than assuming
     /// it scales with the radius: the reach is where alpha falls under 8, and the
     /// glow's opacity ramp moves it as much as the blur does.
-    static let beamGlowTailBlur: CGFloat = 24
+    static let beamGlowTailBlur: CGFloat = 28
 
     /// The exponent that turns the glow from a **tube** into a **coma**.
     ///
@@ -344,6 +344,16 @@ enum Style {
     /// |---|---|---|---|---|
     /// | at 2.4 | 1.00 | 0.50 | 0.19 | 0.036 |
     /// | at 1.25 | 1.00 | 0.70 | 0.42 | 0.177 |
+    /// | at 1.5 | 1.00 | 0.65 | 0.35 | 0.125 |
+    ///
+    /// **1.5 since 2026-09-01, and it moved with `beamTailFraction`, not on its own.**
+    /// The lit segment went 0.35 → 0.50 of the perimeter (303pt → 433pt), so the
+    /// same exponent put the 280pt-behind sample at position 0.35 instead of 0.08,
+    /// and `theGlowPeaksAtTheHeadAndDiesAtTheTail` read head 139 against furthest 35:
+    /// 3.97×, a hair under its 4× floor, which is the tube beginning. A longer tail
+    /// has to fall faster per point to stay a comet; 1.5 is the smallest step that
+    /// clears the floor with margin. The exponent and the fraction are one dial
+    /// with two ends — change one, re-check the other.
     ///
     /// At 2.4 more than half the stroked segment was effectively unlit and the
     /// visible comet was about 150pt of the 303 that is stroked; at 1.25 it is about
@@ -372,7 +382,7 @@ enum Style {
     /// `beamCoreTailBlur`. Measured at the trailing terminus, alpha 1pt out only
     /// moved 22 → 14 when `beamTail`'s own alpha came down 0.70 → 0.42. This
     /// exponent sets the *body* of the tail; `beamTail`'s alpha sets its end.
-    static let beamGlowRamp: Double = 1.25
+    static let beamGlowRamp: Double = 1.5
 
     /// The glow's opacity multiplier for a slice at `position`.
     ///
@@ -441,13 +451,13 @@ enum Style {
     /// Half of it is thrown away by the outward mask, which is correct — the light is
     /// on the Card's edge, blooming away from it — and it is why the alpha is higher
     /// than an ellipse drawn whole would need.
-    static let beamBloomLength: CGFloat = 168
+    static let beamBloomLength: CGFloat = 200
 
     /// The bloom's extent **across** the rim: the axis the gutter bounds.
     ///
     /// See `beamBloomLength`. This is the one of the two that has a hard constraint
     /// on it, and it is why the elongation was bought along the rim instead.
-    static let beamBloomThickness: CGFloat = 96
+    static let beamBloomThickness: CGFloat = 108
 
     /// How far past the layer's own bounds the outward mask reaches.
     ///
@@ -487,6 +497,22 @@ enum Style {
     /// what the accessibility answer has always said it should be.
     static var beamDrawsGlow: Bool { !Motion.isTransparencyReduced }
 
+    /// The **spill**: how far the halo is allowed *inside* the rim, in points.
+    ///
+    /// Light hitting the edge of a sheet of glass bleeds a little way into it,
+    /// and a halo that stops dead at the rim reads as a thing *behind* the Card
+    /// rather than as light *on* it. Pass five put the whole halo inward and it
+    /// washed over the Card's content; this is a band, not a fill. `Style.padding`
+    /// is 12, so a 6pt band never reaches anything the Card draws, and
+    /// `BorderBeamRenderTests.nothingIsLitDeepInsideTheRim` keeps it there. It is
+    /// part of the halo: gone with it under Reduce Transparency.
+    static let beamSpillWidth: CGFloat = 6
+
+    /// The spill's blur. Small on purpose — the band's own falloff is the
+    /// `beamSpill` alpha, and a blur wider than the band pushes light past
+    /// `beamSpillWidth` into the Card, which the render test forbids.
+    static let beamSpillBlur: CGFloat = 3
+
     /// The lit segment's length, as a fraction of the Card's perimeter.
     ///
     /// A fraction rather than a length, and it stays one now that the beam runs
@@ -499,7 +525,7 @@ enum Style {
     /// In points, on the one size a Card is: the 236 × 216 surface's rim is about
     /// **866pt** after the corners are rounded off, so the comet is about
     /// **303pt** long and each of the `beamSegments` slices about **15pt**.
-    static let beamTailFraction: CGFloat = 0.35
+    static let beamTailFraction: CGFloat = 0.50
 
     /// How many sub-strokes build each layer of the tail.
     ///
@@ -714,6 +740,20 @@ private struct Palette {
     /// The Border Beam **core**'s bright leading edge, and the colour it fades
     /// out through.
     ///
+    /// **White-hot, since 2026-09-01, and the halo is what makes that allowed.**
+    /// A comet is a white core inside a chromatic halo; a blue line on a blue halo
+    /// has no internal contrast and read as a smear. The near-white core that
+    /// failed in pass five (Δ10/442, below) failed because it was *alone* on the
+    /// desktop. It is not alone now: the glow and the bloom underneath it are the
+    /// blue, they carry the beam's visibility against any ground, and the core
+    /// only has to be brighter than them. `theCoreIsWhiteHot` bounds it.
+    /// `theBeamReadsAgainstAWhiteDesktop` is still the test that decides whether
+    /// this is true — if it ever fails, the fallback agreed is a blue-white
+    /// (0.85, 0.92, 1.0) core in light appearance, not a return to blue in both.
+    ///
+    /// What follows is the record of the light-blue core it replaces, kept because
+    /// every number in it is still the reason the *halo* is chromatic.
+    ///
     /// **One light blue, the same in both appearances, and the reason it is
     /// chromatic is the most important sentence in this file.** The core straddles
     /// the rim — see `Style.beamWidth` — so its outer half composites against the
@@ -783,6 +823,12 @@ private struct Palette {
     /// glow is a wider band and wants less saturation and less weight per pixel
     /// than the line at its centre.
     ///
+    /// **Since 2026-09-01 the halo carries the colour and the visibility, and the
+    /// core carries neither** — see `beamHead`. That is why both alphas went back
+    /// *up* (0.70 → 0.80, 0.30 → 0.40) after coming down twice: the "too dense"
+    /// they came down for was a blue halo under a blue core, which is blue twice.
+    /// Under a white core the same halo is the comet's colour once.
+    ///
     /// **Both alphas came down twice, because "too dense" was said twice**, and they
     /// have not gone back up. 0.80 → 0.55, then 0.72 → 0.46, and they are
     /// **0.52 → 0.18** now, in both appearances. The tail's is the one that moved
@@ -832,6 +878,12 @@ private struct Palette {
     /// rim's alpha against the alpha 4pt out, which must stay above about 1.3.
     let beamBloom: Color
 
+    /// The **spill**: the halo's colour where it bleeds onto the Card's own glass,
+    /// inside the rim. The glow's head colour at a lower alpha, because it lands on
+    /// a surface the app owns and needs far less to read there than the glow
+    /// needs against the desktop. See `Style.beamSpillWidth`.
+    let beamSpill: Color
+
     // MARK: Derived surface tints
 
     /// Slab, focused Card and unfocused Card all share this. The Slab is not a
@@ -871,11 +923,12 @@ private struct Palette {
         // hoisted out of `Palette` because a colour belongs to a palette here, and a
         // future pass that has to split them again should not have to move them
         // back in first.
-        beamHead: Color(red: 0.50, green: 0.68, blue: 1.0).opacity(1.0),
-        beamTail: Color(red: 0.68, green: 0.82, blue: 1.0).opacity(0.58),
-        beamGlowHead: Color(red: 0.62, green: 0.78, blue: 1.0).opacity(0.70),
-        beamGlowTail: Color(red: 0.74, green: 0.86, blue: 1.0).opacity(0.30),
-        beamBloom: Color(red: 0.66, green: 0.81, blue: 1.0).opacity(0.64)
+        beamHead: Color(red: 1.0, green: 1.0, blue: 1.0).opacity(1.0),
+        beamTail: Color(red: 0.90, green: 0.95, blue: 1.0).opacity(0.55),
+        beamGlowHead: Color(red: 0.55, green: 0.74, blue: 1.0).opacity(0.80),
+        beamGlowTail: Color(red: 0.70, green: 0.84, blue: 1.0).opacity(0.40),
+        beamBloom: Color(red: 0.60, green: 0.78, blue: 1.0).opacity(0.72),
+        beamSpill: Color(red: 0.55, green: 0.74, blue: 1.0).opacity(0.28)
     )
 
     static let light = Palette(
@@ -903,11 +956,12 @@ private struct Palette {
         // lighter than any highlight) belonged to the inward mask and is deleted with
         // it. Outside the rim there is no such ceiling, and a light blue is far from
         // a light desktop as well as a dark one.
-        beamHead: Color(red: 0.50, green: 0.68, blue: 1.0).opacity(1.0),
-        beamTail: Color(red: 0.68, green: 0.82, blue: 1.0).opacity(0.58),
-        beamGlowHead: Color(red: 0.62, green: 0.78, blue: 1.0).opacity(0.70),
-        beamGlowTail: Color(red: 0.74, green: 0.86, blue: 1.0).opacity(0.30),
-        beamBloom: Color(red: 0.66, green: 0.81, blue: 1.0).opacity(0.64)
+        beamHead: Color(red: 1.0, green: 1.0, blue: 1.0).opacity(1.0),
+        beamTail: Color(red: 0.90, green: 0.95, blue: 1.0).opacity(0.55),
+        beamGlowHead: Color(red: 0.55, green: 0.74, blue: 1.0).opacity(0.80),
+        beamGlowTail: Color(red: 0.70, green: 0.84, blue: 1.0).opacity(0.40),
+        beamBloom: Color(red: 0.60, green: 0.78, blue: 1.0).opacity(0.72),
+        beamSpill: Color(red: 0.55, green: 0.74, blue: 1.0).opacity(0.28)
     )
 
     static func of(_ scheme: ColorScheme) -> Palette {
@@ -1065,6 +1119,9 @@ enum BeamLayer {
     /// blurred at the head rather than unblurred — see `Style.beamCoreHeadBlur`,
     /// where 0 was the visible hard end three times over.
     case core
+    /// The halo's inward bleed onto the Card's glass. Masked to a
+    /// `Style.beamSpillWidth` band inside the rim by `BorderBeam.inward`.
+    case spill
 }
 
 /// One slice of one layer of the comet: a Card's own rim shape, trimmed to
@@ -1111,6 +1168,10 @@ struct BeamSlice: View {
         case .glow: palette.beamGlowTail.mix(with: palette.beamGlowHead, by: position)
             .opacity(Style.beamGlowIntensity(at: position))
         case .core: palette.beamTail.mix(with: palette.beamHead, by: position)
+        // The same ramp as the glow: the spill is the glow's inner edge, and it
+        // has to die behind the head at the same rate or it reads as a second,
+        // stationary rim inside the first.
+        case .spill: palette.beamSpill.opacity(Style.beamGlowIntensity(at: position))
         }
         let width = switch layer {
         // The glow's is doubled because the glow is masked outward and a `.stroke`
@@ -1118,10 +1179,14 @@ struct BeamSlice: View {
         // and straddles the rim. See `Style.beamWidth`.
         case .glow: Style.beamGlowStrokeWidth
         case .core: Style.beamWidth
+        // Doubled for the same reason as the glow's, mirrored: a stroke is
+        // centred on the path and the mask keeps the inner half.
+        case .spill: Style.beamSpillWidth * 2
         }
         let blur = switch layer {
         case .glow: Style.beamGlowBlur(at: position)
         case .core: Style.beamCoreBlur(at: position)
+        case .spill: Style.beamSpillBlur
         }
         return Style.cardShape
             .trim(from: from, to: to)
