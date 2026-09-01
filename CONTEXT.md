@@ -107,12 +107,14 @@ is the mistake this entry exists to prevent. OCR Text sweeps the Subject Card
 because the *Subject changed*, not because OCR finished. It never marks a
 selection moving — that stays instant. All three Cards have one; the Slab does
 not. Shares a drawing primitive with the Loading Ring and nothing else.
-The halo is **outside** the rim and the crisp line **straddles** it — half on the
-Card's own glass, half outside. The half on the glass is why the line cannot
-disappear, and the reason that matters is worth carrying: for four passes the *whole*
-beam was masked outside the rim, which is the gutter and then the Panel's transparent
-margin — the user's **desktop** — so it never composited against anything the app
-draws and whether it could be seen was decided by somebody's wallpaper. A near-white
+The halo is **inside** the rim — light on the Card's own glass, swelling and
+thinning along its length like a liquid, with only a thin feather outside — and the
+crisp line **straddles** the rim. Until 2026-09-01 the halo was *outside*, and on
+screen a blurred coloured band outside a surface read as exactly what it is: a drop
+shadow in colour. Before that, for four passes the *whole* beam was masked outside
+the rim, which is the gutter and then the Panel's transparent margin — the user's
+**desktop** — so it never composited against anything the app draws and whether it
+could be seen was decided by somebody's wallpaper. A near-white
 beam in dark appearance over a white desktop measured Δ10/442: nothing. **"Dark
 appearance" does not mean "dark ground".** That is why the *halo* is chromatic, and
 since 2026-09-01 it is a **ramp of several saturated hues along the comet's length**

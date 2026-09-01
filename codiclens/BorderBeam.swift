@@ -218,17 +218,20 @@ struct BorderBeam: ViewModifier, Animatable {
                     // exactly what a fully outward core did for four passes. See
                     // `outward` and `Style.beamWidth`.
                     if Style.beamDrawsGlow {
+                        // **The halo is inside the glass.** Glow and bloom under
+                        // `inward`, a `Style.beamGlowWidth` band inside the rim:
+                        // light on the surface, not a coloured shadow cast onto
+                        // the desktop — which is what the outward halo read as
+                        // on screen. See `Style.beamGlowWidth`.
                         ZStack {
                             layer(.glow)
                             bloom
                         }
-                        .mask { Self.outward }
-                        // The spill: the halo bleeding a few points onto the
-                        // Card's own glass. Its own mask, a band just inside the
-                        // rim — see `inward` and `Style.beamSpillWidth`. Part of
-                        // the halo, so it goes with it under Reduce Transparency.
-                        layer(.spill)
-                            .mask { Self.inward }
+                        .mask { Self.inward }
+                        // A thin feather outside, so the lit rim is not cut off
+                        // flat. Both go together under Reduce Transparency.
+                        layer(.feather)
+                            .mask { Self.outward }
                     }
                     layer(.core)
                 }
@@ -244,7 +247,8 @@ struct BorderBeam: ViewModifier, Animatable {
             ForEach(slices) { slice in
                 BeamSlice(
                     from: slice.from, to: slice.to,
-                    position: slice.position, layer: which
+                    position: slice.position, layer: which,
+                    travel: phase
                 )
             }
         }
@@ -354,18 +358,22 @@ struct BorderBeam: ViewModifier, Animatable {
 
     // MARK: - Inward, a band
 
-    /// The region the spill may light: inside the rim, and no deeper than
-    /// `Style.beamSpillWidth`. The Card's shape with a smaller copy of itself
-    /// punched out of the middle. Nothing about it depends on the layout size
-    /// beyond the shape, so unlike `outward` it needs no outset.
+    /// The region the glow and the bloom may light: a `Style.beamGlowWidth` band
+    /// inside the rim, with a **soft inner edge**.
+    ///
+    /// A `strokeBorder` rather than the Card's shape with a smaller copy punched out
+    /// of it: the punch-out (`.blendMode(.destinationOut)` inside a
+    /// `.compositingGroup()`) left a faint rectangle at the mask's inner edge on
+    /// every ground, and its edge was hard, so a glow swelling to the band's limit
+    /// was cut flat against it. A stroke *is* the band, with nothing to punch. The
+    /// blur feathers the inner edge so the glow dies into the glass rather than
+    /// stopping at a line; it bleeds a few points outside the rim as well, into
+    /// the feather, which is what a lit edge should do. `Style.beamGlowWidth` is
+    /// the band's width and `nothingIsLitDeepInsideTheRim` holds the bleed.
     private static var inward: some View {
         Style.cardShape
-            .overlay {
-                Style.cardShape
-                    .inset(by: Style.beamSpillWidth)
-                    .blendMode(.destinationOut)
-            }
-            .compositingGroup()
+            .strokeBorder(.black, lineWidth: Style.beamGlowWidth)
+            .blur(radius: Style.beamGlowEdgeBlur)
     }
 
     // MARK: - Outward, except the core
