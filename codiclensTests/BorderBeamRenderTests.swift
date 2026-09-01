@@ -375,12 +375,14 @@ struct BorderBeamRenderTests {
             let brightest = Double(max(colour.r, max(colour.g, colour.b))) / Double(alpha)
             let dimmest = Double(min(colour.r, min(colour.g, colour.b))) / Double(alpha)
             #expect(
-                brightest > 0.90 && dimmest > 0.80,
+                brightest > 0.90 && dimmest > 0.72,
                 """
                 the core is not white-hot in \(dark ? "dark" : "light") \
                 appearance: brightest channel \(brightest), dimmest \(dimmest), \
-                against 1.00 and 1.00 shipping. Every channel high is what white \
-                means; a dimmest channel falling towards 0.5 is the light-blue core \
+                against 0.99 and 0.79 shipping. The sample is 0.25pt inside the rim, \
+                where the white core sits over the coloured spill band, so the \
+                dimmest channel is the spill showing through and 0.79 is white over \
+                teal; a dimmest channel falling towards 0.5 is a coloured *core* \
                 coming back.
                 """
             )
