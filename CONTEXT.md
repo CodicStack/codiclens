@@ -41,8 +41,12 @@ A glass surface inside the Panel. There is one — the Results Slab, below the C
 _Avoid_: panel, pane, tray, sheet
 
 **Card**:
-One tile representing one Phase. Cards float directly over the desktop in a row at the top of the Panel — there is deliberately no Slab behind them. The focused Card is brighter and more defined at the edge; no surface in the app carries an accent colour. The ban is on a *static* accent — an accent fill across a Card turned the Panel into a coloured box and a tinted selection fought every app icon beside it. A transient highlight that is gone in a quarter of a second is not one; see Border Beam.
+One tile representing one Phase. Cards float directly over the desktop in a row at the top of the Panel — there is deliberately no Slab behind them. Every Card carries a Lamp; the focused Card's is turned up and its edge is more defined. No surface in the app carries an accent colour. The ban is on a *static accent colour* — an accent fill across a Card turned the Panel into a coloured box and a tinted selection fought every app icon beside it. A static monochrome light is not an accent (see Lamp), and a transient highlight that is gone in half a second is not one either (see Border Beam).
 _Avoid_: tile, pane, box
+
+**Lamp**:
+The static light a Card's glass is lit by: brightest along the top of its rim, gone partway down, monochrome, and the same whether or not anything is happening. Every Card has one; the focused Card's is turned up, an unfocused Card's is turned down and never off. It is a property of the surface, not a signal about state, and it is not the Border Beam — the Lamp never moves. Declined on 2026-08-22 while the Border Beam was expected to carry the surface's look alone; reopened on 2026-09-01 when it could not. The Slab has no Lamp.
+_Avoid_: rim light, glow, specular (that is the wash on the glass body, not the rim), border, focus ring
 
 **Result**:
 One selectable row or grid cell in the Results Slab.
@@ -118,10 +122,11 @@ Card's content; that was rejected.
 The nucleus is an ellipse elongated **along** the rim, not a circle — a circle
 centred on a line reads as a dot on it. The reference material's blue belongs to its
 Card's *fill* rather than to its rim light, and reading it the other way made this a
-saturated blue twice; a permanently lit rim would be the **fixed lamp**, a different
-thing, and has been declined.
+saturated blue twice. A permanently lit rim is the **Lamp**, a different thing
+with its own entry: the Lamp is what the Card *is*, the Border Beam is what
+happens to it once.
 _Avoid_: glow, edge blur, border glow, loading animation, spinner, focus ring,
-blue beam, accent
+blue beam, accent, lamp
 
 **Loading Ring**:
 The app's own spinner: a constant-length arc, rotating, beside the text in each

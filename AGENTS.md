@@ -48,6 +48,17 @@ needs no `project.pbxproj` edit.
 
 - **`Style.swift` owns every radius, material, tint and rim.** No view outside it holds
   one, and no view outside it branches on `colorScheme`.
+- **A Card is native Liquid Glass plus three static, monochrome overlays, and the
+  Lamp is one of them.** `CardSurface` layers a specular wash (top, behind the
+  glass), an inner shadow (bottom, behind the glass) and the **Lamp** — a second
+  hairline on the rim, full at the top edge, gone by `Style.lampReach` — over
+  `.glassEffect`. Focus is the Lamp's weight plus the base rim's weight; the
+  focused Card's brighter *fill* (`Palette.highlight`) is deleted, do not bring it
+  back as a second focus signal. The Lamp was declined on 2026-08-22 and
+  reopened on 2026-09-01: the decline assumed the Border Beam could carry the
+  reference's look alone, and six passes showed it could not. ADR 0002 bans a
+  hand-rolled *blur*, not light on top of the native material. The Slab gets none
+  of the three — it is the tray, the Cards are the objects.
 - **`Motion.swift` owns every curve, in two categories.** A **Transition** carries
   a change the user caused, and there are exactly three — `entrance`, `resize`,
   `snappy` — used only by the Panel appearing, the Panel dismissing and a surface
