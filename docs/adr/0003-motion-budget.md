@@ -977,6 +977,96 @@ It is six times the Δ10 that was invisible, and the levers if it ever needs clo
 are the two that stay closed: saturation is the withdrawn blue, and a static lit rim
 is the fixed lamp.
 
+##### The smoke comet — the step that made the plume a plume (2026-09-02)
+
+The liquid halo was rejected against the reference with two sentences: "think about
+it as a smoke simulation", and "the beam that runs on the edge should not be too
+thick". Both are about the *tail*, and the liquid wave could not answer either. One
+sinusoid on a stroke's width is a band that breathes; it has the same reach behind
+the head as under it and the same density everywhere the ramp allows, so it read as
+a thick tube with a pulse, and thinning it only made a thinner tube.
+
+Smoke is a model, not a look: light emitted at the head that **ages** as it trails.
+Three things happen to it and each is one dial in `Style` — it **expands**
+(`beamSmokeExpansion`, the glow three times as wide at the tail as under the head),
+it **diffuses** (`beamGlowHeadBlur` 3.5 → `beamGlowTailBlur` 8) and it
+**dissipates** (`beamGlowRamp` 1.5). And it is **turbulent**:
+`beamSmokeTurbulence(at:travel:)` is three incommensurate sinusoids in the slice's
+position and the sweep's travel, which is the cheapest thing that has no visible
+period, and it modulates the glow's width (`beamSmokeWisp`) and density
+(`beamSmokeDensity`), both scaled by age so the head stays compact and the tail does
+the billowing. The travel term moves the wisps as the light goes round. It is a pure
+function of `(position, travel)` — no state, no clock, no randomness — so every frame
+is reproducible and the render tests still measure something.
+
+**The nose is the part that was not in the ask and answers the oldest complaint.**
+Smoke has no density at its source; it thickens just behind it. `beamNose(at:)` is
+a smoothstep over the leading `beamNoseFraction` (0.08, about 35pt) of the comet,
+from 0 at the head point to 1 behind it, on the glow and the feather in full and on
+the core at half. Without it the glow's leading slice is a butt-capped stroke at
+full alpha, and every earlier attempt to hide that end — a bigger bloom, a blurred
+core, a longer ellipse — was a way of covering a bar's front. With it the front is
+a taper and the brightest point sits behind the head, which is what a comet looks
+like and what the reference's rim light does. Every render test that wants the light
+now samples the **peak** rather than the head point (`peakOnTheRightEdge`); the
+hard-edge test still samples the front, because the front is what it is about.
+
+**Thin, everywhere, and the mask stopped being the shape.** Core 2 → 1.5pt. Glow
+body 8 → 4pt at the head. Feather 6 → 4pt. Bloom 160 × 40 → 100 × 16 at lower alpha.
+Segments 20 → 28 so the wisps have resolution. And `beamGlowWidth` went 12 → **16**,
+which reads as the opposite direction and is not: while the band was 9pt the plume's
+own billows were cut flat against the mask's inner edge, so the visible inner edge
+was the mask's and every wisp was invisible. The band is now wider than the plume
+can reach and only the plume's own edge is ever seen; `nothingIsLitDeepInsideTheRim`
+follows it and the content is still 12pt of `Style.padding` away from the deepest
+faint smoke.
+
+**What the tests said.** `theSmokeExpandsBehindTheHead` is the repaint's own
+claim, stated as half-max width so the wisps' density cannot decide it: 4pt under
+the peak against about 8pt on the top edge. `theHeadHasAHaloAndACrispCore` now
+claims a *compact* source — bright at 2 and 4pt in, monotone to 10pt, under 20 at the
+band's edge — where it used to claim the band was full.
+`theBeamReadsAgainstAWhiteDesktop` measured **47 and 51** against 83 and 86 with
+the liquid halo, and the floor came down 50 → **40**: a 1.5pt core and a 4pt head
+are half the light on purpose, the failure it guards is 17, and the number moved
+with none of the chroma or alpha nudges tried — it is the core's white over the
+glass, not the glow, at the peak pixel. Everything else passed unchanged, including
+the drain-out and both termini.
+
+**And then, the same day: nothing inside the Card.** "The beam is still inside of
+the card. That I do not want at all … it should at max hit the edge." So the smoke
+is outside the rim, all of it: glow and bloom under `outward`, cut hard at the rim;
+the core under `outward(inset: hairline)`, lighting the Card's own 1pt rim and cut
+there, with `beamWidth` bounded at 2 × `hairline` so none of it is wasted. The
+inward band and the feather layer are deleted — the feather was the outside part,
+and now everything is. `nothingIsLitDeepInsideTheRim` became
+`nothingIsLitInsideTheRim`: under 20 past 1.5pt in, zero past 3pt, at five phases.
+Every light-sampling test flipped to read outward; `beamGlowRamp` went 1.5 → 1.6
+because the tail reads wider outside and sat exactly on the 4× floor. This is the
+third time the halo has been outside and the first time by instruction rather than
+by argument; what made the first two read as a drop shadow was a wide soft band
+whose brightest point sat off the edge, and this one is 4pt at the head, hard
+against the rim, and only wide where it is faint. Composited over a white desktop it
+measures well over the 40 floor in both appearances, because the smoke is chromatic
+and the ground outside the rim contributes nothing.
+
+**And then, the same day again: the reference, literally.** The outward smoke lasted
+one look — "what is this tail thing? it looks ass … the reference image is what it
+should look like" — with a screenshot of a green wisp floating off the Card's corner,
+detached from the line. That is the failure every paragraph above was circling: a
+halo with any shape of its own, however it is masked, is a thing next to the line
+rather than light from it. So the beam is now what Tuna's is and nothing more. A white
+hairline on the rim that fades along the edge. A 3pt soft white glow hugging it
+outside, with the *same* fade and the same nose, so there is no point along the comet
+where the glow is doing something the line is not. No nucleus, no hue, no plume:
+`BeamBloom`, `head(in:at:)`, the smoke dials and the aurora ramp are deleted, not
+parked. The one asymmetry left is `Palette.beamLight`, near-white in dark appearance
+and faintly cool in light, because a white glow outside the rim over a white desktop
+is the Δ10 nothing and light appearance's Card lives on white desktops. The floors
+moved with the light: 3,910 lit pixels (floor 2,500), Δ32/24 over a white desktop
+(floor 20 — the rim lighting from `cardRim` to white is what carries it there, and a
+band Δ does not see that well), `beamGlowRamp` 1.5 for the 4× falloff.
+
 ### What is not in this budget
 
 A **Glow** — a soft bloom outward from an edge — was considered alongside the beam

@@ -12,6 +12,14 @@
 		<data>
 		1S8uJGMGcrV+hvGrhSDzU9RwrGo=
 		</data>
+		<key>Resources/emoji-data-license.txt</key>
+		<data>
+		5oIGIMspTE7NWB0yNLU9PmyZYSM=
+		</data>
+		<key>Resources/emoji-index.json</key>
+		<data>
+		iTSCrzzDR1hZ7s8cNM4/5jukzRc=
+		</data>
 	</dict>
 	<key>files2</key>
 	<dict>
@@ -27,6 +35,20 @@
 			<key>hash2</key>
 			<data>
 			bOVFl0MMxwuu0WhGW//Z6XAVi/4QXSrIqKEn9lL6eFM=
+			</data>
+		</dict>
+		<key>Resources/emoji-data-license.txt</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			8li6s1TRsrJsSXMd/ojRJDkusjodc/4CJLqX8O6WALs=
+			</data>
+		</dict>
+		<key>Resources/emoji-index.json</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			O8jhHpvbxMeq4VAeE3Ivo1N1vOjMByMwfK0FcrO+Sks=
 			</data>
 		</dict>
 	</dict>

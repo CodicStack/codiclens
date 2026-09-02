@@ -107,9 +107,16 @@ is the mistake this entry exists to prevent. OCR Text sweeps the Subject Card
 because the *Subject changed*, not because OCR finished. It never marks a
 selection moving — that stays instant. All three Cards have one; the Slab does
 not. Shares a drawing primitive with the Loading Ring and nothing else.
-The halo is **inside** the rim — light on the Card's own glass, swelling and
-thinning along its length like a liquid, with only a thin feather outside — and the
-crisp line **straddles** the rim. Until 2026-09-01 the halo was *outside*, and on
+**Nothing goes inside the Card — ever.** Since 2026-09-02, by instruction ("the
+beam should never go inside of the card, it should at max hit the edge"), the whole
+halo is outside the rim, cut hard at it, and the crisp line lights the Card's own
+hairline rim and nothing behind it. For one day before that the halo was light on
+the glass inside the rim; that is gone. **And it is the reference, literally
+(2026-09-02, third instruction):** a white hairline on the rim that fades along the
+edge, a 3pt soft white glow hugging it outside with the same fade, and a soft front.
+No nucleus, no hue, no plume — the smoke that stood in for a few hours read as a
+coloured tail detached from the line, and the aurora ramp went with it. Light
+appearance's glow is faintly cool so it still reads over a white desktop. Until 2026-09-01 the halo was *outside*, and on
 screen a blurred coloured band outside a surface read as exactly what it is: a drop
 shadow in colour. Before that, for four passes the *whole* beam was masked outside
 the rim, which is the gutter and then the Panel's transparent margin — the user's

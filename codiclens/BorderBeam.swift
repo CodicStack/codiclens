@@ -52,6 +52,35 @@ import UniformTypeIdentifiers
 /// whatever the wallpaper is. `outward` carries the full finding and
 /// `Style.beamWidth` carries the straddle.
 ///
+/// **The halo is smoke, and that is the seventh correction (2026-09-02).** The
+/// glow was a band that breathed — one sinusoid on its width — and against the
+/// reference it read as too thick and too even: "think about it as a smoke
+/// simulation … the beam that runs on the edge should not be too thick". Smoke is
+/// light that has aged since it left the head: it expands, diffuses and dissipates
+/// along the tail, and it is turbulent, so the plume billows and the wisps drift
+/// as the sweep goes round. All of that is `Style.beamSmoke…`, evaluated per slice
+/// from `(position, travel)` and nothing else; nothing in this file changed for it
+/// except the words. The one shape change that did land here is the **nose**: the
+/// glow has no density at the head point and builds up behind it
+/// (`Style.beamNose(at:)`), so the front is a taper and the brightest point trails
+/// the head. `bloom` still sits on the head point; it is what is ahead of the peak.
+///
+/// **And then it is the reference, literally — the ninth correction, the same day.**
+/// The smoke (a plume that expanded, drifted and dissipated behind the head) read
+/// as "a tail thing … looks ass": a coloured wisp floating off the corner, detached
+/// from the line. So there is no bloom, no nucleus, no hue and no turbulence any
+/// more: a white hairline on the rim that fades along the edge, a 3pt soft glow
+/// hugging it outside with the *same* fade, and the nose at the front. Two layers,
+/// one fade, all of it outside the Card. `BeamBloom` and `head(in:at:)` are gone.
+///
+/// **The smoke was outside the rim, all of it — the eighth correction, the same
+/// day.** "The beam should never go inside of the card, it should at max hit the
+/// edge." The glow and the bloom are under `outward`, cut hard at the rim; the core
+/// lights the Card's own hairline and no more (`Style.beamWidth` ≤ 2 × `hairline`).
+/// The inward band is deleted. The drop-shadow finding that put the halo inside on
+/// 2026-09-01 was about a *wide soft* outward band; this one is 4pt at the head and
+/// only wide where it is faint.
+///
 /// **It means nothing.** It belongs to a Card *as a surface*: it fires when that
 /// Card becomes about something new and that is the whole of it. It is not tied
 /// to OCR, to `isOCRInFlight`, to searching, or to any other in-flight or
@@ -209,31 +238,25 @@ struct BorderBeam: ViewModifier, Animatable {
                     // Transparency's answer, and it covers the bloom as well:
                     // the halo goes whole, the crisp sweep stays.
                     //
-                    // **The halo is masked and the core is not, and that split is
-                    // this modifier's central decision.** The glow and the bloom
-                    // are cut to the region *outside* the rim, so nothing washes
-                    // over the Card's icon, name and chips. The core straddles the
-                    // rim — half on the Card's own glass, half outside — so its
-                    // visibility can never be staked on a wallpaper, which is
-                    // exactly what a fully outward core did for four passes. See
-                    // `outward` and `Style.beamWidth`.
+                    // **Nothing inside the rim. Ever.** Since 2026-09-02 (second
+                    // ask of the day): "the beam should never go inside of the
+                    // card, it should at max hit the edge". So the glow and the
+                    // bloom are cut to the region *outside* `Style.cardShape` by
+                    // `outward`, hard at the rim — smoke leaves the edge and goes
+                    // away from the Card — and the core is the one thing that
+                    // touches the edge: `Style.beamWidth` is narrow enough that
+                    // its inner half lies inside the Card's own hairline rim, so
+                    // it lights the border and reaches nothing behind it.
+                    // `nothingIsLitInsideTheRim` is that as a number.
                     if Style.beamDrawsGlow {
-                        // **The halo is inside the glass.** Glow and bloom under
-                        // `inward`, a `Style.beamGlowWidth` band inside the rim:
-                        // light on the surface, not a coloured shadow cast onto
-                        // the desktop — which is what the outward halo read as
-                        // on screen. See `Style.beamGlowWidth`.
-                        ZStack {
-                            layer(.glow)
-                            bloom
-                        }
-                        .mask { Self.inward }
-                        // A thin feather outside, so the lit rim is not cut off
-                        // flat. Both go together under Reduce Transparency.
-                        layer(.feather)
+                        layer(.glow)
                             .mask { Self.outward }
                     }
+                    // The core may light the Card's own hairline and nothing behind
+                    // it: cut at `hairline` inside the rim, so its blur cannot creep
+                    // onto the glass however soft the tail gets.
                     layer(.core)
+                        .mask { Self.outward(inset: Style.hairline) }
                 }
                 // The beam is light on the rim, not a hit target. The Card row's
                 // own frame is what `hitRegions.cards` reports.
@@ -247,139 +270,24 @@ struct BorderBeam: ViewModifier, Animatable {
             ForEach(slices) { slice in
                 BeamSlice(
                     from: slice.from, to: slice.to,
-                    position: slice.position, layer: which,
-                    travel: phase
+                    position: slice.position, layer: which
                 )
             }
         }
     }
 
-    // MARK: - The nucleus
-
-    /// The bloom, placed on the rim wherever the head currently is and turned to
-    /// face along it.
-    ///
-    /// **Part of the glow, not a third layer.** It is drawn inside the same
-    /// `Style.beamDrawsGlow` gate and under the same `outward` mask, so Reduce
-    /// Transparency takes the bloom away with the halo and leaves the crisp core
-    /// sweeping — which is what that switch has always meant here.
-    ///
-    /// **The rotation is the difference between a streak and a dot**, and it is why
-    /// `head(in:at:)` returns an angle as well as a point. `BeamBloom` is an ellipse
-    /// whose long axis is horizontal in its own space; turning it by the rim's
-    /// tangent at the head puts that axis along the rim, so the nucleus reads as
-    /// light smeared along an edge rather than as a spot placed on one. A circle
-    /// needed no angle, which is exactly why a circle read as a dot.
-    ///
-    /// The `GeometryReader` is how the bloom learns the Card's size; everything
-    /// else in this modifier is shape-relative and needs none. It costs the one
-    /// path build and the one `trimmedPath` in `head(in:at:)` per frame, and
-    /// nothing per slice.
-    private var bloom: some View {
-        GeometryReader { proxy in
-            let tail = max(Style.beamTailFraction, 0.0001)
-            let range = Self.trimRange(phase: phase, tail: tail)
-            if range.to > range.from,
-               let head = Self.head(
-                   in: CGRect(origin: .zero, size: proxy.size),
-                   at: seam(range.to)
-               ) {
-                BeamBloom()
-                    .rotationEffect(.radians(head.angle))
-                    // How much of the comet is on the path: `span / tail` is 0 at
-                    // both ends of the sweep and 1 whenever the segment is fully
-                    // extended. Without it the bloom would appear at full size and
-                    // full alpha in the first frame — the disc has extent even
-                    // when the lit segment has none — and it would still be parked
-                    // at the seam at full strength while the tail drained out,
-                    // which is the same stationary-terminus problem `slices` fixes
-                    // for the strokes. One expression covers both ends, because
-                    // during the drain-out `span / tail` *is* `1 - (u - 1) / tail`.
-                    .opacity(min(Double((range.to - range.from) / tail), 1))
-                    .position(head.point)
-            }
-        }
-    }
-
-    /// Where on the rim the head is, and which way the rim runs there.
-    ///
-    /// **Read the *first* point of a short trimmed sub-path.** `currentPoint` on
-    /// `trimmedPath(from: 0, to: f)` returns the sub-path's *end* and is `nil` at
-    /// f = 0, which is the trap `Style.beamSeamOffset`'s comment already records
-    /// being walked into once. A sub-path always opens with a `.move`, so that
-    /// case is the one that fires; the others are there so a future change to the
-    /// shape cannot make this silently return `nil`.
-    ///
-    /// The **angle** comes out of the same sub-path for free: the last point of the
-    /// trim is `epsilon` of perimeter ahead of the first, so the vector between them
-    /// is the rim's direction at the head to within the corner's own curvature. One
-    /// `Path` build and one `trimmedPath` per frame either way — the tangent costs a
-    /// second point out of a path that was already being walked, and nothing else.
-    /// Doing it as two calls to a point function would have cost two of each, which
-    /// is the version this replaced.
-    ///
-    /// `epsilon` is a plain small number and there is no refinement loop, and it is
-    /// bigger than it was — 0.008 of the perimeter, about 7pt — because it is now
-    /// answering a direction as well as a position. A 7pt chord through a 22pt corner
-    /// reports the corner's average direction rather than its exact tangent, which is
-    /// invisible on a soft ellipse. The *position* is unaffected by any of this: it is
-    /// the first point of the trim, which is exact at any epsilon.
-    ///
-    /// Approximate on purpose, in other words. `beamSeamOffset` had to be exact to a
-    /// ten-thousandth because it decides *where the beam enters the rim* and an error
-    /// there is a visible discontinuity every lap. A bloom is a soft ellipse
-    /// `Style.beamBloomLength` long; being a point or two along the rim from the
-    /// core's tip, or a degree or two off its tangent, is invisible.
-    static func head(in rect: CGRect, at fraction: CGFloat) -> (point: CGPoint, angle: Double)? {
-        guard rect.width > 0, rect.height > 0 else { return nil }
-        let epsilon: CGFloat = 0.008
-        let f = min(max(fraction, 0), 1 - epsilon)
-        let sub = Style.cardShape.path(in: rect).trimmedPath(from: f, to: f + epsilon)
-
-        var first: CGPoint?
-        var last: CGPoint?
-        sub.forEach { element in
-            let point: CGPoint? = switch element {
-            case .move(let point): point
-            case .line(let point): point
-            case .curve(_, let control1, _): control1
-            case .quadCurve(_, let control): control
-            case .closeSubpath: nil
-            }
-            guard let point else { return }
-            if first == nil { first = point }
-            last = point
-        }
-
-        guard let first else { return nil }
-        guard let last, last != first else { return (first, 0) }
-        return (first, atan2(Double(last.y - first.y), Double(last.x - first.x)))
-    }
-
-    // MARK: - Inward, a band
-
-    /// The region the glow and the bloom may light: a `Style.beamGlowWidth` band
-    /// inside the rim, with a **soft inner edge**.
-    ///
-    /// A `strokeBorder` rather than the Card's shape with a smaller copy punched out
-    /// of it: the punch-out (`.blendMode(.destinationOut)` inside a
-    /// `.compositingGroup()`) left a faint rectangle at the mask's inner edge on
-    /// every ground, and its edge was hard, so a glow swelling to the band's limit
-    /// was cut flat against it. A stroke *is* the band, with nothing to punch. The
-    /// blur feathers the inner edge so the glow dies into the glass rather than
-    /// stopping at a line; it bleeds a few points outside the rim as well, into
-    /// the feather, which is what a lit edge should do. `Style.beamGlowWidth` is
-    /// the band's width and `nothingIsLitDeepInsideTheRim` holds the bleed.
-    private static var inward: some View {
-        Style.cardShape
-            .strokeBorder(.black, lineWidth: Style.beamGlowWidth)
-            .blur(radius: Style.beamGlowEdgeBlur)
-    }
-
-    // MARK: - Outward, except the core
+    // MARK: - Outward
 
     /// Everything outside the Card's rim, and nothing inside it — the mask over the
-    /// **glow and the bloom only**.
+    /// glow and the bloom. The core is unmasked because it does not need one: see
+    /// `Style.beamWidth`, which is bounded so the core never leaves the hairline.
+    ///
+    /// **Since 2026-09-02 this is the only mask, by instruction: "the beam should
+    /// never go inside of the card, it should at max hit the edge."** The inward
+    /// band that held the smoke on the glass for one day is deleted. What made the
+    /// earlier outward halos read as a drop shadow was a *wide, soft* band whose
+    /// brightest point sat off the edge; the smoke is 4pt at its brightest, hard
+    /// against the rim, and only wide where it is faint.
     ///
     /// **This has been inverted twice and the history is the reason to read it
     /// before touching it.** For four passes the *whole* comet was masked outward,
@@ -424,7 +332,12 @@ struct BorderBeam: ViewModifier, Animatable {
     /// metric that has to stay bounded is the *tangential* step — a terminus along
     /// the beam, which is what "you can see where the border thing ends" was about —
     /// and `BorderBeamRenderTests` pins that at both termini.
-    private static var outward: some View {
+    private static var outward: some View { outward(inset: 0) }
+
+    /// `outward`, with the hole shrunk by `inset`: the region outside the Card's
+    /// shape inset by that much. The core uses `hairline`, so the Card's own 1pt
+    /// rim is the only part of the Card it may touch.
+    private static func outward(inset: CGFloat) -> some View {
         Rectangle()
             // The negative padding goes on the *rectangle*, before the overlay,
             // which is the only order that works: a view's overlay is laid out at
@@ -435,6 +348,7 @@ struct BorderBeam: ViewModifier, Animatable {
             .padding(-Style.beamMaskOutset)
             .overlay {
                 Style.cardShape
+                    .inset(by: inset)
                     .blendMode(.destinationOut)
             }
             .compositingGroup()
