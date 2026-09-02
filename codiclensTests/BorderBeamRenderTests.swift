@@ -30,8 +30,11 @@ import Testing
 /// already carrying alpha left 40pt of an intended 336pt on screen while every
 /// geometry test passed.
 ///
-/// `nothingIsLitDeepInsideTheRim` has been pointed both ways and the history is the
-/// interesting part. For four passes it was `nothingIsLitInsideTheRim`, asserting
+/// `nothingIsLitInsideTheRim` (2026-09-02) says what its name says, by
+/// instruction: "the beam should never go inside of the card, it should at max hit
+/// the edge". Only the core's own blur may cross the rim, and it is gone by 4pt.
+/// Before that it was `nothingIsLitDeepInsideTheRim`, and before that the history
+/// below is the interesting part. For four passes it was `nothingIsLitInsideTheRim`, asserting
 /// that the beam only ever touched pixels *outside* the Card — which is to say
 /// pixels this app does not own, because outside a Card's rim is the gutter, the
 /// Panel's transparent margin and then the user's desktop. It was certifying the
@@ -75,6 +78,18 @@ import Testing
 /// circle, and a circle centred on a line is a dot on that line: "not just a dot
 /// that has a radial glow … but spread it more out". A circle is a shape claim, so
 /// it is checkable as one.
+///
+/// **2026-09-02, three instructions in one day, and the beam ended up as the
+/// reference literally.** "Think smoke, not too thick" produced an expanding,
+/// turbulent plume; "never inside the card" moved it outside; "what is this tail
+/// thing, it looks ass" deleted it. What remains is a white hairline on the rim
+/// fading along the edge, a 3pt glow hugging it outside with the same fade, and a
+/// nose at the front. `theSmokeExpandsBehindTheHead` and the bloom test went with
+/// the plume and the nucleus. What the day left behind in this file:
+/// `nothingIsLitInsideTheRim` (nothing past 3pt in, at all), and every
+/// light-sampling test reading *outward* at `peakOnTheRightEdge` — the nose puts
+/// the brightest point behind the head point — while
+/// `neitherEndOfTheLitSegmentIsAHardEdge` still reads the front.
 ///
 /// The through-line: a render can prove light is on screen and cannot say whether
 /// it reads as the thing it is for. What a render *can* be made to catch is a
@@ -243,14 +258,16 @@ struct BorderBeamRenderTests {
     /// with a bigger, bluer, longer comet and reads **8,591**. None of these numbers
     /// is comparable with the one before it; the counted set keeps moving.
     ///
-    /// The floor is **6,000**, about two thirds of the measurement. It is a floor on
+    /// The Tuna beam (2026-09-02) — a hairline and a 3pt glow, all outside — reads
+    /// **3,910**, and the floor is **2,500**. Previously 6,000, about two thirds of
+    /// the smoke's 8,591; the count fell because the light is small on purpose. It is a floor on
     /// the beam *existing*, not a target: several of the numbers above went down on
     /// purpose. Re-measure it rather than scaling it, both ways.
     @Test func theTailSurvivesItsOwnFalloff() {
         let lit = litPixels(progress: 0.5) - baseline
 
         #expect(
-            lit > 6_000,
+            lit > 2_500,
             """
             only \(lit) pixels of rim are lit at mid-sweep. The comet is being \
             deleted by its own falloff — check Style.beamGlowWidth and \
@@ -285,46 +302,50 @@ struct BorderBeamRenderTests {
     /// the number that says the line reads as a line rather than as the bright middle
     /// of a cloud. It must stay above about 1.3.
     @Test func theHeadHasAHaloAndACrispCore() {
-        guard let bitmap = beamAlone(progress: Self.headOnTheRightEdge) else {
+        guard let bitmap = beamAlone(progress: Self.peakOnTheRightEdge) else {
             Issue.record("the beam layer did not rasterise")
             return
         }
 
         let y = Int(((pad + size.height / 2) * Self.scale).rounded(.down))
-        /// Points *outward* from the rim, which is where the halo is.
+        /// Points *outward* from the rim; negative is inside, where the smoke is.
         func alpha(_ outward: CGFloat) -> Int {
             let x = Int(((pad + size.width + outward + 0.25) * Self.scale).rounded(.down))
             return bitmap.alpha(x: x, y: y)
         }
 
-        // 150 shipping: the core's own alpha plus the feather's. It was 175 while
-        // the glow was outside and added to it; now the glow is inside.
         #expect(
             alpha(0) > 120,
             "the core is not crisp at the rim: alpha \(alpha(0)). Style.beamWidth is the core's stroked width."
         )
-        // Inward since 2026-09-01: the halo is light on the glass, not a shadow
-        // on the desktop. Negative is inside the rim.
+        // Outward, and *only* outward, since 2026-09-02: "the beam should never
+        // go inside of the card, it should at max hit the edge". The glow is a
+        // tight breath on the line — bright against the rim, thinning fast, gone
+        // well before `Style.beamGlowWidth`.
         let w = Style.beamGlowWidth
         #expect(
-            alpha(-2) > 60 && alpha(-4) > 60 && alpha(-w * 0.6) > 40 && alpha(-w) > 15,
+            alpha(2) > 60 && alpha(4) > 35,
             """
-            the head has no halo: alpha \(alpha(-2)) / \(alpha(-4)) / \(alpha(-w * 0.6)) / \
-            \(alpha(-w)) at 2, 4, \(w * 0.6) and \(w) points *in*. Style.beamGlowHeadBlur must \
-            never be 0 and the glow layer must be drawn under the head, not only \
-            behind it — a head with no bloom is a line, which is what this test is for.
+            the head has no halo: alpha \(alpha(2)) / \(alpha(4)) at 2 and 4 points *out*. \
+            Style.beamGlowHeadBlur must never be 0 and the glow layer must be drawn under \
+            the peak, not only behind it — a head with no bloom is a line, which is what \
+            this test is for.
             """
         )
         #expect(
-            alpha(-2) > alpha(-w) && alpha(-w) > alpha(-w - 10),
-            "the halo does not fall off inward: \(alpha(-2)) / \(alpha(-w)) / \(alpha(-w - 10))"
+            alpha(2) > alpha(6) && alpha(6) > alpha(10) && alpha(w) < 20,
+            """
+            the head is not a compact source: \(alpha(2)) / \(alpha(6)) / \(alpha(10)) at \
+            2, 6 and 10 points out, \(alpha(w)) at \(w)pt. Style.beamGlowBodyWidth is the \
+            glow's reach and Style.beamGlowHeadBlur its softness.
+            """
         )
         #expect(
-            alpha(2) > 25 && alpha(2) < alpha(-2),
+            alpha(-2) < 20 && alpha(-4) == 0,
             """
-            the rim is cut off flat on the outside, or the halo is back on the \
-            desktop: alpha \(alpha(2)) 2pt out against \(alpha(-2)) 2pt in. The \
-            feather (Style.beamFeatherWidth) should be present and smaller than the glow.
+            the beam is inside the Card: alpha \(alpha(-2)) 2pt in and \(alpha(-4)) 4pt in. \
+            The core is cut at the hairline and nothing else may cross the rim — see \
+            Style.beamWidth's bound and BorderBeam.outward(inset:).
             """
         )
     }
@@ -365,7 +386,7 @@ struct BorderBeamRenderTests {
         let x = Int(((pad + size.width - 0.25) * Self.scale).rounded(.down))
 
         for dark in [false, true] {
-            guard let bitmap = beamAlone(progress: Self.headOnTheRightEdge, dark: dark) else {
+            guard let bitmap = beamAlone(progress: Self.peakOnTheRightEdge, dark: dark) else {
                 Issue.record("the beam layer did not rasterise")
                 return
             }
@@ -418,6 +439,21 @@ struct BorderBeamRenderTests {
         return (midpoint + halfSlice) / (1 + Double(Style.beamTailFraction))
     }()
 
+    /// The phase that puts the comet's **brightest point** on the right edge's
+    /// vertical midpoint. Since the smoke repaint the head point is not the peak:
+    /// smoke has no density at its source and builds over `Style.beamNoseFraction`
+    /// of the comet behind it (`Style.beamNose(at:)`), so the head point is that
+    /// far *ahead* of where the light is. Every profile that wants the light — the
+    /// halo, the core's colour, the falloff, the white-desktop Δ — samples here;
+    /// the hard-edge test samples `headOnTheRightEdge`, because the front is
+    /// exactly what it is about.
+    private static let peakOnTheRightEdge: Double = {
+        let midpoint = 1 - Double(Style.beamSeamOffset)
+        let tail = Double(Style.beamTailFraction)
+        let halfSlice = tail / Double(Style.beamSegments) / 2
+        return (midpoint + halfSlice + Style.beamNoseFraction * tail) / (1 + tail)
+    }()
+
     /// **The glow peaks at the head and dies before the tail's own end: a coma,
     /// not a tube.**
     ///
@@ -458,14 +494,14 @@ struct BorderBeamRenderTests {
     /// the top, and their order along the beam is unambiguous even though their
     /// exact arc distances are not.
     @Test func theGlowPeaksAtTheHeadAndDiesAtTheTail() {
-        guard let bitmap = beamAlone(progress: Self.headOnTheRightEdge) else {
+        guard let bitmap = beamAlone(progress: Self.peakOnTheRightEdge) else {
             Issue.record("the beam layer did not rasterise")
             return
         }
 
-        // Inside the rim since the halo moved onto the glass, and the *peak*
-        // across the band's depth rather than one fixed depth: the glow's width
-        // is a travelling wave now (Style.beamWave), so alpha at any single depth
+        // Outside the rim — the only side the smoke is on — and the *peak*
+        // across the halo's depth rather than one fixed depth: the glow's width
+        // is constant now but the blur ramps, so alpha at any single depth
         // rises and falls along the beam by design. What must still fall off is
         // the light itself.
         func alpha(x: CGFloat, y: CGFloat) -> Int {
@@ -474,21 +510,21 @@ struct BorderBeamRenderTests {
                 y: Int(((y + 0.25) * Self.scale).rounded(.down))
             )
         }
-        func peakInward(onRightEdgeAt y: CGFloat) -> Int {
+        func peakOutward(onRightEdgeAt y: CGFloat) -> Int {
             stride(from: CGFloat(2), through: Style.beamGlowWidth, by: 1)
-                .map { alpha(x: right - $0, y: y) }.max() ?? 0
+                .map { alpha(x: right + $0, y: y) }.max() ?? 0
         }
-        func peakInward(onTopEdgeAt x: CGFloat) -> Int {
+        func peakOutward(onTopEdgeAt x: CGFloat) -> Int {
             stride(from: CGFloat(2), through: Style.beamGlowWidth, by: 1)
-                .map { alpha(x: x, y: pad + $0) }.max() ?? 0
+                .map { alpha(x: x, y: pad - $0) }.max() ?? 0
         }
 
         let right = pad + size.width
         let midY = pad + size.height / 2
-        let head = peakInward(onRightEdgeAt: midY)
-        let behind = peakInward(onRightEdgeAt: midY - 60)
-        let far = peakInward(onTopEdgeAt: right - Style.cardRadius - 60)
-        let furthest = peakInward(onTopEdgeAt: right - Style.cardRadius - 160)
+        let head = peakOutward(onRightEdgeAt: midY)
+        let behind = peakOutward(onRightEdgeAt: midY - 60)
+        let far = peakOutward(onTopEdgeAt: right - Style.cardRadius - 60)
+        let furthest = peakOutward(onTopEdgeAt: right - Style.cardRadius - 160)
 
         #expect(
             head > behind && behind > far && far > furthest,
@@ -687,7 +723,7 @@ struct BorderBeamRenderTests {
     /// middle of the Card are untouched. The bound below is that, loosely: it still
     /// fails outright if `BorderBeam.outward` is deleted, which is the one-modifier
     /// mistake worth catching.
-    @Test func nothingIsLitDeepInsideTheRim() {
+    @Test func nothingIsLitInsideTheRim() {
         /// Signed distance from the rim, positive outside: the standard rounded-rect
         /// SDF, exact for an axis-aligned one.
         func distanceFromTheRim(x: Int, y: Int) -> CGFloat {
@@ -705,28 +741,27 @@ struct BorderBeamRenderTests {
                 return
             }
 
-            var worstPast10 = 0
-            var worstPast16 = 0
+            var worstPast2 = 0
+            var worstPast4 = 0
             for y in 0..<bitmap.height {
                 for x in 0..<bitmap.width {
                     let alpha = bitmap.alpha(x: x, y: y)
                     guard alpha > 0 else { continue }
                     let d = distanceFromTheRim(x: x, y: y)
-                    if d < -(Style.beamGlowWidth + 8) { worstPast10 = max(worstPast10, alpha) }
-                    if d < -(Style.beamGlowWidth + 18) { worstPast16 = max(worstPast16, alpha) }
+                    if d < -1.5 { worstPast2 = max(worstPast2, alpha) }
+                    if d < -3 { worstPast4 = max(worstPast4, alpha) }
                 }
             }
 
             #expect(
-                worstPast10 < 20 && worstPast16 == 0,
+                worstPast2 < 20 && worstPast4 == 0,
                 """
-                the beam put alpha \(worstPast10) more than \(Int(Style.beamGlowWidth + 8))pt \
-                inside the rim and \(worstPast16) more than \(Int(Style.beamGlowWidth + 18))pt \
-                in, at phase \(phase). The glow and the bloom are under \
-                BorderBeam.inward, a Style.beamGlowWidth band; Style.padding and the \
-                content's own inset are what keep the light off the icon and the name, \
-                and this is the bound that says it stayed a band and did not become a \
-                fill — pass five's failure.
+                the beam put alpha \(worstPast2) more than 1.5pt inside the rim and \
+                \(worstPast4) more than 3pt in, at phase \(phase). "The beam should never go \
+                inside of the card, it should at max hit the edge": the glow and the bloom \
+                are under BorderBeam.outward, and the core's inner half lies within the \
+                Card's own hairline (Style.beamWidth ≤ 2 × hairline) and is cut there. Only \
+                the mask's own antialiasing may cross, and only just.
                 """
             )
         }
@@ -773,7 +808,7 @@ struct BorderBeamRenderTests {
     /// one.
     @Test func theBeamReadsAgainstAWhiteDesktop() {
         for dark in [false, true] {
-            guard let lit = composited(progress: Self.headOnTheRightEdge, dark: dark),
+            guard let lit = composited(progress: Self.peakOnTheRightEdge, dark: dark),
                   let unlit = composited(progress: nil, dark: dark) else {
                 Issue.record("the Card did not rasterise")
                 return
@@ -781,7 +816,8 @@ struct BorderBeamRenderTests {
 
             let y = Int(((pad + size.height / 2) * Self.scale).rounded(.down))
             var best = 0.0
-            for offset in stride(from: CGFloat(-8), through: 16, by: 0.5) {
+            // Outside 16pt to inside 8pt: the light is outside the rim now.
+            for offset in stride(from: CGFloat(-16), through: 8, by: 0.5) {
                 let x = Int(((pad + size.width - offset - 0.25) * Self.scale).rounded(.down))
                 let a = lit.rgb(x: x, y: y)
                 let b = unlit.rgb(x: x, y: y)
@@ -790,12 +826,20 @@ struct BorderBeamRenderTests {
                 best = max(best, d)
             }
 
+            // 83 and 86 with the liquid halo, 47 and 51 with the smoke, and **32
+            // (light) and 24 (dark) with the Tuna beam** — a white hairline and a
+            // 3pt white glow, all outside the rim, over a white desktop. That is
+            // faint by the reference's own nature: what carries the beam there is
+            // the rim lighting from `cardRim` to white, and a Δ across a 24pt band
+            // does not see that well. Light appearance's glow carries a faint cool
+            // tint (`Palette.beamLight`) for exactly this ground. The floor is a
+            // regression guard above the 17 that was *nothing*, not a target.
             #expect(
-                best > 50,
+                best > 20,
                 """
                 the beam is invisible on a Card over a white desktop in \
                 \(dark ? "dark" : "light") appearance: peak Δ\(Int(best))/442 \
-                across the rim band, against 83 and 86 shipping. This is the \
+                across the rim band, against 32 and 24 shipping. This is the \
                 architectural failure, not a tuning one: with the core masked \
                 entirely outward and near-white it collapses to 17, because outside \
                 the rim is the user's desktop. See BorderBeam.outward.

@@ -158,6 +158,65 @@ needs no `project.pbxproj` edit.
   uniform in path length — verified: `cardShape`'s path starts at the right edge's
   vertical midpoint and runs clockwise, which is why the top-left corner falls a
   little past 0.5.
+- **THE BEAM IS THE REFERENCE, LITERALLY (2026-09-02, third instruction of the day,
+  supersedes the two bullets below where they disagree).** "What is this tail thing?
+  It looks ass … the reference image is what it should look like." A white hairline
+  on the rim (`beamWidth` 1.5, cut at `hairline`) fading along the edge; a **3pt**
+  soft white glow hugging it outside (`beamGlowBodyWidth`, blur 2.5 → 5) with the
+  *same* fade (`beamGlowRamp` 1.5, plus `beamNose` at the front); nothing else.
+  Deleted: `BeamBloom`, `BorderBeam.head(in:at:)`, `beamBloomLength/Thickness`,
+  `Palette.beamBloomAlpha`, every `beamSmoke…` dial, `BeamPalette` and the aurora
+  hue ramp, `beamHue(at:)`. The light is `Palette.beamLight`: near-white in dark
+  appearance, faintly cool (0.62, 0.80, 1.0) in light — the one appearance split,
+  and only because a white glow outside the rim over a white desktop is nothing.
+  The core is pure white in both. **The light belongs to the line**: the glow has
+  no variation along the comet the core does not have, so it cannot read as a
+  separate thing. Floors re-measured, not scaled: `theTailSurvivesItsOwnFalloff`
+  3,910 → floor 2,500; `theBeamReadsAgainstAWhiteDesktop` 32/24 → floor 20 (the
+  failure it guards is 17; a white light over a white desktop is faint by the
+  reference's nature and the rim lighting up is what carries it).
+  `theSmokeExpandsBehindTheHead` is deleted with the plume.
+- **NOTHING INSIDE THE RIM. EVER. (2026-09-02, second instruction of the day.)**
+  "The beam should never go inside of the card, it should at max hit the edge." The
+  glow and the bloom are under `BorderBeam.outward`, cut hard at the rim; the core
+  is under `outward(inset: Style.hairline)`, so it lights the Card's own 1pt rim and
+  is cut there — `Style.beamWidth` must stay ≤ 2 × `hairline` so nothing of it is
+  wasted. The inward band (`BorderBeam.inward`, `beamGlowEdgeBlur`) and the feather
+  layer (`BeamLayer.feather`, `beamFeatherWidth/Blur`, `Palette.beamFeatherAlpha`)
+  are deleted: the feather *was* the outside part, and now everything is.
+  `nothingIsLitInsideTheRim` bounds it — under 20 past 1.5pt in, **0** past 3pt — and
+  every other render test samples *outward*. `beamGlowWidth` (16) is now the head's
+  outward reach ceiling the tests hold, not a mask. `beamMaskOutset` is derived from
+  the glow's widest spread and the bloom again. The 2026-09-01 "drop shadow" finding
+  that moved the halo inside was about a wide, soft outward band with its brightest
+  point off the edge; the smoke is 4pt at the head, hard against the rim, and only
+  wide where it is faint. Do not move it back inside for any test number — a test
+  that wants light on the glass is wrong.
+- **THE HALO IS SMOKE (since 2026-09-02), AND THE WHOLE BEAM IS THIN.** Asked for
+  against the reference (Tuna): "think about it as a smoke simulation … the beam that
+  runs on the edge should not be too thick". The liquid wave is deleted. Smoke is
+  light emitted at the head that *ages*: it **expands** (`Style.beamSmokeExpansion`,
+  3× wider at the tail than under the head), **diffuses** (`beamGlowHeadBlur` 3.5 →
+  `beamGlowTailBlur` 8) and **dissipates** (`beamGlowRamp` 1.5), and it is
+  **turbulent** — `beamSmokeTurbulence(at:travel:)`, three incommensurate sinusoids
+  in slice position and sweep travel, modulating width (`beamSmokeWisp`) and density
+  (`beamSmokeDensity`) scaled by age, so the head stays compact and the tail billows,
+  and the wisps drift as the light goes round. Pure function of `(position, travel)`:
+  no state, no clock, no randomness. **The nose** (`beamNoseFraction` 0.08,
+  `beamNose(at:)`) fades the glow and the feather in over the leading 35pt and the
+  core to half, so the front is a taper and the brightest point is *behind* the head
+  point — render tests that want the light sample `peakOnTheRightEdge`, the hard-edge
+  test still samples the front. Numbers that supersede the ones below: core
+  `beamWidth` **1.5**; glow body `beamGlowBodyWidth` **4** at the head; feather
+  **4/5**; bloom **100 × 16** at 0.70; segments **28**; `beamGlowWidth` **16** — wider,
+  not narrower, because a 9pt band cut every billow flat and the mask's edge was the
+  only edge on screen; it must stay wider than the plume can reach. Hue ramp mixed
+  toward white by `beamSmokeWhiteness` (0.08) for glow, feather and bloom.
+  `theSmokeExpandsBehindTheHead` pins the plume as half-max width;
+  `theHeadHasAHaloAndACrispCore` claims a compact source, not a full band;
+  `theBeamReadsAgainstAWhiteDesktop`'s floor is **40** (measured 47/51; the failure it
+  guards is 17, and the number did not move with chroma — it is the core over glass).
+  See ADR 0003, "The smoke comet".
 - **THE HALO IS INSIDE THE RIM (since 2026-09-01), THE CORE STRADDLES IT, AND A THIN
   FEATHER IS ALL THAT IS OUTSIDE.** On screen the outward halo — the design the rest
   of this bullet records — read as "a drop shadow, which looks really bad", because
