@@ -42,9 +42,15 @@ struct EmojiGridView: View {
 
     private var vm: EmojiSearchVM { coordinator.emojiVM }
 
+    /// Flexible, not fixed: the Slab is wider than six cells, and the remainder
+    /// belongs between the columns rather than as a blank band at the right
+    /// edge. Each cell keeps its 40pt frame and centres in its column.
     private var columns: [GridItem] {
         Array(
-            repeating: GridItem(.fixed(Self.cellSize), spacing: Self.cellSpacing),
+            repeating: GridItem(
+                .flexible(minimum: Self.cellSize, maximum: .infinity),
+                spacing: Self.cellSpacing
+            ),
             count: EmojiSearchVM.columnCount
         )
     }
