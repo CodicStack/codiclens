@@ -152,6 +152,8 @@ struct SubjectCardView: View {
         // Phase happens to be — so this is asked before `isFocused`.
         if coordinator.isEditingTextSubject { return "⌘E" }
         guard isFocused else { return nil }
+        // A text preview already says what it is with its count; the Return chip beside it was noise.
+        if characterCount != nil { return nil }
         if coordinator.isEmojiBrowsing { return coordinator.currentEmoji == nil ? nil : "⏎" }
         if isClipboardMode { return clipboardItem == nil ? nil : "⏎" }
         return subject == nil ? nil : "⏎"

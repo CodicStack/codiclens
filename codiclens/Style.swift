@@ -170,13 +170,6 @@ enum Style {
     static var resultShape: RoundedRectangle {
         RoundedRectangle(cornerRadius: resultRadius, style: .continuous)
     }
-
-    /// The ground under a Card's body text, inset by `padding` from the Card's
-    /// own edge. Concentric with `cardShape`: an inset rounded rectangle keeps a
-    /// constant border width only if its radius drops by the inset.
-    static var writingGroundShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: cardRadius - padding, style: .continuous)
-    }
 }
 
 // MARK: - Palette
@@ -365,6 +358,9 @@ private struct CardSurface: ViewModifier {
 /// Glass over glass loses the backdrop it exists to reveal, and a Card holding a
 /// page of text over a busy wallpaper is the one place legibility outranks the
 /// backdrop.
+///
+/// It covers the **whole** Card, edge to edge in `cardShape` with no inset. An
+/// inset panel floating inside the glass read as a card inside a card.
 private struct WritingGround: ViewModifier {
     @Environment(\.colorScheme) private var scheme
     let writing: Bool
@@ -373,9 +369,8 @@ private struct WritingGround: ViewModifier {
         let palette = Palette.of(scheme)
         return content.background {
             if writing {
-                Style.writingGroundShape
+                Style.cardShape
                     .fill(palette.writingGround)
-                    .padding(Style.padding)
             }
         }
     }
