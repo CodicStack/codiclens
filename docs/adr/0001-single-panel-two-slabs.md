@@ -19,7 +19,8 @@ This is now the shipping design. Two details came out differently from the wordi
 
 - **There is no Card Slab.** The Cards float directly over the desktop in a row, each
   its own glass surface with its own rim and shadow. "We should not have the outer
-  box." The Results Slab is the only Slab.
+  box." The Results Slab is the only Slab. (Since ADR 0009 the rim and that
+  hand-drawn shadow are gone; the native glass supplies both.)
 - **The Panel's fixed extent includes a margin on all four sides** —
   `PanelLayout.margin`, sized for the entrance animation's 1.04 overshoot plus a
   shadow beyond it. Without it a `.shadow()` is clipped into a hard band by the window
@@ -28,7 +29,7 @@ This is now the shipping design. Two details came out differently from the wordi
 
 ## Consequences
 
-- `hasShadow` must be `false` on the Panel; each Slab draws its own SwiftUI shadow. AppKit deriving a shadow from transparent content is slow and artifact-prone.
+- `hasShadow` must be `false` on the Panel; the Results Slab draws its own SwiftUI shadow, and a Card's native glass casts its own (see `docs/adr/0009-cards-are-bare-glass.md` — a Card never gets a hand-written shadow). AppKit deriving a shadow from transparent content is slow and artifact-prone.
 - The empty gap belongs to the Panel, so hit-testing must treat clicks there as "outside" — the existing click-outside-to-dismiss monitor depends on it.
 - The Panel never resizes. Slabs animate their own size inside a fixed window.
 - Reverting to two windows is a real refactor, not a flag. Accepted deliberately: what we expect to want to tune is the *feel*, and that lives in `Motion.swift`, not in the window count.

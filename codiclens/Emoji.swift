@@ -105,7 +105,14 @@ final class EmojiPreferences {
 enum EmojiRenderer {
     /// Apple Color Emoji is a bitmap font. It carries strikes at these pixel
     /// sizes and resamples — visibly soft — at anything in between.
-    static let strikes: [CGFloat] = [20, 26, 32, 40, 48]
+    ///
+    /// **64 is here for the Subject Card's icon slot.** The table stopped at 48
+    /// while `Style.cardIcon` was 64; the slot is 76 now, and `strike(nearest:)`
+    /// asks for `box * 0.8` — 61pt — which rounded back down to 48 and drew a
+    /// glyph about 62pt tall in a 76pt slot, visibly smaller than the app icon
+    /// beside it. 64 is a strike the font actually carries, so the Card fills
+    /// its slot without resampling.
+    static let strikes: [CGFloat] = [20, 26, 32, 40, 48, 64]
 
     static func strike(nearest requested: CGFloat) -> CGFloat {
         strikes.min { abs($0 - requested) < abs($1 - requested) } ?? 32

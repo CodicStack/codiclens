@@ -40,9 +40,17 @@ struct PanelView: View {
     @State private var shakeTrigger = 0
 
     var body: some View {
-        VStack(spacing: Style.gap) {
-            cardRow
-            resultsSlab
+        // One container for every piece of glass in the Panel, which is what
+        // lets a Card's **Arrival** morph out of the Card before it. Its spacing
+        // is the distance at which two pieces of glass would fuse into one body,
+        // and it is deliberately far below the 12pt gutter between two Cards:
+        // Cards sit near each other and never merge. The container itself is not
+        // glass — only its children are.
+        GlassEffectContainer(spacing: Style.glassMergeDistance) {
+            VStack(spacing: Style.gap) {
+                cardRow
+                resultsSlab
+            }
         }
         .frame(
             width: PanelLayout.contentWidth,
@@ -106,11 +114,15 @@ struct PanelView: View {
     /// *reported* to `hitRegions` rather than assumed: a click in that empty
     /// space has to dismiss the Panel, and the region has to shrink with the
     /// Slab for it to.
+    ///
+    /// The width is `PanelLayout.slabWidth`, not the Card row's: under a single
+    /// Card the Slab keeps its own floor and overhangs the Card on both sides,
+    /// which is what the Emoji grid's five fixed columns need.
     @ViewBuilder
     private var resultsSlab: some View {
         if showsResults {
             ResultsListView(coordinator: coordinator)
-                .frame(width: PanelLayout.cardRowWidth(coordinator.cardCount))
+                .frame(width: PanelLayout.slabWidth(coordinator.cardCount))
                 .slabSurface()
                 .onGeometryChange(for: CGRect.self) { proxy in
                     proxy.frame(in: .named(PanelLayout.coordinateSpace))

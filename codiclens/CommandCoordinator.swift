@@ -606,22 +606,7 @@ class CommandCoordinator {
         onPhaseChange?()
     }
 
-    /// How many times the Panel has been summoned.
-    ///
-    /// A summon counter and not a reset counter, and only because of *where*
-    /// `reset` is called from: `PanelController.showPanel` runs it as the Panel
-    /// appears rather than as it disappears, so every increment is a Panel
-    /// arriving on screen. Nothing else calls `reset`.
-    ///
-    /// It exists for `CardBeamIdentity.subject`, which has no other way to know:
-    /// the Card row is built once and is not rebuilt between summons, so the
-    /// Subject Card sees neither an `onAppear` nor a focus edge on the second
-    /// summon and the tenth. If `reset` is ever moved to the hide path, this
-    /// stops being a summon and the Subject Card starts sweeping a summon late.
-    private(set) var summonGeneration = 0
-
     func reset() {
-        summonGeneration += 1
         phase = .searchingSubject
         selectedSubject = nil
         selectedAction = nil

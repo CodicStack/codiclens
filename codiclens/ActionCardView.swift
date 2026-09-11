@@ -3,6 +3,10 @@ import SwiftUI
 struct ActionCardView: View {
     let coordinator: CommandCoordinator
 
+    /// The Card row's glass namespace: this Card's glass grows out of the
+    /// Subject Card's, and the Target Card's grows out of this one.
+    let glassNamespace: Namespace.ID
+
     private var isFocused: Bool {
         if case .pickingAction = coordinator.phase { return true }
         return false
@@ -29,8 +33,7 @@ struct ActionCardView: View {
                     .padding(Style.padding)
             }
         }
-        .cardSurface(focused: isFocused)
-        .cardBeam(identity: CardBeamIdentity.action(coordinator))
+        .cardSurface(focused: isFocused, phase: .action, in: glassNamespace)
         .padding(Style.cardInset)
     }
 
@@ -47,7 +50,7 @@ struct ActionCardView: View {
                 .frame(width: Style.cardIcon, height: Style.cardIcon)
 
             Text(action.name)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 15, weight: .bold))
                 .lineLimit(1)
                 .foregroundStyle(.primary)
 

@@ -12,7 +12,7 @@ import SwiftUI
 struct EmojiGridView: View {
     @Bindable var coordinator: CommandCoordinator
 
-    /// Apple Color Emoji has bitmap strikes at 20/26/32/40/48px. Anything
+    /// Apple Color Emoji has bitmap strikes at 20/26/32/40/48/64px. Anything
     /// between them resamples and reads soft, so the glyph is pinned to 32.
     private static let glyphSize: CGFloat = 32
 
