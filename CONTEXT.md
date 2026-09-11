@@ -41,12 +41,16 @@ A glass surface inside the Panel. There is one — the Results Slab, below the C
 _Avoid_: panel, pane, tray, sheet
 
 **Card**:
-One tile representing one Phase. Cards float directly over the desktop in a row at the top of the Panel — there is deliberately no Slab behind them. Every Card carries a Lamp; the focused Card's is turned up and its edge is more defined. No surface in the app carries an accent colour. The ban is on a *static accent colour* — an accent fill across a Card turned the Panel into a coloured box and a tinted selection fought every app icon beside it. A static monochrome light is not an accent (see Lamp), and a transient highlight that is gone in half a second is not one either (see Border Beam).
-_Avoid_: tile, pane, box
+One glass tile representing one Phase. Cards sit in a row at the top of the Panel, each its own piece of glass with a small gap between them — there is deliberately no surface behind them, and they never fuse into one body. Since 2026-09-11 a Card is bare native glass and nothing painted on it: no rim, no shadow, no light of its own. The one thing that distinguishes Cards is the Selection Tint on the focused one.
+_Avoid_: tile, pane, box, slab
 
-**Lamp**:
-The static light a Card's glass is lit by: brightest along the top of its rim, gone partway down, monochrome, and the same whether or not anything is happening. Every Card has one; the focused Card's is turned up, an unfocused Card's is turned down and never off. It is a property of the surface, not a signal about state, and it is not the Border Beam — the Lamp never moves. Declined on 2026-08-22 while the Border Beam was expected to carry the surface's look alone; reopened on 2026-09-01 when it could not. The Slab has no Lamp.
-_Avoid_: rim light, glow, specular (that is the wash on the glass body, not the rim), border, focus ring
+**Selection Tint**:
+The colour the focused Card's glass takes on — the user's system accent colour, in the glass itself rather than as a fill on top of it. The unfocused Cards are untinted. This is the only colour any surface in the app carries, and it means one thing: this Card holds the keyboard. Replaces the "no accent colour" rule that stood from 2026-08 to 2026-09-11; that rule was written against a *fill* across a Card, and is what led to the Lamp and the Border Beam trying to signal focus without colour.
+_Avoid_: accent, highlight, fill, glass tint (the grey material tint that made the Cards read as frosted plastic — gone, and not this)
+
+**Arrival**:
+A new Card growing out of the Card before it when a Phase is reached — the Action Card out of the Subject Card, the Target Card out of the Action Card. It is a Transition (see Motion): the surface changes size, and what the Card *contains* still appears instantly.
+_Avoid_: morph, split, animate in, slide in
 
 **Result**:
 One selectable row or grid cell in the Results Slab.
@@ -91,57 +95,19 @@ _Avoid_: focus restore, app switch
 **Motion**:
 The app's animation vocabulary, in two categories that must not be confused. A
 **Transition** carries a change the user caused; there are exactly three curves
-and only Panel appearance, Panel dismissal and Slab resizing use them.
-**Decoration** carries nothing — it is the Border Beam and the Loading Ring, it
+and only Panel appearance, Panel dismissal, Slab resizing and a Card's Arrival use them.
+**Decoration** carries nothing — it is the Loading Ring, it
 never tells the user anything, it never delays anything, and it is absent under
 Reduce Motion. Everything else changes instantly and on purpose.
 _Avoid_: transitions (Transition means one of the three), effects, FX
 
-**Border Beam**:
-A travelling light — a soft bloom at its head with a dissolving trail behind it —
-that goes once around a Card's rim when that Card becomes
-about something new — a Phase reaching it, a Subject being replaced, a summon. It
-belongs to the Card **as a surface** and it means nothing: it is not tied to OCR,
-to searching, to loading, or to any other in-flight state, and reading it as one
-is the mistake this entry exists to prevent. OCR Text sweeps the Subject Card
-because the *Subject changed*, not because OCR finished. It never marks a
-selection moving — that stays instant. All three Cards have one; the Slab does
-not. Shares a drawing primitive with the Loading Ring and nothing else.
-**Nothing goes inside the Card — ever.** Since 2026-09-02, by instruction ("the
-beam should never go inside of the card, it should at max hit the edge"), the whole
-halo is outside the rim, cut hard at it, and the crisp line lights the Card's own
-hairline rim and nothing behind it. For one day before that the halo was light on
-the glass inside the rim; that is gone. **And it is the reference, literally
-(2026-09-02, third instruction):** a white hairline on the rim that fades along the
-edge, a 3pt soft white glow hugging it outside with the same fade, and a soft front.
-No nucleus, no hue, no plume — the smoke that stood in for a few hours read as a
-coloured tail detached from the line, and the aurora ramp went with it. Light
-appearance's glow is faintly cool so it still reads over a white desktop. Until 2026-09-01 the halo was *outside*, and on
-screen a blurred coloured band outside a surface read as exactly what it is: a drop
-shadow in colour. Before that, for four passes the *whole* beam was masked outside
-the rim, which is the gutter and then the Panel's transparent margin — the user's
-**desktop** — so it never composited against anything the app draws and whether it
-could be seen was decided by somebody's wallpaper. A near-white
-beam in dark appearance over a white desktop measured Δ10/442: nothing. **"Dark
-appearance" does not mean "dark ground".** That is why the *halo* is chromatic, and
-since 2026-09-01 it is a **ramp of several saturated hues along the comet's length**
-— the aurora: teal, green, violet, pink, in that order every time — the same in
-both appearances:
-one pastel blue had one distance from the ground and a light desktop ate it; a ramp
-always has some stop far from whatever is behind it. The **core is white** — a
-comet is a white light inside a coloured halo — and it may be white only because
-the halo under it, not the wallpaper, is what it composites against. A pass in between masked everything *inward*, which fixed the ground and
-put the halo over the Card's content; that was rejected. What survives of it is the
-**spill**: a few points of the halo bleeding onto the Card's glass just inside the
-rim, never reaching the content.
-The nucleus is an ellipse elongated **along** the rim, not a circle — a circle
-centred on a line reads as a dot on it. The reference material's blue belongs to its
-Card's *fill* rather than to its rim light, and reading it the other way made this a
-saturated blue twice. A permanently lit rim is the **Lamp**, a different thing
-with its own entry: the Lamp is what the Card *is*, the Border Beam is what
-happens to it once.
-_Avoid_: glow, edge blur, border glow, loading animation, spinner, focus ring,
-blue beam, accent, lamp
+**Retired words (2026-09-11)**:
+**Lamp** and **Border Beam** were the focused Card's static rim light and a
+travelling light around a Card's rim. Both existed to make a lone Card read as
+expensive without colour or a surface behind it, and both are gone with the
+redesign: native glass supplies the edge, and the Selection Tint supplies focus.
+Do not reintroduce either under a new name.
+_Avoid_: lamp, beam, rim light, glow, sweep, comet, halo
 
 **Loading Ring**:
 The app's own spinner: a constant-length arc, rotating, beside the text in each
