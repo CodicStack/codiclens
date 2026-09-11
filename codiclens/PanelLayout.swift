@@ -20,19 +20,13 @@ enum PanelLayout {
     /// One Card's **cell**. Every Card gets one, whether it has neighbours or not.
     ///
     /// The drawn glass surface is smaller than this by `Style.cardInset` on every
-    /// side, because that padding sits *outside* the surface: 284 × 264 less 24
-    /// twice is **236 × 216**, which is the size the beam runs on and the size
-    /// `Style.beamSeamOffset` is a function of.
+    /// side, because that padding sits *outside* the surface: 212 × 212 less 6
+    /// twice is a **200 × 200** Card, and two neighbouring insets are the 12pt
+    /// gutter between two of them.
     ///
-    /// **The cell grew 260 × 240 → 284 × 264 for the Border Beam's glow, and the
-    /// surface deliberately did not move.** The glow needs gutter to fall off in —
-    /// `Style.cardInset` went 12 → 24 for it — and the previous time that inset
-    /// grew the growth came out of the drawn surface, which cost the user Card
-    /// content. This time it comes out of the Panel's declared size instead. The
-    /// Panel is still fixed and still never resizes; it is simply bigger, which is
-    /// free, and it leaves 236 × 216 alone.
-    static let cardWidth: CGFloat = 284
-    static let cardHeight: CGFloat = 264
+    /// Square, because a Card is an icon with a name under it and nothing else.
+    static let cardWidth: CGFloat = 212
+    static let cardHeight: CGFloat = 212
 
     /// Subject, Action, Target — the most Cards any Phase shows.
     static let maxCardCount = 3
@@ -126,32 +120,57 @@ enum PanelLayout {
         rows > 0 ? CGFloat(rows) * resultRowHeight + Style.resultInset * 2 : 0
     }
 
-    /// The Card row's width for a Card count, including the row's own padding.
+    /// The Card row's width for a Card count: one cell per Card and nothing
+    /// else.
+    ///
+    /// Exact rather than generous, so the arithmetic above is true on screen:
+    /// each cell is `cardWidth` wide, each carries `Style.cardInset` of padding
+    /// outside its own glass, and two neighbouring insets are the gutter. The
+    /// Results Slab is given this width too wherever it is wide enough to be
+    /// worth having — see `slabWidth` — which puts its edges one inset outside
+    /// the outermost Card's glass.
     static func cardRowWidth(_ count: Int) -> CGFloat {
-        CGFloat(max(count, 1)) * cardWidth + 20
+        CGFloat(max(count, 1)) * cardWidth
+    }
+
+    /// The narrowest the Results Slab ever gets, whatever the Card row is
+    /// doing above it.
+    ///
+    /// The Slab is the larger, calmer surface of the two, and it does not have
+    /// to be as narrow as a lone Card: the `VStack` centres it under the Card
+    /// row, so a wider Slab stays symmetrical about the same axis. This is the
+    /// width the Slab had under one Card before the Cards shrank to
+    /// `cardWidth`, and the Emoji grid's five fixed cells were laid out for it
+    /// — at the old width they fit with their insets, at 212 they are clipped
+    /// along the right edge.
+    static let slabMinWidth: CGFloat = 304
+
+    /// The Results Slab's width for a Card count: the Card row's width, unless
+    /// that is narrower than the Slab is allowed to be.
+    ///
+    /// Two Cards and up, this is `cardRowWidth` exactly, so the Slab's edges
+    /// sit one inset outside the outermost Card's glass. Under one Card the
+    /// floor wins and the Slab overhangs the Card on both sides.
+    static func slabWidth(_ cardCount: Int) -> CGFloat {
+        max(cardRowWidth(cardCount), slabMinWidth)
     }
 
     /// The widest and tallest the content inside the margin ever gets.
-    static var contentWidth: CGFloat { cardRowWidth(maxCardCount) }
+    ///
+    /// The Slab is written into the max as well as the Card row. Three Cards
+    /// is 636 and already dominates `slabMinWidth`, so the second term never
+    /// bites today — it is there so the invariant is stated rather than
+    /// assumed: nothing inside the margin is wider than this.
+    static var contentWidth: CGFloat { max(cardRowWidth(maxCardCount), slabMinWidth) }
     static var contentHeight: CGFloat { cardHeight + Style.gap + maxResultsHeight }
 
     /// Empty space on all four sides of the content.
     ///
     /// `PanelEntrance` peaks at 1.04 about the centre, which pushes the widest
-    /// layout `contentWidth * 0.02 ≈ 17pt` past its own edge. The remaining
-    /// ~31pt is room for a surface's shadow to fall off in. Shrink this and the
-    /// shadow comes back as a band along the window edge.
-    ///
-    /// **The Border Beam's glow did not need this to grow**, and it was checked
-    /// rather than assumed, because a glow clipped by the window edge is the same
-    /// artefact this margin exists to prevent. The glow is perceptible 34pt out
-    /// from a Card's rim, and every rim has more than that between it and anything
-    /// it could be cut by: the outermost Card's rim is `margin + 10 + cardInset` =
-    /// 82pt from the window edge, the top rim is `margin + cardInset` = 72pt from
-    /// it, and the bottom rim is `cardInset + Style.gap` = 36pt above the Results
-    /// Slab, which is the one clearance the glow comes close to using. The Slab is
-    /// a later sibling in the `VStack`, so it would draw *over* the glow rather
-    /// than clip it; 36 > 34 means it does not have to.
+    /// layout `contentWidth * 0.02 ≈ 13pt` past its own edge. What is left is
+    /// room for a surface's shadow — the Slab's own, and the one native glass
+    /// draws under a Card — to fall off in. Shrink this and the shadow comes back
+    /// as a band along the window edge.
     static let margin: CGFloat = 48
 
     static var panelWidth: CGFloat { contentWidth + margin * 2 }

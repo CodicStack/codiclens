@@ -2,6 +2,11 @@ import SwiftUI
 
 struct SubjectCardView: View {
     @Bindable var coordinator: CommandCoordinator
+
+    /// The Card row's glass namespace, so this Card's glass is the one the
+    /// Action Card grows out of.
+    let glassNamespace: Namespace.ID
+
     @FocusState private var isEditorFocused: Bool
 
     /// Whether the Query is still the question being asked.
@@ -109,8 +114,7 @@ struct SubjectCardView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottomTrailing) { corner }
-        .cardSurface(focused: isFocused, writing: isWriting)
-        .cardBeam(identity: CardBeamIdentity.subject(coordinator))
+        .cardSurface(focused: isFocused, writing: isWriting, phase: .subject, in: glassNamespace)
         .padding(Style.cardInset)
     }
 
@@ -174,7 +178,7 @@ struct SubjectCardView: View {
                 // name, and `highlightedName` leaves that plain rather than
                 // underlining the characters that happen to line up.
                 Text(highlightedName(emoji.name, query: coordinator.emojiVM.searchText))
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 15, weight: .bold))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .foregroundStyle(.primary)
@@ -192,7 +196,7 @@ struct SubjectCardView: View {
                 .foregroundStyle(.green)
 
             Text(result)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 15, weight: .bold))
                 .lineLimit(3)
                 .foregroundStyle(.primary)
 
@@ -314,7 +318,7 @@ struct SubjectCardView: View {
                     query: isQueryPhase ? coordinator.subjectVM.searchText : ""
                 )
             )
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 15, weight: .bold))
                 .lineLimit(1)
                 .foregroundStyle(.primary)
         }

@@ -41,12 +41,12 @@ A glass surface inside the Panel. There is one — the Results Slab, below the C
 _Avoid_: panel, pane, tray, sheet
 
 **Card**:
-One glass tile representing one Phase. Cards sit in a row at the top of the Panel, each its own piece of glass with a small gap between them — there is deliberately no surface behind them, and they never fuse into one body. Since 2026-09-11 a Card is bare native glass and nothing painted on it: no rim, no shadow, no light of its own. The one thing that distinguishes Cards is the Selection Tint on the focused one.
+One glass tile representing one Phase. Cards sit in a row at the top of the Panel, each its own piece of glass with a small gap between them — there is deliberately no surface behind them, and they never fuse into one body. Since 2026-09-11 a Card is bare native glass and nothing painted on it: no rim, no shadow, no light of its own. No Card carries any colour, focused or not — the user rejected a tinted focused Card on sight (2026-09-11). Focus is shown by Emphasis.
 _Avoid_: tile, pane, box, slab
 
-**Selection Tint**:
-The colour the focused Card's glass takes on — the user's system accent colour, in the glass itself rather than as a fill on top of it. The unfocused Cards are untinted. This is the only colour any surface in the app carries, and it means one thing: this Card holds the keyboard. Replaces the "no accent colour" rule that stood from 2026-08 to 2026-09-11; that rule was written against a *fill* across a Card, and is what led to the Lamp and the Border Beam trying to signal focus without colour.
-_Avoid_: accent, highlight, fill, glass tint (the grey material tint that made the Cards read as frosted plastic — gone, and not this)
+**Emphasis**:
+How the focused Card differs from the others: it stands at full size with its content fully present, while an unfocused Card is smaller and its content quieter. Glass is the same on every Card; the difference is in size and presence, never in colour, rim or light. Changing which Card has Emphasis is instant.
+_Avoid_: selection tint, accent, highlight, focus ring, raised, lit
 
 **Arrival**:
 A new Card growing out of the Card before it when a Phase is reached — the Action Card out of the Subject Card, the Target Card out of the Action Card. It is a Transition (see Motion): the surface changes size, and what the Card *contains* still appears instantly.
@@ -95,8 +95,8 @@ _Avoid_: focus restore, app switch
 **Motion**:
 The app's animation vocabulary, in two categories that must not be confused. A
 **Transition** carries a change the user caused; there are exactly three curves
-and only Panel appearance, Panel dismissal, Slab resizing and a Card's Arrival use them.
-**Decoration** carries nothing — it is the Loading Ring, it
+and only Panel appearance, Panel dismissal, Slab resizing, the Card row widening as a
+Phase is added and a Card's Arrival use them. **Decoration** carries nothing — it is the Loading Ring, it
 never tells the user anything, it never delays anything, and it is absent under
 Reduce Motion. Everything else changes instantly and on purpose.
 _Avoid_: transitions (Transition means one of the three), effects, FX
@@ -105,9 +105,9 @@ _Avoid_: transitions (Transition means one of the three), effects, FX
 **Lamp** and **Border Beam** were the focused Card's static rim light and a
 travelling light around a Card's rim. Both existed to make a lone Card read as
 expensive without colour or a surface behind it, and both are gone with the
-redesign: native glass supplies the edge, and the Selection Tint supplies focus.
-Do not reintroduce either under a new name.
-_Avoid_: lamp, beam, rim light, glow, sweep, comet, halo
+redesign: native glass supplies the edge, and the Emphasis supplies focus.
+Do not reintroduce either under a new name. **Selection Tint** — an accent-coloured glass on the focused Card — was proposed and rejected the same day; no surface carries colour.
+_Avoid_: lamp, beam, rim light, glow, sweep, comet, halo, selection tint
 
 **Loading Ring**:
 The app's own spinner: a constant-length arc, rotating, beside the text in each

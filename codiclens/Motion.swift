@@ -13,7 +13,8 @@ import SwiftUI
 /// - **`entrance`** — the Panel appearing and dismissing. Also the shake, which
 ///   is a value shaping over this same curve rather than a fourth one.
 /// - **`resize`** — a surface changing size: the Card row widening as a Phase is
-///   added, the Results Slab arriving, growing and leaving.
+///   added, a Card's Arrival out of the Card before it, the Results Slab
+///   arriving, growing and leaving.
 /// - **`snappy`** — scrolling the selection into view.
 ///
 /// Phase advances, Card content swaps and selection movement are **instant, on
@@ -21,25 +22,25 @@ import SwiftUI
 /// is running, which is what lets a surface's size spring while the content
 /// inside it changes in one frame.
 ///
-/// Reduce Motion and the user's animations preference collapse all three to a
-/// cross-fade, in `collapsed(_:)` — the single place either switch is read.
+/// Reduce Motion and the user's animations preference are one switch,
+/// `isReduced`, and it collapses all three curves to a cross-fade in
+/// `collapsed(_:)` — the single place a curve is collapsed.
 ///
-/// **Decoration.** `beamSweep` and `ringSpin`. A decoration carries no
-/// information — nothing about it is learnable — it delays nothing and is never
-/// waited on or given a threshold before it appears, and it is simply **absent**
-/// under Reduce Motion rather than collapsed. It is a separate *category*, not
-/// two more curves: the budget was never "three is the number", it was *do not
-/// animate information*, and a decorative loop touches none of that. The next
-/// animation that "just needs to show that something is happening" is a
-/// transition wearing decoration's clothes and goes through the three curves.
+/// **Decoration.** `ringSpin`, and that is the whole of it. A decoration carries
+/// no information — nothing about it is learnable — it delays nothing and is
+/// never waited on or given a threshold before it appears, and it is simply
+/// **absent** under Reduce Motion rather than collapsed. It stays a separate
+/// *category* rather than a fourth curve: the budget was never "three is the
+/// number", it was *do not animate information*, and a decorative loop touches
+/// none of that. The next animation that "just needs to show that something is
+/// happening" is a transition wearing decoration's clothes and goes through the
+/// three curves.
 ///
-/// **Two accessibility switches are read here and nowhere else.** `isReduced`
-/// covers Reduce Motion and the app's own animations preference, and it is what a
-/// decoration checks before drawing at all. `isTransparencyReduced` covers Reduce
-/// Transparency, which is a claim about legibility rather than about movement —
-/// the Border Beam answers it by dropping its halo, the glow layer and the head
-/// bloom together, and going on sweeping. They are independent on purpose and
-/// neither implies the other.
+/// **`isReduced` is the app's one accessibility switch, defined here.** It
+/// covers Reduce Motion and the app's own animations preference, and three
+/// places read it: `collapsed(_:)` in this file, `LoadingRing` — a decoration
+/// checks it before drawing at all — and `Style.swift`, where a Card's Arrival
+/// checks it to decide whether its glass morphs or is simply there.
 enum Motion {
 
     // MARK: - The three curves
@@ -85,45 +86,12 @@ enum Motion {
 
     // MARK: - Decoration
 
-    // Neither of these goes through `collapsed(_:)`, and that is not an
-    // oversight. `collapsed(_:)` turns an `Animation` into a cross-fade, which
-    // is meaningless for a loop and meaningless for a travelling highlight —
-    // there is nothing to cross-fade *to*. So the collapse cannot be delegated
-    // to it: a decoration reads `Motion.isReduced` at the point of use and is
-    // absent. Whatever the surface said without it, it still says.
-
-    /// The Border Beam's one lap. `easeOut` on purpose, and now for two reasons.
-    ///
-    /// The first is perceived speed: it is set by the velocity at the *start* of
-    /// a motion, so easeOut leaves the mark at full speed and reads as fast.
-    /// easeInOut reads as mass, which is a different quality and slower-feeling
-    /// because it spends its first frames accelerating.
-    ///
-    /// The second arrived with the comet. Because of the over-travel geometry,
-    /// the last thing the sweep does is drain the tail out through the seam — so
-    /// the *end* of the curve is not the head arriving anywhere, it is a blurred
-    /// glow emptying. easeOut spends its final frames slowly, which is exactly
-    /// where that glow wants to be spent. Linear would arrive and stop; do not
-    /// make it linear.
-    ///
-    /// 0.25 → 0.55 because the paint changed rather than the intent. A 3.5pt bar
-    /// at 0.25s was a whip and meant to be; a 1pt core with 300pt of dissolving
-    /// glow behind it needs long enough for the tail to be seen as a tail rather
-    /// than as a flash.
-    ///
-    /// **It stayed 0.55 through all five later changes**, and that was decided
-    /// rather than skipped each time. The glow got wider — 34pt of reach where
-    /// there had been 11 — then quieter and more concentrated at the head, then
-    /// quieter again and white rather than blue; then it changed *sides* twice, and
-    /// it is now a light blue halo outside the rim with the crisp core straddling
-    /// it, longer along the rim than it has ever been. None of that changed anything
-    /// about the *journey*: the lit segment is still `Style.beamTailFraction` of the
-    /// perimeter, so there is exactly as much rim to travel and exactly as much of
-    /// it stroked at once. Duration answers segment length and perimeter, and
-    /// neither moved. A bigger halo is easier to see, not slower to read; a longer
-    /// *visible* comet is not a longer journey; and which side of the rim the light
-    /// falls on is not a distance at all.
-    static let beamSweep: Animation = .easeOut(duration: 0.55)
+    // This does not go through `collapsed(_:)`, and that is not an oversight.
+    // `collapsed(_:)` turns an `Animation` into a cross-fade, which is
+    // meaningless for a loop — there is nothing to cross-fade *to*. So the
+    // collapse cannot be delegated to it: a decoration reads `Motion.isReduced`
+    // at the point of use and is absent. Whatever the surface said without it,
+    // it still says.
 
     /// The Loading Ring's revolution.
     static let ringSpin: Animation = .linear(duration: 0.85).repeatForever(autoreverses: false)
@@ -140,36 +108,6 @@ enum Motion {
     static var isReduced: Bool {
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return true }
         return !(UserDefaults.standard.object(forKey: animationsEnabledKey) as? Bool ?? true)
-    }
-
-    /// Whether the system is asking for opaque content instead of
-    /// semi-transparent.
-    ///
-    /// **A different switch with a different meaning, and it must not be folded
-    /// into `isReduced`.** Reduce Motion is about movement and its answer is to
-    /// remove a decoration outright. Reduce Transparency is about legibility, and
-    /// Apple's guidance is that content be opaque rather than semi-transparent —
-    /// which a blur is, by definition. So the Border Beam's answer to this one is
-    /// to drop its **glow layer and the head bloom that belongs to it** and keep
-    /// sweeping: the crisp core still travels the rim, with no halo around it.
-    /// With Reduce Motion on there is no beam to be transparent about, and with
-    /// only this one on there is a beam with no halo. Giving `isReduced` a second
-    /// meaning would make those two cases indistinguishable.
-    ///
-    /// The halo is dropped whole rather than un-blurred, which is a change from
-    /// when the beam was one layer and setting its blur to 0 was the answer. The
-    /// glow's source band is `Style.beamGlowWidth` wide, so an un-blurred glow is
-    /// not a quieter halo — it is a 10pt flat bar travelling the rim — and a
-    /// `RadialGradient` disc is nothing but softness, so there is no un-blurred
-    /// version of the bloom at all.
-    ///
-    /// It lives here, in the motion file, because `Motion.swift` is already the
-    /// single place the app reads AppKit accessibility state — `isReduced` is the
-    /// other read — and one slightly-misnamed home for both beats two files each
-    /// holding one. `Style.beamDrawsGlow` consults it rather than reading
-    /// `NSWorkspace` itself, for the same reason.
-    static var isTransparencyReduced: Bool {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
     }
 
     /// How long a collapsed animation takes. Long enough to read as a fade

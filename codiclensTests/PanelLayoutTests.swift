@@ -34,10 +34,34 @@ struct PanelLayoutTests {
     }
 
     @Test func theContentIsTheWidestCardRowAndTheTallestSlabWithAGapBetween() {
-        #expect(PanelLayout.contentWidth == PanelLayout.cardRowWidth(PanelLayout.maxCardCount))
+        #expect(
+            PanelLayout.contentWidth
+                == max(
+                    PanelLayout.cardRowWidth(PanelLayout.maxCardCount),
+                    PanelLayout.slabMinWidth
+                )
+        )
         #expect(
             PanelLayout.contentHeight
                 == PanelLayout.cardHeight + Style.gap + PanelLayout.maxResultsHeight
+        )
+    }
+
+    /// The Slab is the calmer surface, and a lone Card is too narrow to hold
+    /// the Emoji grid's five fixed columns. Under one Card the Slab keeps its
+    /// own floor; from two Cards up it is the Card row's width exactly.
+    @Test func theSlabIsNeverNarrowerThanTheEmojiGridNeeds() {
+        #expect(PanelLayout.slabWidth(1) == PanelLayout.slabMinWidth)
+        #expect(PanelLayout.slabWidth(1) == 304)
+        #expect(PanelLayout.slabWidth(1) > PanelLayout.cardRowWidth(1))
+        #expect(PanelLayout.slabWidth(2) == PanelLayout.cardRowWidth(2))
+        #expect(
+            PanelLayout.slabWidth(PanelLayout.maxCardCount)
+                == PanelLayout.cardRowWidth(PanelLayout.maxCardCount)
+        )
+        #expect(
+            PanelLayout.slabWidth(PanelLayout.maxCardCount) <= PanelLayout.contentWidth,
+            "the Slab has to fit inside the margin like everything else"
         )
     }
 

@@ -60,8 +60,15 @@ struct ResultDisplayTests {
 
     /// The glyph is drawn at a bitmap strike, never between two of them: Apple
     /// Color Emoji resamples visibly in between.
-    @Test(arguments: [CGFloat(32), 40, 64, 96])
+    @Test(arguments: [CGFloat(32), 40, 64, 96, Style.cardIcon])
     func everyBoxSizeLandsOnAStrike(box: CGFloat) {
         #expect(EmojiRenderer.strikes.contains(EmojiRenderer.strike(nearest: box * 0.8)))
+    }
+
+    /// The Card's icon slot has to have a strike big enough to fill it. While
+    /// the table stopped at 48 and the slot grew to 76, a glyph came out about
+    /// 62pt tall next to an app icon that filled all 76.
+    @Test func theCardsIconSlotIsDrawnAtTheLargestStrike() {
+        #expect(EmojiRenderer.strike(nearest: Style.cardIcon * 0.8) == 64)
     }
 }

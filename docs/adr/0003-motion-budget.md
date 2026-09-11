@@ -1,8 +1,14 @@
 ---
-status: accepted
+status: partially superseded
 ---
 
 # Animate the Panel, not its contents
+
+**Partially superseded, 2026-09-11.** The motion budget itself stands: three Transition
+curves, Decoration that never carries information, and selection movement and Phase
+changes that are instant. Every section below about the Border Beam is history — the
+beam, its dials and its tests are deleted. See `docs/adr/0009-cards-are-bare-glass.md`
+and `CONTEXT.md`, **Retired words**.
 
 Only three things animate: the Panel appearing, the Panel dismissing, and a Slab changing size. Phase advances, Card content swaps, and selection movement are **instant, deliberately**.
 

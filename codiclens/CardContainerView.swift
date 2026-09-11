@@ -4,6 +4,12 @@ struct CardContainerView: View {
     @Bindable var coordinator: CommandCoordinator
     @FocusState private var isSearchFocused: Bool
 
+    /// The namespace the Cards' glass is matched in, which is what makes an
+    /// **Arrival** an Arrival: the Action Card's glass grows out of the Subject
+    /// Card's, and the Target Card's out of the Action Card's. It lives here
+    /// because this is the view that inserts and removes them.
+    @Namespace private var glassNamespace
+
     /// What the text field holds. Assigning this is what actually forces the
     /// field's contents — a binding that merely returns a different value does
     /// not, which is why the query has to live here as state.
@@ -165,26 +171,42 @@ struct CardContainerView: View {
 
     /// The Cards for the Phases reached so far.
     ///
+    /// **No spacing, because the gap is each Card's own.** A Card's cell carries
+    /// `Style.cardInset` of padding outside its glass, so two neighbours make
+    /// the gutter between them and the row's arithmetic stays in one place.
+    ///
+    /// **Every cell is `PanelLayout.cardWidth` × `cardHeight`, definite.** A Card
+    /// is flexible inside — its content fills the cell so it stays centred — and
+    /// a flexible view in an `HStack` takes a share of whatever width the stack
+    /// is offered *this frame*. The row's width is itself animating 212 → 424
+    /// while a Card arrives, so without a definite cell each Card is squashed on
+    /// the first frames of the Arrival and springs back out: the glass morphing
+    /// out of its neighbour would be morphing out of a deforming source. A
+    /// definite cell keeps every drawn surface 200 × 200 (212 less
+    /// `Style.cardInset` twice) no matter what width the row is passing through.
+    ///
     /// `.identity` on the Cards that come and go is not an oversight. What
-    /// animates when a Phase is added is the *row's* width — driven by
-    /// `PanelView`, which owns this view's frame — while the Card itself
-    /// hard-cuts into place. A Card that scales or fades in delays information
-    /// the user has already asked for, which is the trap `docs/adr/0003` exists
-    /// to prevent.
+    /// animates when a Phase is added is the *glass* — the row widening, and the
+    /// new Card's surface growing out of its neighbour's — while the Card's
+    /// **content** hard-cuts into place. Content that scales or fades in delays
+    /// information the user has already asked for, which is the trap
+    /// `docs/adr/0003` exists to prevent.
     private var cardRow: some View {
-        HStack(spacing: 6) {
-            SubjectCardView(coordinator: coordinator)
+        HStack(spacing: 0) {
+            SubjectCardView(coordinator: coordinator, glassNamespace: glassNamespace)
+                .frame(width: PanelLayout.cardWidth, height: PanelLayout.cardHeight)
 
             if coordinator.cardCount >= 2 {
-                ActionCardView(coordinator: coordinator)
+                ActionCardView(coordinator: coordinator, glassNamespace: glassNamespace)
+                    .frame(width: PanelLayout.cardWidth, height: PanelLayout.cardHeight)
                     .transition(.identity)
             }
 
             if coordinator.cardCount >= 3 {
-                TargetCardView(coordinator: coordinator)
+                TargetCardView(coordinator: coordinator, glassNamespace: glassNamespace)
+                    .frame(width: PanelLayout.cardWidth, height: PanelLayout.cardHeight)
                     .transition(.identity)
             }
         }
-        .padding(6)
     }
 }
