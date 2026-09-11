@@ -250,7 +250,12 @@ struct SubjectCardView: View {
             .font(.system(size: 13))
             .scrollContentBackground(.hidden)
             .focused($isEditorFocused)
-            .padding(16)
+            // `textPreview` pads 20. An `NSTextView` adds its own line-fragment
+            // padding and a top inset, so these are what land the first glyph on
+            // the preview's — measured on screen, not derived; anything else
+            // makes the text jump on ⌘E.
+            .padding(.horizontal, 15)
+            .padding(.vertical, 20)
             .onKeyPress { press in
                 if press.key == .tab && press.modifiers.isEmpty {
                     coordinator.saveTextSubjectEditAndAdvance()
