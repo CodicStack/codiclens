@@ -237,7 +237,7 @@ struct EmojiCommandTests {
     // MARK: - Actions
 
     @Test
-    func tabOffersPasteThenCopy() throws {
+    func tabOffersPasteCopyThenShare() throws {
         let (coordinator, _) = try makeCoordinator()
         coordinator.enterEmojiMode()
         try select("🔥", in: coordinator)
@@ -245,7 +245,8 @@ struct EmojiCommandTests {
         coordinator.advancePhase()
 
         #expect(coordinator.phase == .pickingAction)
-        #expect(coordinator.actionVM.filteredActions.map(\.name) == ["Paste", "Copy"])
+        // An Emoji has content, so it has Share — `CONTEXT.md`, **Share**.
+        #expect(coordinator.actionVM.filteredActions.map(\.name) == ["Paste", "Copy", "Share…"])
     }
 
     @Test

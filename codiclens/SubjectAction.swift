@@ -173,6 +173,9 @@ enum ActionHandler {
     /// that does not dismiss the Panel: the OCR Text lands in it. See
     /// `docs/adr/0007-async-action-behind-the-effect-seam.md`.
     case ocr
+    case qrCode
+    case rotate(ImageActions.RotationDirection)
+    case openInPreview
 
     /// Promoting a Target into the Subject, so a thing found while looking for
     /// something else can be acted on in its own right. Never executes
@@ -215,6 +218,41 @@ struct SubjectAction: Identifiable {
         icon: .sfSymbol("text.viewfinder"),
         isFinal: true,
         handler: .ocr
+    )
+
+    private static let rotateLeft = SubjectAction(
+        name: "Rotate Left",
+        icon: .sfSymbol("rotate.left"),
+        isFinal: true,
+        handler: .rotate(.left)
+    )
+
+    private static let rotateRight = SubjectAction(
+        name: "Rotate Right",
+        icon: .sfSymbol("rotate.right"),
+        isFinal: true,
+        handler: .rotate(.right)
+    )
+
+    private static let openInPreview = SubjectAction(
+        name: "Open in Preview",
+        icon: .sfSymbol("eye"),
+        isFinal: true,
+        handler: .openInPreview
+    )
+
+    /// Handing a Subject's content to a macOS sharing service.
+    ///
+    /// Not Final: the service is the Target. Every Subject that *has* content
+    /// carries it — text, Emoji, a Clipboard Item, a file, a folder
+    /// (`CONTEXT.md`, **Share**). The Finder Subject deliberately does not: the
+    /// grammar gives an Action one Target, and Finder's is the file, so a file
+    /// found there is shared by making it the Subject first ("Use as Subject").
+    private static let share = SubjectAction(
+        name: "Share…",
+        icon: .sfSymbol("square.and.arrow.up"),
+        isFinal: false,
+        handler: .share
     )
 
     /// Promoting a Target into the Subject.
@@ -273,9 +311,12 @@ struct SubjectAction: Identifiable {
             return []
 
         case .emoji:
+            // An Emoji shares as its text, through the same rule as any other
+            // text Subject.
             return [
                 .init(name: "Paste", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .paste),
                 .init(name: "Copy", icon: .sfSymbol("doc.on.doc"), isFinal: true, handler: .copy),
+                share,
             ]
 
         case .text(let rawText):
@@ -285,10 +326,18 @@ struct SubjectAction: Identifiable {
             ]
             actions.append(contentsOf: transforms())
             actions.append(.init(name: "Search Web", icon: .sfSymbol("magnifyingglass"), isFinal: true, handler: .searchWeb))
+            if ImageActions.canGenerateQRCode(for: rawText) {
+                actions.append(.init(
+                    name: "QR Code",
+                    icon: .sfSymbol("qrcode"),
+                    isFinal: true,
+                    handler: .qrCode
+                ))
+            }
             if URL(string: rawText) != nil && rawText.hasPrefix("http") {
                 actions.append(.init(name: "Open URL", icon: .sfSymbol("link"), isFinal: true, handler: .openURL))
             }
-            actions.append(.init(name: "Share…", icon: .sfSymbol("square.and.arrow.up"), isFinal: false, handler: .share))
+            actions.append(share)
             return actions
 
         case .clipboard(let item):
@@ -305,11 +354,22 @@ struct SubjectAction: Identifiable {
         var actions: [SubjectAction] = [
             .init(name: "Open", icon: .sfSymbol("doc"), isFinal: true, handler: .openFile),
         ]
-        if includingOCR { actions.append(ocr) }
+        if includingOCR {
+            actions.append(ocr)
+            actions.append(rotateLeft)
+            actions.append(rotateRight)
+        }
+        actions.append(.init(
+            name: "Open With…",
+            icon: .sfSymbol("arrow.up.forward.app.fill"),
+            isFinal: false,
+            handler: .openWith
+        ))
+        if includingOCR { actions.append(openInPreview) }
         actions.append(contentsOf: [
-            .init(name: "Open With…", icon: .sfSymbol("arrow.up.forward.app.fill"), isFinal: false, handler: .openWith),
             .init(name: "Reveal in Finder", icon: .sfSymbol("folder"), isFinal: true, handler: .revealInFinder),
             .init(name: "Copy Path", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .copyPath),
+            share,
             .init(name: "Move to Trash", icon: .sfSymbol("trash"), isFinal: true, handler: .moveToTrash),
             .init(name: "Quick Look", icon: .sfSymbol("eye"), isFinal: true, handler: .quickLook),
             useAsSubject,
@@ -327,15 +387,26 @@ struct SubjectAction: Identifiable {
         if item.isImage {
             actions.append(ocr)
             actions.append(.init(name: "Save Image…", icon: .sfSymbol("square.and.arrow.down"), isFinal: true, handler: .saveAs))
-            actions.append(.init(name: "Open in Preview", icon: .sfSymbol("eye"), isFinal: true, handler: .openFile))
+            actions.append(openInPreview)
+            actions.append(rotateLeft)
+            actions.append(rotateRight)
             actions.append(.init(name: "Copy Path", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .copyPath))
+            actions.append(share)
         } else {
             actions.append(.init(name: "Type Text", icon: .sfSymbol("keyboard"), isFinal: true, handler: .typeText))
             actions.append(.init(name: "Run as AppleScript", icon: .sfSymbol("applescript"), isFinal: true, handler: .runScript))
             actions.append(.init(name: "Open Email", icon: .sfSymbol("envelope"), isFinal: true, handler: .openEmail))
             actions.append(.init(name: "Save as File…", icon: .sfSymbol("square.and.arrow.down"), isFinal: true, handler: .saveAs))
             actions.append(.init(name: "Search Web", icon: .sfSymbol("magnifyingglass"), isFinal: true, handler: .searchWeb))
-            actions.append(.init(name: "Share…", icon: .sfSymbol("square.and.arrow.up"), isFinal: false, handler: .share))
+            if ImageActions.canGenerateQRCode(for: item.content) {
+                actions.append(.init(
+                    name: "QR Code",
+                    icon: .sfSymbol("qrcode"),
+                    isFinal: true,
+                    handler: .qrCode
+                ))
+            }
+            actions.append(share)
             actions.append(contentsOf: transforms())
             for c in CountType.allCases {
                 actions.append(.init(name: c.name, icon: .sfSymbol("number"), isFinal: true, handler: .count(c)))

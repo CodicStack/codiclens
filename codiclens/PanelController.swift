@@ -77,6 +77,18 @@ class PanelController {
             self?.coordinator.receiveOCRText(text)
         }
 
+        runner.onQRCode = { [weak self] generation, data in
+            self?.coordinator.receiveQRCode(data, generation: generation)
+        }
+
+        runner.onImageRotation = { [weak self] generation, succeeded, image in
+            self?.coordinator.receiveImageRotation(
+                succeeded: succeeded,
+                refreshedImage: image,
+                generation: generation
+            )
+        }
+
         quickLookHelper.onDismiss = { [weak self] in
             self?.quickLookDidClose()
         }

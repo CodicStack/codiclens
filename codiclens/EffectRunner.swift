@@ -13,6 +13,14 @@ protocol EffectRunner: AnyObject {
 /// Quick Look, the save panel — are injected by `PanelController`, because they
 /// need window state this module deliberately doesn't own.
 final class SystemEffectRunner: EffectRunner {
+    /// Serial because reset can start a new image Action while an old callback
+    /// is intentionally discarded. Two rotations of one file must still reach
+    /// disk in command order rather than both reading the same old pixels.
+    private let imageWorkQueue = DispatchQueue(
+        label: "com.codiclens.image-actions",
+        qos: .userInitiated
+    )
+
     var onHide: (() -> Void)?
     var onPasteAndHide: ((@escaping () -> Void) -> Void)?
     var onQuickLook: ((QuickLookContext) -> Void)?
@@ -29,6 +37,8 @@ final class SystemEffectRunner: EffectRunner {
     /// `nil` when the image had no readable text, so no empty text Subject is
     /// ever created.
     var onOCRText: ((String?) -> Void)?
+    var onQRCode: ((Int, Data?) -> Void)?
+    var onImageRotation: ((Int, Bool, NSImage?) -> Void)?
 
     func run(_ effects: [Effect]) {
         for effect in effects {
@@ -48,6 +58,15 @@ final class SystemEffectRunner: EffectRunner {
             Task {
                 let config = NSWorkspace.OpenConfiguration()
                 _ = try? await NSWorkspace.shared.open([file], withApplicationAt: application, configuration: config)
+            }
+
+        case .openInPreview(let file):
+            guard let preview = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Preview") else {
+                return
+            }
+            Task {
+                let config = NSWorkspace.OpenConfiguration()
+                _ = try? await NSWorkspace.shared.open([file], withApplicationAt: preview, configuration: config)
             }
 
         case .revealInFinder(let url):
@@ -84,7 +103,7 @@ final class SystemEffectRunner: EffectRunner {
             script?.executeAndReturnError(&error)
 
         case .share(let payload, let service):
-            service.perform(withItems: [Self.sharingItem(for: payload)])
+            service.perform(withItems: [SharePayloadItems.item(for: payload)])
 
         case .quickLook(let context):
             onQuickLook?(context)
@@ -104,6 +123,29 @@ final class SystemEffectRunner: EffectRunner {
             Task { @MainActor in
                 onOCRText(await OCR.text(in: url))
             }
+
+        case .generateQRCode(let text, let generation):
+            guard let onQRCode else { return }
+            imageWorkQueue.async {
+                let data = try? ImageActions.generateQRCode(for: text)
+                DispatchQueue.main.async { onQRCode(generation, data) }
+            }
+
+        case .rotateImage(let url, let direction, let generation):
+            guard let onImageRotation else { return }
+            imageWorkQueue.async {
+                let succeeded: Bool
+                do {
+                    try ImageActions.rotateImage(at: url, direction: direction)
+                    succeeded = true
+                } catch {
+                    succeeded = false
+                }
+                let refreshedImage = succeeded ? NSImage(contentsOf: url) : nil
+                DispatchQueue.main.async {
+                    onImageRotation(generation, succeeded, refreshedImage)
+                }
+            }
         }
     }
 
@@ -119,14 +161,6 @@ final class SystemEffectRunner: EffectRunner {
             pasteboard.setData(data, forType: .png)
         case .fileURL(let url):
             pasteboard.writeObjects([url as NSURL])
-        }
-    }
-
-    private static func sharingItem(for payload: Payload) -> Any {
-        switch payload {
-        case .text(let text): text as NSString
-        case .image(let data): NSImage(data: data) ?? NSImage()
-        case .fileURL(let url): url
         }
     }
 
