@@ -22,6 +22,7 @@ class TargetSearchVM {
 
     private var isFileSearchMode = false
     private let fileSearchSubject = PassthroughSubject<String, Never>()
+    private let shareTargetProvider: (Payload) -> [ActionTarget]
     private var cancellable: AnyCancellable?
     private var searchProcess: Process?
 
@@ -39,18 +40,20 @@ class TargetSearchVM {
         "tiff", "tif", "bmp", "webp", "pdf", "svg"
     ]
 
-    init() {
+    init(shareTargetProvider: @escaping (Payload) -> [ActionTarget] = {
+        ActionTarget.shareTargets(for: $0)
+    }) {
+        self.shareTargetProvider = shareTargetProvider
         cancellable = fileSearchSubject
             .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
-            .removeDuplicates()
             .sink { [weak self] text in
                 self?.performFileSearch(text)
             }
     }
 
     func loadTargets(for subject: Subject, action: SubjectAction) {
+        leaveFileSearchMode()
         searchText = ""
-        isFileSearchMode = false
 
         // "Use as Subject" finds a file or an app the same way Finder's own
         // Actions do — the same `mdfind` Target list, reached from a different
@@ -72,11 +75,13 @@ class TargetSearchVM {
             return
         }
 
+        // Share is deliberately absent: its Targets come from the *Payload*,
+        // not the Subject — a Clipboard Image shares as its stored PNG and a
+        // Clipboard Item has no URL of its own — and only the coordinator can
+        // resolve one. It calls `loadShareTargets` instead.
         switch action.handler {
         case .openWith:
             allTargets = ActionTarget.openWithTargets(for: subject)
-        case .share:
-            allTargets = ActionTarget.shareTargets(for: subject)
         default:
             allTargets = []
         }
@@ -84,16 +89,20 @@ class TargetSearchVM {
         selectedIndex = 0
     }
 
-    /// Share targets for a clipboard item, which has no `Subject` to derive them from.
+    /// The Targets a Share Payload has. Every Share comes through here —
+    /// `CommandCoordinator` decides what a Subject shares as, because a
+    /// Clipboard Item's content lives in the history rather than in the
+    /// Subject.
     func loadShareTargets(for payload: Payload) {
+        leaveFileSearchMode()
         searchText = ""
-        isFileSearchMode = false
-        allTargets = ActionTarget.shareTargets(for: payload)
+        allTargets = shareTargetProvider(payload)
         filteredTargets = allTargets
         selectedIndex = 0
     }
 
     private func performFileSearch(_ text: String) {
+        guard isFileSearchMode, searchText == text else { return }
         searchProcess?.terminate()
         searchProcess = nil
 
@@ -134,7 +143,9 @@ class TargetSearchVM {
                 .map { $0.0 }
 
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.searchText == queryText else { return }
+                guard let self,
+                      self.isFileSearchMode,
+                      self.searchText == queryText else { return }
                 self.filteredTargets = Array(sorted)
                 self.selectedIndex = 0
                 self.isSearching = false
@@ -225,11 +236,18 @@ class TargetSearchVM {
     }
 
     func reset() {
+        leaveFileSearchMode()
         searchText = ""
         allTargets = []
         filteredTargets = []
         selectedIndex = 0
+    }
+
+    /// Revokes file search before another Target source takes ownership.
+    /// Queued debounce and completion handlers check this mode before writing.
+    private func leaveFileSearchMode() {
         isFileSearchMode = false
+        isSearching = false
         searchProcess?.terminate()
         searchProcess = nil
     }

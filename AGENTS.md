@@ -43,6 +43,31 @@ needs no `project.pbxproj` edit.
 - FloatingPanel uses `.nonactivatingPanel` — never break this contract without restoring previous app focus.
 - App scanning must be recursive to find apps in subdirectories (e.g., Adobe apps).
 - `NSWorkspace.shared.open()` calls must be async (use `openAsync` helper) to avoid blocking the main thread.
+- **Share is a Target list, not a popped system menu.** The sharing service is the
+  Target, chosen in the Target Phase like any other. Still built from
+  `NSSharingService.sharingServices(forItems:)`, deprecated since macOS 13 in favour of
+  `standardShareMenuItem` and still returning the full list on 26. No "Copy Link" and no
+  "More…" rows.
+- **Plain text is shared as a temporary `.txt` file**, named from its first line, because
+  AirDrop refuses a string: `NSSharingService(named: .sendViaAirDrop).canPerform(withItems:
+  ["text" as NSString])` is **false**, and an `NSString` payload offers only Mail, Messages,
+  Notes, Freeform, Journal and Reminders. **Text that is a URL is shared as an `NSURL`
+  instead** — that payload gets AirDrop *and* Add to Reading List.
+- **QR Code is an Action, not a Share Target.** A QR code is a form of the text, not a
+  recipient of it. Its output becomes a new Clipboard image at the top of history and the
+  Subject retargets to it, exactly as OCR retargets to OCR Text. Absent when the text
+  exceeds the Core Image encoder's UTF-8 capacity, and never offered on Emoji. Capacity
+  follows an actual encoder attempt, not a character-count estimate.
+- **Rotate is in place and must not hide the Panel.** Rotate Left / Rotate Right are Final
+  Actions on an image Subject that rotate without asking, as Finder does; the Subject stays,
+  the Panel stays, and a rotated Clipboard Item is **not** moved to the top of the history.
+  Same no-`.hide` rule as OCR. Everything else — markup, crop — is **Open in Preview**. See
+  `docs/adr/0011-image-edits-rotate-in-process-everything-else-is-preview.md`. Normal
+  one-frame 8-bit PNG and TIFF files rotate in their original format; higher-precision
+  sources are rejected rather than reduced to 8-bit. JPEG rotates by changing orientation
+  metadata while ImageIO copies its compressed image data losslessly. Multi-frame or
+  auxiliary-image sources are rejected so animation, pages, depth data and gain maps are
+  never silently discarded.
 
 ### Visual layer
 
@@ -203,10 +228,13 @@ Wires runner callbacks:
 - `onQuickLook` → `showQuickLook()` — activates app, shows QLPreviewPanel
 - `onSavePanel` → `showSavePanel()` — NSSavePanel for file export
 - `onShowSettings` → `showSettings()` — settings window
-- `onOCRText` → `coordinator.receiveOCRText(_:)` — the OCR Text coming back the
-  other way. The only callback that answers the coordinator rather than doing
-  something to the window, and the reason `CommandCoordinator` neither imports
-  Vision nor `await`s. See `docs/adr/0007-async-action-behind-the-effect-seam.md`.
+- `onOCRText` → `coordinator.receiveOCRText(_:)`
+- `onQRCode` → `coordinator.receiveQRCode(_:generation:)`
+- `onImageRotation` → `coordinator.receiveImageRotation(...)`
+
+These three callbacks answer the coordinator across the Effect seam. The runner owns
+Vision and image processing, so `CommandCoordinator` does neither. Image callback
+generation IDs discard answers from a reset Panel session.
 
 `coordinator.onPhaseChange` is **not** wired. It used to resize the card window; the
 window no longer resizes, and the Card row's width is a SwiftUI animation driven by
@@ -256,10 +284,11 @@ gates move for one. **Use as Subject** is a non-Final Action that promotes a
 file-or-app Target into the Subject and lands back on `.pickingAction`. Files
 are deliberately *not* ranked alongside apps in Subject search.
 
-OCR is the one Action that takes time. It returns `[.ocr(url)]` and **no
-`.hide`** — the OCR Text lands *in* the Panel — and `EffectRunner` awaits
-Vision and answers through `onOCRText`. `isOCRInFlight` gates a second Enter
-and is what the Slab's "Reading text…" row reads.
+OCR returns `[.ocr(url)]` and **no `.hide`** — the OCR Text lands *in* the Panel — and
+`EffectRunner` awaits Vision before answering through `onOCRText`. QR Code and Rotate
+also run behind the Effect seam and return no `.hide`; their work uses one serial queue
+so consecutive rotations reach disk in command order. `isOCRInFlight` and
+`isImageActionInFlight` gate a second Enter while their respective answer is pending.
 
 Text mode: activates only when fuzzy search returns zero app matches
 (result-dependent, not input-dependent) — **and only once the Index has
@@ -338,8 +367,24 @@ Support. Images saved as PNG files in `codiclens/images/`. Text previews for Qui
 in `codiclens/previews/`. The pasteboard is only ever read on the main thread; the
 PNG re-encode goes through `ImageReencoder`, off-main in the app and inline in tests.
 
+**A Clipboard Item is a snapshot**: the text or the pixels at copy time. `previewURL`
+for an image returns the **stored PNG**, never the original file — it used to prefer the
+original when it still existed, which had Quick Look showing one file while Paste and
+Open in Preview used another. `originalFilePath` is still stored and is now only a
+display name; nothing fetches content through it, and there is no re-sync from the
+original. Edits saved in Preview, and Rotate, land on the stored PNG, so Paste follows
+them. See `docs/adr/0010-a-clipboard-item-is-a-snapshot.md`.
+
 ### QuickLookHelper — QLPreviewPanel bridge
 Data source and delegate for system Quick Look. Handles keyboard events (j/k navigation, Shift+Space dismiss). Reports dismissal via `onDismiss` callback.
+
+**A third-party `QLPreviewPanel` toolbar is close, fullscreen, title, Share and "Open with
+Preview" — that is the whole list**, verified on macOS 26 by screenshotting a throwaway
+app. Finder additionally shows Markup and Rotate because those are Finder **Quick Actions**
+(Action extensions); there is no public API to host them here and private API was rejected.
+Do not try to add them. The toolbar is Apple's and we add no keys inside the panel beyond
+the navigation ones above. An image Subject gets Rotate and Open in Preview from the Panel
+instead — `docs/adr/0011-image-edits-rotate-in-process-everything-else-is-preview.md`.
 
 ## Data Flow: Paste
 
@@ -392,6 +437,8 @@ User types query → Enter
 | `Subject.swift` | Subject model (app/file/folder/text/builtIn) |
 | `PathSubject.swift` | A Query beginning `/` or `~`, and the one URL→Subject resolver |
 | `OCR.swift` | The whole of the app's Vision use: URL → OCR Text |
+| `ImageActions.swift` | QR PNG generation and atomic, orientation-normalizing image rotation |
+| `EffectRunner.swift` | Executes system Effects; serializes image jobs and returns their answers |
 | `SubjectAction.swift` | Action model, text transforms, action handlers |
 | `FuzzyMatch.swift` | Fuzzy scoring (exact/prefix/substring/subsequence/levenshtein) |
 | `Emoji.swift` | Emoji model, SkinTone, default-tone preference, glyph→NSImage rendering |

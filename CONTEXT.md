@@ -74,6 +74,13 @@ _Avoid_: internal, system item, virtual subject
 The recorded list of things the user has copied, each one a Clipboard Item.
 _Avoid_: pasteboard, buffer
 
+**Clipboard Item**:
+One thing the user copied, kept as a snapshot: the text or the pixels as they
+were at copy time. A file it was copied from lends its name and nothing else —
+Quick Look, Paste, Share and Open in Preview all see the snapshot, and a later
+change to that file changes nothing here.
+_Avoid_: entry, record, link, reference
+
 **Emoji**:
 A single Unicode emoji together with its name and search keywords. Symbols are explicitly out of scope.
 _Avoid_: glyph, character, icon (Icon means an app's artwork)
@@ -116,6 +123,23 @@ Vision nor `mdfind` reports progress, so there is nothing for it to measure. It
 never fills, and it never appears without text saying what is being waited on.
 _Avoid_: progress, progress indicator, activity indicator, throbber
 
+### Sharing
+
+**Share**:
+The Action that hands a Subject's content to a macOS sharing service — AirDrop,
+Mail, Messages and the rest. The service is the Target. Every Subject that has
+content has Share: text, Emoji, a Clipboard Item, a file, a folder. Text that is
+a URL is shared as a link, not as text. A file found through Finder is shared by
+making it the Subject first (Use as Subject), never by a second Target.
+_Avoid_: send, export, share sheet, share menu
+
+**QR Code**:
+The Action that turns a text Subject into a QR code image. The image becomes a
+new Clipboard Item and the Subject in one move, so everything an image can have
+done to it — Paste, Save, Share — is one Phase away. Not a Share Target: a QR
+code is a form of the text, not a recipient of it.
+_Avoid_: generate QR, QR share, scan code
+
 ### Reading text out of images
 
 **OCR**:
@@ -141,6 +165,19 @@ Changing a text Subject's text in its own Card. Any text Subject can be edited �
 a Clipboard Item, OCR Text, or the output of a transform. Not a Clipboard
 capability; a text Subject capability.
 _Avoid_: inline edit, rename, amend
+
+**Rotate**:
+Rotate Left and Rotate Right, the two Actions that turn an image Subject a
+quarter turn in place — a Clipboard Item's snapshot or an image file on disk,
+without asking, as Finder does. The Subject stays and the Panel stays; only the
+pixels change. Not Editing: Editing is text.
+_Avoid_: edit image, transform (a Transform is a text thing), flip
+
+**Open in Preview**:
+The Action that hands an image Subject to Apple's Preview for anything Rotate
+cannot do — markup, crop, annotate. Codiclens has no image editor of its own and
+Quick Look outside Finder offers none; Preview is the editor.
+_Avoid_: markup, annotate, edit in preview
 
 **Path Subject**:
 A file or folder named by typing its path. A Query beginning `/` or `~` is a

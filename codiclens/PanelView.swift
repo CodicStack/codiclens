@@ -81,6 +81,10 @@ struct PanelView: View {
             guard foundNothing else { return }
             withAnimation(Motion.entrance) { shakeTrigger += 1 }
         }
+        .onChange(of: coordinator.imageActionFailed) { _, failed in
+            guard failed else { return }
+            withAnimation(Motion.entrance) { shakeTrigger += 1 }
+        }
     }
 
     // MARK: - The Card row

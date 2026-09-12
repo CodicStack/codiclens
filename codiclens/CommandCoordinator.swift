@@ -229,6 +229,13 @@ class CommandCoordinator {
     /// row shake twice instead of once.
     private(set) var ocrFoundNoText = false
 
+    /// Image work returns across the Effect seam. Generation IDs prevent a
+    /// completion from an earlier Panel session from changing a newer Subject.
+    private(set) var isImageActionInFlight = false
+    private(set) var imageActionFailed = false
+    private var imageActionGeneration = 0
+    private var pendingImageSubjectID: UUID?
+
     /// Whether zero Results means "nothing matched" rather than "not answered
     /// yet".
     ///
@@ -434,7 +441,7 @@ class CommandCoordinator {
             let action = actionVM.filteredActions[actionVM.selectedIndex]
             if !action.isFinal {
                 selectedAction = action
-                targetVM.loadTargets(for: subject, action: action)
+                loadTargets(for: subject, action: action)
                 phase = .pickingTarget
                 onPhaseChange?()
             }
@@ -473,6 +480,22 @@ class CommandCoordinator {
         }
     }
 
+    /// Fills the Target Phase for a non-Final Action.
+    ///
+    /// Share is the one Action whose Targets come from the *Payload* rather
+    /// than the Subject, and resolving a Payload is this object's job: a
+    /// Clipboard Image shares as its stored PNG, which only the history can
+    /// name. Going through `sharePayload(for:)` here is also what keeps the
+    /// list the user picks from and the item the service is handed the same
+    /// thing.
+    private func loadTargets(for subject: Subject, action: SubjectAction) {
+        if case .share = action.handler, let payload = sharePayload(for: subject) {
+            targetVM.loadShareTargets(for: payload)
+        } else {
+            targetVM.loadTargets(for: subject, action: action)
+        }
+    }
+
     /// Advances the machine and hands the resulting effects to the runner.
     /// The effects are returned too, so tests can assert on them directly.
     @discardableResult
@@ -480,7 +503,7 @@ class CommandCoordinator {
         // A second Enter while OCR is running must do nothing at all. Not a
         // debounce and not a delay: the run either is or is not in flight, and
         // while it is, the answer it will bring back owns the Subject.
-        guard !isOCRInFlight else { return [] }
+        guard !isOCRInFlight, !isImageActionInFlight else { return [] }
         let effects = submitEffects()
         runner.run(effects)
         return effects
@@ -526,7 +549,7 @@ class CommandCoordinator {
             guard let subject = selectedSubject else { return [] }
             guard action.isFinal else {
                 selectedAction = action
-                targetVM.loadTargets(for: subject, action: action)
+                loadTargets(for: subject, action: action)
                 phase = .pickingTarget
                 onPhaseChange?()
                 return []
@@ -586,6 +609,74 @@ class CommandCoordinator {
         retarget(at: text, writingTheQuery: false)
     }
 
+    /// QR bytes returning from the runner become a new Clipboard Item and the
+    /// current Subject in one move. No pasteboard write occurs on this path.
+    func receiveQRCode(_ data: Data?, generation: Int) {
+        guard isImageActionInFlight, generation == imageActionGeneration else { return }
+        isImageActionInFlight = false
+        let expectedSubjectID = pendingImageSubjectID
+        pendingImageSubjectID = nil
+        guard phase == .pickingAction, selectedSubject?.id == expectedSubjectID else { return }
+        guard let data, let item = history.recordGeneratedImage(data) else {
+            imageActionFailed = true
+            return
+        }
+
+        clipboardVM.load()
+        let subject = Subject(clipboardItem: item)
+        selectedSubject = subject
+        selectedAction = nil
+        actionVM.loadActions(for: subject)
+        phase = .pickingAction
+        syncQueryDisplay()
+        onPhaseChange?()
+    }
+
+    /// Rotation completion changes no model identity or history position. A
+    /// fresh Subject value makes SwiftUI reload pixels from the same URL.
+    func receiveImageRotation(
+        succeeded: Bool,
+        refreshedImage: NSImage? = nil,
+        generation: Int
+    ) {
+        guard isImageActionInFlight, generation == imageActionGeneration else { return }
+        isImageActionInFlight = false
+        let expectedSubjectID = pendingImageSubjectID
+        pendingImageSubjectID = nil
+        guard phase == .pickingAction, selectedSubject?.id == expectedSubjectID else { return }
+        guard succeeded, let subject = selectedSubject else {
+            imageActionFailed = true
+            return
+        }
+
+        let refreshed: Subject?
+        if let item = subject.clipboardItem {
+            refreshed = Subject(clipboardItem: item)
+        } else if let refreshedImage {
+            refreshed = Subject(
+                displayName: subject.displayName,
+                path: subject.path,
+                url: subject.url,
+                icon: refreshedImage,
+                kind: subject.kind
+            )
+        } else {
+            // Rotation succeeded even if AppKit could not decode a replacement
+            // icon. Re-identifying the Subject still invalidates SwiftUI's
+            // view of the file; keep its existing icon as fallback.
+            refreshed = Subject(
+                displayName: subject.displayName,
+                path: subject.path,
+                url: subject.url,
+                icon: subject.icon,
+                kind: subject.kind
+            )
+        }
+        guard let refreshed else { return }
+        selectedSubject = refreshed
+        onPhaseChange?()
+    }
+
     /// Asks that the next `reset` open straight into Emoji Mode.
     ///
     /// The panel resets itself as it appears, so the hotkey cannot simply set
@@ -614,6 +705,10 @@ class CommandCoordinator {
         textSubjectEditText = ""
         isOCRInFlight = false
         ocrFoundNoText = false
+        imageActionGeneration += 1
+        isImageActionInFlight = false
+        imageActionFailed = false
+        pendingImageSubjectID = nil
         subjectVM.isSearchCommitted = true
         actionVM.reset()
         targetVM.reset()
@@ -674,6 +769,23 @@ class CommandCoordinator {
         }
     }
 
+    /// What this subject hands to a sharing service.
+    ///
+    /// The same Payload as the pasteboard gets, with one difference: a
+    /// Clipboard Image shares as its **stored PNG's file URL** rather than as
+    /// image bytes, so the file arriving on the other machine keeps the name it
+    /// had here. Paste and Copy must still put pixels on the pasteboard — a
+    /// file URL there pastes a file reference into a document — which is why
+    /// this is a second method and not a change to `payload(for:)`.
+    private func sharePayload(for subject: Subject) -> Payload? {
+        if case .clipboard(let item) = subject.kind,
+           item.isImage,
+           let imageURL = history.imageURL(for: item) {
+            return .fileURL(imageURL)
+        }
+        return payload(for: subject)
+    }
+
     /// The plain text behind a subject, where it has any.
     private func plainText(for subject: Subject) -> String? {
         switch subject.kind {
@@ -686,10 +798,15 @@ class CommandCoordinator {
 
     /// The file a subject points at: its own URL, or the stored image for a
     /// clipboard entry.
+    ///
+    /// Never the file a Clipboard Item was copied *from*. A Clipboard Item is a
+    /// snapshot (`CONTEXT.md`, **Clipboard Item**), so Open in Preview, OCR,
+    /// Copy Path and Share all see the pixels as they were at copy time; the
+    /// original lends its name and nothing else.
     private func fileURL(for subject: Subject, target: ActionTarget? = nil) -> URL? {
         if let targetURL = target?.url { return targetURL }
         if case .clipboard(let item) = subject.kind {
-            return history.imageURL(for: item) ?? item.originalFileURL
+            return history.imageURL(for: item)
         }
         return subject.url
     }
@@ -786,6 +903,26 @@ class CommandCoordinator {
             // `docs/adr/0007-async-action-behind-the-effect-seam.md`.
             return [.ocr(url)]
 
+        case .qrCode:
+            guard case .emoji = subject.kind else {
+                guard let text = plainText(for: subject),
+                      ImageActions.canGenerateQRCode(for: text) else { return [] }
+                return beginImageAction(for: subject) { generation in
+                    .generateQRCode(text, generation: generation)
+                }
+            }
+            return []
+
+        case .rotate(let direction):
+            guard let url = fileURL(for: subject, target: target) else { return [] }
+            return beginImageAction(for: subject) { generation in
+                .rotateImage(url, direction: direction, generation: generation)
+            }
+
+        case .openInPreview:
+            guard let url = fileURL(for: subject, target: target) else { return [.hide] }
+            return [.hide, .openInPreview(url)]
+
         // MARK: Promotion
 
         case .useAsSubject:
@@ -834,7 +971,8 @@ class CommandCoordinator {
             return saveEffects(for: subject)
 
         case .share:
-            guard let service = target?.sharingService, let payload = payload(for: subject) else {
+            guard let service = target?.sharingService,
+                  let payload = sharePayload(for: subject) else {
                 return [.hide]
             }
             return [.hide, .share(payload, via: service)]
@@ -885,6 +1023,17 @@ class CommandCoordinator {
         case .service:
             return []
         }
+    }
+
+    private func beginImageAction(
+        for subject: Subject,
+        effect: (Int) -> Effect
+    ) -> [Effect] {
+        imageActionGeneration += 1
+        isImageActionInFlight = true
+        imageActionFailed = false
+        pendingImageSubjectID = subject.id
+        return [effect(imageActionGeneration)]
     }
 
     private func quickLookURL(for subject: Subject, target: ActionTarget?) -> URL? {

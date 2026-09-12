@@ -27,28 +27,13 @@ struct ActionTarget: Identifiable {
         }
     }
     
-    static func shareTargets(for subject: Subject) -> [ActionTarget] {
-        switch subject.kind {
-        case .text(let rawText):
-            return shareTargets(for: .text(rawText))
-        default:
-            guard let url = subject.url else { return [] }
-            return shareTargets(for: .fileURL(url))
-        }
-    }
-
-    /// Share targets the system offers for a payload. Clipboard items and
-    /// subjects both arrive here, so the two paths can't drift apart.
+    /// Share targets the system offers for a payload. Clipboard Items and
+    /// Subjects both arrive here — `CommandCoordinator` resolves the Payload
+    /// for either — so the two paths can't drift apart. The Payload is turned
+    /// into an item by `SharePayloadItems`, the same conversion the Share
+    /// Effect performs with, so the list can't disagree with the send.
     static func shareTargets(for payload: Payload) -> [ActionTarget] {
-        let items: [Any]
-        switch payload {
-        case .text(let text):
-            items = [text as NSString]
-        case .image(let data):
-            items = NSImage(data: data).map { [$0 as Any] } ?? []
-        case .fileURL(let url):
-            items = [url]
-        }
+        let items = [SharePayloadItems.item(for: payload)]
 
         return NSSharingService.sharingServices(forItems: items).map { service in
             let icon = service.image

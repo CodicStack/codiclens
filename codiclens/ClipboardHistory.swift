@@ -40,11 +40,24 @@ final class ClipboardHistory {
     func recordImage(_ pngData: Data, originalURL: URL? = nil, timestamp: Date = Date()) -> Bool {
         if let first = items.first, first.isImage, imageData(for: first) == pngData { return false }
 
-        let fileName = Self.imageFileName(
+        return insertImage(pngData, originalURL: originalURL, timestamp: timestamp)
+    }
+
+    /// Records output created inside Codiclens as a new Clipboard Item even
+    /// when equal pixels already sit at the top. QR Code promises a new image,
+    /// while pasteboard polling keeps its ordinary top-item deduplication.
+    @discardableResult
+    func recordGeneratedImage(_ pngData: Data, timestamp: Date = Date()) -> ClipboardItem? {
+        guard insertImage(pngData, originalURL: nil, timestamp: timestamp) else { return nil }
+        return items.first
+    }
+
+    private func insertImage(_ pngData: Data, originalURL: URL?, timestamp: Date) -> Bool {
+        let fileName = uniqueImageFileName(Self.imageFileName(
             timestamp: timestamp,
             originalURL: originalURL,
             extensionOverride: "png"
-        )
+        ))
         guard (try? store.writeImage(pngData, named: fileName)) != nil else { return false }
 
         items.insert(ClipboardItem(
@@ -61,7 +74,7 @@ final class ClipboardHistory {
     func recordImageFile(at source: URL, timestamp: Date = Date()) -> Bool {
         if let first = items.first, first.originalFilePath == source.path { return false }
 
-        let fileName = Self.imageFileName(timestamp: timestamp, originalURL: source)
+        let fileName = uniqueImageFileName(Self.imageFileName(timestamp: timestamp, originalURL: source))
         guard (try? store.copyImage(from: source, named: fileName)) != nil else { return false }
 
         items.insert(ClipboardItem(
@@ -121,13 +134,16 @@ final class ClipboardHistory {
         item.imageFileName.flatMap { store.imageData(named: $0) }
     }
 
-    /// What Quick Look should show: the original file if it still exists, the
-    /// stored image otherwise, and a written-out preview for text.
+    /// What Quick Look should show: the stored image, and a written-out
+    /// preview for text.
+    ///
+    /// Never the file the image was copied from, even when that file is still
+    /// there. A Clipboard Item is a **snapshot** — the pixels as they were at
+    /// copy time (`CONTEXT.md`, **Clipboard Item**) — so Quick Look, Paste,
+    /// Share and Open in Preview all show the same thing, and editing the
+    /// original afterwards changes none of them. `originalFilePath` survives to
+    /// lend the entry its name and nothing else.
     func previewURL(for item: ClipboardItem) -> URL? {
-        if let originalURL = item.originalFileURL,
-           FileManager.default.fileExists(atPath: originalURL.path) {
-            return originalURL
-        }
         if let imageURL = imageURL(for: item) {
             return imageURL
         }
@@ -150,6 +166,24 @@ final class ClipboardHistory {
 
     private func save() {
         store.saveItems(items)
+    }
+
+    /// A timestamp has one-second precision, so two images recorded during the
+    /// same second need distinct paths. Otherwise the newer write silently
+    /// changes the older Clipboard Item's snapshot too.
+    private func uniqueImageFileName(_ proposed: String) -> String {
+        guard store.imageData(named: proposed) != nil else { return proposed }
+
+        let pathExtension = (proposed as NSString).pathExtension
+        let stem = (proposed as NSString).deletingPathExtension
+        var suffix = 2
+        while true {
+            let candidate = pathExtension.isEmpty
+                ? "\(stem) \(suffix)"
+                : "\(stem) \(suffix).\(pathExtension)"
+            if store.imageData(named: candidate) == nil { return candidate }
+            suffix += 1
+        }
     }
 
     // MARK: - Naming

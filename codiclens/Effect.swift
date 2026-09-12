@@ -54,9 +54,19 @@ enum Effect {
     /// coordinator would be file I/O on the wrong side of the line.
     case ocr(URL)
 
+    /// Generate PNG bytes for a QR code away from the coordinator. The
+    /// generation lets the coordinator reject an answer from a Panel session
+    /// that has already been reset.
+    case generateQRCode(String, generation: Int)
+
+    /// Rotate the image at `URL` in place. Clipboard images pass their stored
+    /// snapshot URL; file Subjects pass the original file URL.
+    case rotateImage(URL, direction: ImageActions.RotationDirection, generation: Int)
+
     // Everything else
     case runAppleScript(String)
     case share(Payload, via: NSSharingService)
+    case openInPreview(URL)
     case quickLook(QuickLookContext)
     case showSettings
     case savePanel(data: Data, fileName: String, contentType: UTType)
@@ -87,10 +97,16 @@ extension Effect: Equatable {
             a == b
         case let (.ocr(a), .ocr(b)):
             a == b
+        case let (.generateQRCode(ta, ga), .generateQRCode(tb, gb)):
+            ta == tb && ga == gb
+        case let (.rotateImage(ua, da, ga), .rotateImage(ub, db, gb)):
+            ua == ub && da == db && ga == gb
         case let (.runAppleScript(a), .runAppleScript(b)):
             a == b
         case let (.share(pa, sa), .share(pb, sb)):
             pa == pb && sa === sb
+        case let (.openInPreview(a), .openInPreview(b)):
+            a == b
         case let (.quickLook(a), .quickLook(b)):
             a.selectedIndex == b.selectedIndex && a.items.map(\.url) == b.items.map(\.url)
         case let (.savePanel(da, na, ta), .savePanel(db, nb, tb)):
