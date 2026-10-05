@@ -86,7 +86,7 @@ import UniformTypeIdentifiers
 /// to OCR, to `isOCRInFlight`, to searching, or to any other in-flight or
 /// waiting state — reading it as one is the single most likely way this feature
 /// gets broken later, which is why it is written here, in
-/// `docs/adr/0003-motion-budget.md` and in `CONTEXT.md` all three. OCR Text
+/// `docs/adr/0003-motion-budget.md` and in `GLOSSARY.md` all three. OCR Text
 /// landing does sweep the Subject Card, and *not* because OCR ran: it sweeps
 /// because the Subject was replaced, exactly as a transform's output does.
 /// Nothing in this file reads an in-flight flag. It shares a drawing primitive
