@@ -662,7 +662,7 @@ enum Style {
 /// selection fought every app icon it sat next to.
 ///
 /// The Border Beam's two colours are the one exception, and a deliberate one.
-/// The ban `CONTEXT.md` records is on a *static* accent — something on screen
+/// The ban `GLOSSARY.md` records is on a *static* accent — something on screen
 /// long enough to be a colour the app is. The beam is gone in 0.55s.
 private struct Palette {
 
@@ -697,7 +697,7 @@ private struct Palette {
     /// **This is the "fixed lamp" that was declined on 2026-08-22 and reopened on
     /// 2026-09-01.** The decline was made while the Border Beam was expected to
     /// carry the reference's look alone; the reopening is the finding that it
-    /// cannot. The ban `CONTEXT.md` records is on a static *accent colour*, and a
+    /// cannot. The ban `GLOSSARY.md` records is on a static *accent colour*, and a
     /// monochrome light is not one.
     let lamp: Color
 

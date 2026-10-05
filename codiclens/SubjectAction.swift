@@ -209,7 +209,7 @@ struct SubjectAction: Identifiable {
     /// Reading the text out of an image.
     ///
     /// Named for the acronym deliberately, against Apple's "Recognize Text" —
-    /// it is the word the user reaches for. See `CONTEXT.md`.
+    /// it is the word the user reaches for. See `GLOSSARY.md`.
     private static let ocr = SubjectAction(
         name: "OCR",
         icon: .sfSymbol("text.viewfinder"),

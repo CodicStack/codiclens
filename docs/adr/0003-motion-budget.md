@@ -87,7 +87,7 @@ it is recorded here because the alternative is it being rediscovered in
 sweeps around that Card when the Card **becomes about something new**. It means
 nothing. It is emphatically **not** tied to OCR, to `isOCRInFlight`, or to any
 waiting or in-flight state — that misreading is the single most likely way this
-feature gets wrong later, which is why it is written here and in `CONTEXT.md`
+feature gets wrong later, which is why it is written here and in `GLOSSARY.md`
 both. OCR Text sweeps the Subject Card because the *Subject was replaced*; that
 it happens when OCR finishes is a coincidence of the same event, and nothing in
 `BorderBeam.swift` reads an in-flight flag. It shares a drawing primitive with
