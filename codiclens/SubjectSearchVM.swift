@@ -1,17 +1,72 @@
 import AppKit
 import Combine
 
+/// When the list below the apps is searched: on the keystroke, without
+/// holding it up, and once typing pauses.
+///
+/// The app's is `LiveSearchSchedule`. A test hands in one that holds both
+/// until the test runs them, so no test waits on a clock or races one.
+protocol SearchSchedule: AnyObject {
+    /// Runs `search` now, off the keystroke.
+    func run(_ search: @escaping @MainActor () async -> Void)
+    /// Runs `settle` once typing has paused, unless another keystroke asks
+    /// first — then only the newest is run, once that one has paused.
+    func afterPause(_ settle: @escaping @MainActor () -> Void)
+}
+
+/// A `Task` for the search, and a 120ms Combine debounce for the pause. The
+/// debounce is right here, not a hack: it decides *when to ask* again, and
+/// nothing on screen waits for it.
+final class LiveSearchSchedule: SearchSchedule {
+    private let typed = PassthroughSubject<@MainActor () -> Void, Never>()
+    private var pause: AnyCancellable?
+
+    init() {
+        pause = typed
+            .debounce(for: .milliseconds(120), scheduler: RunLoop.main)
+            .sink { settle in settle() }
+    }
+
+    func run(_ search: @escaping @MainActor () async -> Void) {
+        Task { await search() }
+    }
+
+    func afterPause(_ settle: @escaping @MainActor () -> Void) {
+        typed.send(settle)
+    }
+}
+
 @Observable
 class SubjectSearchVM {
     var searchText: String = "" {
         didSet {
             guard searchText != oldValue else { return }
-            updateResults()
+            queryChanged()
         }
     }
     var results: [Subject] = []
-    var selectedIndex: Int = 0
     var isSearchCommitted: Bool = false
+
+    /// The highlighted row, which Enter acts on.
+    ///
+    /// Set from outside only by the user moving it, so setting it is what
+    /// remembers the row by its id (`heldRow`): the list below the apps
+    /// re-ranks while typing goes on, and a row the user moved onto by hand
+    /// is followed there. Index 0 is the first row, which is where an
+    /// untouched selection stays.
+    var selectedIndex: Int {
+        get { selection }
+        set {
+            selection = newValue
+            heldRow = newValue == 0 ? nil : rowID(at: newValue)
+        }
+    }
+    private var selection = 0
+
+    /// The `ResultDisplayItem.id` of the row the user moved the selection
+    /// onto by hand, or nil while it is on the first row. Cleared when that
+    /// row leaves the list, and the selection goes back to the first row.
+    @ObservationIgnored private var heldRow: String?
 
     /// The Index of installed apps. This view model consumes it and never
     /// builds it — rebuilds happen behind `AppIndex`.
@@ -50,11 +105,11 @@ class SubjectSearchVM {
     /// Whether the Query has been answered in full, which is what "No
     /// results" and the Card's "No match" wait on.
     ///
-    /// Two answers, arriving at two moments: the apps on the keystroke, once
-    /// the Index has landed, and the list below them once typing pauses
-    /// (`searchSources`). Saying "No results" between the two would be the
-    /// "No results, then it changes its mind" defect again, so the claim waits
-    /// for both. A path has no list below it, and keeps the Index's gate alone.
+    /// Two answers: the apps on the keystroke, once the Index has landed, and
+    /// the list below them a moment later, off the main actor. Until the list
+    /// has answered *this* Query the one on screen answers an earlier one, so
+    /// it says nothing about this one, and neither may "No results". A path
+    /// has no list below it, and keeps the Index's gate alone.
     var hasAnswered: Bool {
         guard isIndexReady else { return false }
         return isPathQuery || answeredQuery == searchText
@@ -98,9 +153,10 @@ class SubjectSearchVM {
         }
     }
 
-    /// The list below the apps, for `answeredQuery`. Empty until the pause,
-    /// and emptied again the moment the Query changes: a list answering the
-    /// previous Query is not an answer to this one.
+    /// The list below the apps, as `answeredQuery` was answered. It stays
+    /// while the next Query is out, so the list is never blanked between
+    /// keystrokes, and is replaced in place when that answer lands — rows keep
+    /// their ids (`ResultDisplayItem`), so they update rather than rebuild.
     private(set) var sourceResults: [SourceResult] = [] {
         didSet {
             sourceResultsBySubject = Dictionary(
@@ -110,39 +166,63 @@ class SubjectSearchVM {
     }
     private var sourceResultsBySubject: [UUID: SourceResult] = [:]
 
-    /// The Query `sourceResults` answer. The list lands once per Query and is
-    /// never ranked again until the Query changes — ADR 0012, and ADR 0004's
-    /// rule that rows do not move under the user.
+    /// The Query `sourceResults` answer.
     private var answeredQuery: String?
+
+    /// The Query the settled pass has answered, once it has: from then on a
+    /// word search for it is dropped as it lands, so the list does not change
+    /// again until the Query does.
+    private var settledQuery: String?
+
+    /// Bumped by every settled pass, so only the newest one lands.
+    private var settleGeneration = 0
+
+    /// The Query a keystroke's search of the list below the apps is waiting
+    /// to run for, and whether one is out. One is out at a time, and a Query
+    /// typed meanwhile replaces whatever was waiting: the File Index reader is
+    /// one connection behind a lock, and a search can take half a second ("the "
+    /// over a million Passages), so a search per keystroke would queue behind
+    /// it and every answer but the last would be dropped as it landed.
+    private var waitingQuery: String?
+    private var isSearching = false
 
     private let sources: SourceStore
     private let history: ClipboardHistory
     private let emoji: EmojiSearchVM
     private let searchFiles: FileIndex.Search
+    private let searchSettled: FileIndex.SettledSearch
+    private let schedule: SearchSchedule
 
     private let commitSubject = PassthroughSubject<Void, Never>()
     private var commitCancellable: AnyCancellable?
-    private let sourceSearchSubject = PassthroughSubject<Void, Never>()
-    private var sourceSearchCancellable: AnyCancellable?
 
     /// - Parameters:
     ///   - sources: which Sources are switched on. Read on every search, so a
     ///     switch thrown in Settings takes effect on the next keystroke.
     ///   - history, emoji: what the list below the apps ranks Clipboard Items
     ///     and Emoji from — the same history and dataset their own Modes use.
-    ///   - searchFiles: the File Index. Tests pass a stand-in.
+    ///   - searchFiles: the File Index's word search, on the keystroke. Tests
+    ///     pass a stand-in.
+    ///   - searchSettled: the File Index's settled search, once typing pauses,
+    ///     where search by meaning joins. Tests pass a stand-in.
+    ///   - schedule: when the list below the apps is searched. Tests pass one
+    ///     they run by hand.
     init(
         index: AppIndex,
         sources: SourceStore,
         history: ClipboardHistory,
         emoji: EmojiSearchVM,
-        searchFiles: @escaping FileIndex.Search
+        searchFiles: @escaping FileIndex.Search,
+        searchSettled: @escaping FileIndex.SettledSearch,
+        schedule: SearchSchedule
     ) {
         self.index = index
         self.sources = sources
         self.history = history
         self.emoji = emoji
         self.searchFiles = searchFiles
+        self.searchSettled = searchSettled
+        self.schedule = schedule
         self.builtIns = Self.makeBuiltIns()
 
         // Starts the first scan on a background queue and begins watching.
@@ -155,21 +235,12 @@ class SubjectSearchVM {
                 self?.isSearchCommitted = true
             }
 
-        // The list below the apps lands once typing pauses. A debounce is
-        // right here, not a hack: it decides *when to ask*, and nothing is
-        // shown in the meantime that has to be taken back.
-        sourceSearchCancellable = sourceSearchSubject
-            .debounce(for: .milliseconds(120), scheduler: RunLoop.main)
-            .sink { [weak self] in
-                Task { await self?.searchSources() }
-            }
-
         index.onFirstPopulation { [weak self] in
             self?.indexFirstPopulated()
         }
     }
 
-    /// The Index has landed for the very first time. Re-run the Query once.
+    /// The Index has landed for the very first time. Match the Query once.
     ///
     /// This is not an exception to the mid-search rule below — it sits outside
     /// it. That rule protects Results the user can see and has selected into:
@@ -183,7 +254,7 @@ class SubjectSearchVM {
     /// "simplify" this into an unconditional observer of `AppIndex.apps`.
     private func indexFirstPopulated() {
         guard !searchText.isEmpty, !standsAsText else { return }
-        updateResults()
+        matchQuery()
     }
 
     /// ⌘E: the Query, or what the user edited it into, stands as a text
@@ -199,9 +270,11 @@ class SubjectSearchVM {
     }
 
     /// Escape on a Query standing as text: back to what the Query matched.
-    /// The Query has not changed, so neither has the list below the apps.
+    /// The Query has not changed, so the list below the apps is not asked
+    /// again: an answer that landed while the text stood was kept for this.
     func withdrawText() {
-        updateResults()
+        isSearchCommitted = false
+        matchQuery()
     }
 
     /// The row of the list below the apps that `subject` is, if it is one.
@@ -243,25 +316,40 @@ class SubjectSearchVM {
         }
     }
 
-    /// Runs the Query against the Index.
+    /// A keystroke: the apps now, and the list below them asked again — at
+    /// once for its word matches, and once more when typing pauses.
     ///
-    /// Called only from `searchText`'s `didSet` — a rebuild that lands while
-    /// results are on screen swaps the Index but does not come through here.
-    /// Re-running the Query live would reshuffle the rows under the user's
-    /// fingers and could move the selected row out from under Enter, launching
-    /// the wrong app. The new Index takes effect on the next keystroke.
-    private func updateResults() {
+    /// A path, and an empty Query, have no list below them: it goes.
+    private func queryChanged() {
         isSearchCommitted = false
-
-        if answeredQuery != searchText {
-            answeredQuery = nil
+        settledQuery = nil
+        guard !searchText.isEmpty, !isPathQuery else {
             sourceResults = []
+            answeredQuery = nil
+            waitingQuery = nil
+            matchQuery()
+            return
         }
+        matchQuery()
+        ask(searchText)
+        schedule.afterPause { [weak self] in self?.settle() }
+    }
 
+    /// Runs the Query against the Index and puts the apps on top of the list
+    /// below them as it stands.
+    ///
+    /// Called on a keystroke, on Escape from ⌘E's text and when the Index first
+    /// lands — never on a later rebuild, which swaps the Index but does not
+    /// come through here. Re-running the Query live would reshuffle the rows
+    /// under the user's fingers and could move the selected row out from under
+    /// Enter, launching the wrong app. The new Index takes effect on the next
+    /// keystroke.
+    private func matchQuery() {
         guard !searchText.isEmpty else {
             appResults = []
             results = []
-            selectedIndex = 0
+            heldRow = nil
+            selection = 0
             return
         }
 
@@ -272,7 +360,8 @@ class SubjectSearchVM {
         if isPathQuery {
             appResults = []
             results = PathSubject.resolve(searchText).map { [$0] } ?? []
-            selectedIndex = 0
+            heldRow = nil
+            selection = 0
             commitSubject.send()
             return
         }
@@ -303,49 +392,108 @@ class SubjectSearchVM {
 
         // Zero matches is "No results", never a text Subject. Text is something
         // the user asks for, with ⌘E — `standAsText`.
-        results = appResults + sourceResults.map(\.subject)
-        selectedIndex = 0
-
+        compose()
         commitSubject.send()
-        if answeredQuery != searchText { sourceSearchSubject.send() }
     }
 
-    /// The debounced step: the list below the apps, for the Query in force.
-    /// Internal so a test can run it without waiting out the debounce.
-    ///
-    /// What it ranks is copied here, on the main actor; the File Index read
-    /// and the ranking run off it (`SourceSearch.ranked`). The answer is kept
-    /// only if the Query is still the one it was asked for and nothing has
-    /// answered that Query yet — so it lands once, and the rows above it, the
-    /// apps, do not move. A Query standing as text keeps standing: the answer
-    /// is kept for Escape to come back to.
-    func searchSources() async {
-        let query = searchText
-        guard !query.isEmpty, !isPathQuery, answeredQuery != query else { return }
+    /// The apps, then the list below them, and the selection where the user
+    /// left it: on the row they moved onto by hand while it is still listed,
+    /// otherwise on the first row.
+    private func compose() {
+        // An app the File Index also holds is already above, as an app.
+        let appPaths = Set(appResults.compactMap(\.path))
+        let below = sourceResults.filter { row in
+            guard case .file(let file) = row.hit else { return true }
+            return !appPaths.contains(file.url.path)
+        }
+        results = appResults + below.map(\.subject)
 
-        let search = SourceSearch(
+        let held = heldRow.flatMap { id in results.indices.first { rowID(at: $0) == id } }
+        if held == nil { heldRow = nil }
+        selection = held ?? 0
+    }
+
+    /// The id `displayResults` gives the row at `index`.
+    private func rowID(at index: Int) -> String? {
+        guard results.indices.contains(index) else { return nil }
+        let subject = results[index]
+        return sourceResult(for: subject)?.display.id ?? ResultDisplayItem(from: subject).id
+    }
+
+    /// Typing has paused on this Query: the settled pass.
+    ///
+    /// The File Index's settled search — the word search with the last word a
+    /// prefix in Passages too, and with search by meaning on, meaning fused in
+    /// (`FileIndex.searchSettled`) — ranked with the Clipboard Items and Emoji
+    /// as the keystroke's answer is, re-ranks the list once. After that the
+    /// list does not change until the Query does (`settledQuery`).
+    ///
+    /// It runs beside the keystroke's search, not behind it: it reads on a
+    /// connection of its own, and the first one of a session waits for the
+    /// query encoder, which must not hold up the next keystroke's words. Only
+    /// the newest settled pass lands: the File Index answers one superseded
+    /// or cancelled with nothing, and that nothing is not an answer.
+    private func settle() {
+        guard !searchText.isEmpty, !isPathQuery else { return }
+        settleGeneration += 1
+        let generation = settleGeneration
+        let search = sourceSearch(searchText, files: searchSettled)
+        schedule.run { [weak self] in
+            let ranked = await search.ranked()
+            guard let self, generation == settleGeneration else { return }
+            land(ranked, for: search.query, settled: true)
+        }
+    }
+
+    /// Asks for the list below the apps for `query`: now, if no search is
+    /// out, or as soon as the one that is lands.
+    private func ask(_ query: String) {
+        waitingQuery = query
+        guard !isSearching else { return }
+        isSearching = true
+        schedule.run { [weak self] in await self?.searchWhileAsked() }
+    }
+
+    /// Searches for the Query waiting until none is.
+    private func searchWhileAsked() async {
+        let words = searchFiles
+        while let query = waitingQuery {
+            waitingQuery = nil
+            let search = sourceSearch(query, files: { query in words(query) })
+            land(await search.ranked(), for: query)
+        }
+        isSearching = false
+    }
+
+    /// What the list below the apps ranks for `query`, with `files` as the
+    /// File Index's part. Copied here, on the main actor; the File Index read
+    /// and the ranking run off it (`SourceSearch.ranked`).
+    private func sourceSearch(_ query: String, files: @escaping SourceSearch.FileSearch) -> SourceSearch {
+        SourceSearch(
             query: query,
-            searchFiles: searchFiles,
+            searchFiles: files,
             clipboard: sources.isEnabled(.clipboardHistory) ? history.items.filter { !$0.isImage } : [],
             emoji: sources.isEnabled(.emoji) ? emoji.index.all : [],
             recentEmoji: emoji.recents.strings
         )
-        let ranked = await search.ranked()
-
-        guard searchText == query, answeredQuery != query else { return }
-        answeredQuery = query
-        // An app the File Index also holds is already above, as an app.
-        let appPaths = Set(appResults.compactMap(\.path))
-        sourceResults = ranked.compactMap { row(for: $0.hit, skipping: appPaths) }
-        if !standsAsText {
-            results = appResults + sourceResults.map(\.subject)
-        }
     }
 
-    private func row(for hit: SourceSearch.Hit, skipping appPaths: Set<String>) -> SourceResult? {
+    /// An answer for `query` replaces the list below the apps, if `query` is
+    /// still the Query. One for a Query the user has typed past is dropped: it
+    /// would put rows answering an older Query over the newer one's. So is a
+    /// word answer for a Query the settled pass has already answered. A Query
+    /// standing as text keeps standing; the answer is kept for Escape.
+    private func land(_ ranked: [SourceSearch.Ranked], for query: String, settled: Bool = false) {
+        guard query == searchText, settled || settledQuery != query else { return }
+        if settled { settledQuery = query }
+        answeredQuery = query
+        sourceResults = ranked.map { row(for: $0.hit) }
+        if !standsAsText { compose() }
+    }
+
+    private func row(for hit: SourceSearch.Hit) -> SourceResult {
         switch hit {
         case .file(let file):
-            guard !appPaths.contains(file.url.path) else { return nil }
             // The type's icon, not the file's: one cached lookup per type
             // instead of a disk read per row. The thumbnail replaces it, and
             // choosing the row resolves the file in full (`PathSubject`).
@@ -357,7 +505,8 @@ class SubjectSearchVM {
                 url: file.url,
                 icon: icon,
                 kind: file.kind == .folder ? .folder : .file(contentType: file.contentType),
-                thumbnailURL: file.kind == .file ? file.url : nil
+                thumbnailURL: file.kind == .file ? file.url : nil,
+                passage: file.passage.map(SubjectPassage.init)
             )
             return SourceResult(hit: hit, subject: subject, display: ResultDisplayItem(file: file, icon: icon))
 
@@ -386,6 +535,8 @@ class SubjectSearchVM {
         appResults = []
         sourceResults = []
         answeredQuery = nil
+        settledQuery = nil
+        waitingQuery = nil
         selectedIndex = 0
         isSearchCommitted = false
     }

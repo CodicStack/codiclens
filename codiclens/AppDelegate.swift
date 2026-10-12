@@ -45,6 +45,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyHandlerRef: EventHandlerRef?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Relaunched as the embedding helper: no Panel, no hotkeys, no File
+        // Index, no clipboard recorder, only the request loop.
+        if EmbeddingService.isRequested() { return EmbeddingService.start() }
         guard !Self.isTestHost else { return }
         panelController = PanelController()
         // Off-thread, so neither launch nor the first Emoji Mode waits on the
@@ -67,7 +70,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// handler, the hotkeys, both FSEvents streams and the pasteboard timer all
     /// outlive the decision to quit.
     func applicationWillTerminate(_ notification: Notification) {
-        guard !Self.isTestHost else { return }
+        guard !Self.isTestHost, !EmbeddingService.isRequested() else { return }
         unregisterHotKeys()
         pasteboardWatcher?.stop()
         panelController?.tearDown()

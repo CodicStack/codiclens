@@ -102,12 +102,14 @@ struct FileIndexCatchUpTests {
     @Test func aFirstLaunchCrawlsEverySourceAndStoresWhereToReplayFrom() throws {
         let f = try Fixture()
         let before = FSEventsGetCurrentEventId()
+        let indexer = f.launch()
 
-        #expect(try f.start(f.launch(), ["A", "B"]) == ["A", "B"])
+        #expect(try f.start(indexer, ["A", "B"]) == ["A", "B"])
 
         let stored = try #require(try f.writer.eventID())
         #expect(stored >= before && stored <= FSEventsGetCurrentEventId())
-        #expect(try f.writer.rulesFingerprint() == FileIndexRules.defaults.fingerprint)
+        #expect(try f.writer.rulesFingerprint() == indexer.rulesFingerprint)
+        #expect(indexer.rulesFingerprint.hasPrefix(FileIndexRules.defaults.fingerprint))
     }
 
     @Test func aLaunchWithNothingChangedCrawlsNothing() throws {

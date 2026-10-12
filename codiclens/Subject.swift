@@ -39,6 +39,10 @@ struct Subject: Identifiable {
     /// Clipboard Image's stored PNG. `nil` for everything that is its icon — an
     /// app, a folder, text, a Built-in.
     let thumbnailURL: URL?
+    /// Where in the file a File Result matched, carried from its row to the
+    /// Subject chosen from it and through its Actions. Nil for everything else,
+    /// a file that matched on its name included.
+    var passage: SubjectPassage?
 
     var subtitle: String {
         switch kind {
@@ -82,7 +86,8 @@ struct Subject: Identifiable {
         url: URL?,
         icon: NSImage,
         kind: SubjectKind,
-        thumbnailURL: URL? = nil
+        thumbnailURL: URL? = nil,
+        passage: SubjectPassage? = nil
     ) {
         self.displayName = displayName
         self.path = path
@@ -90,6 +95,7 @@ struct Subject: Identifiable {
         self.icon = icon
         self.kind = kind
         self.thumbnailURL = thumbnailURL
+        self.passage = passage
     }
 
     /// A Clipboard Item as a Subject. `imageURL` is its stored PNG, which only

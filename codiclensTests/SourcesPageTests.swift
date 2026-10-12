@@ -100,10 +100,24 @@ struct SourcesPageTests {
 
         #expect(page.skipRows.map(\.title) == [
             "Caches", "node_modules and build output", "App bundles and packages", "Hidden files and folders",
-            "Repos", "Git worktrees", ".env files", "Keys and certificates"
+            "Repos", "Git worktrees", "Ignored by git", ".env files", "Keys and certificates"
         ])
-        #expect(page.skipRows.map(\.isSkipped) == [true, true, true, false, false, true, false, false])
+        #expect(page.skipRows.map(\.isSkipped) == [true, true, true, false, false, true, true, false, false])
         #expect(page.skipRows.allSatisfy { !$0.detail.isEmpty && !$0.detail.contains("\u{2014}") })
+    }
+
+    /// Without git the switch is still there, and says it does nothing.
+    @Test func ignoredByGitSaysWhenThereIsNoGit() throws {
+        var page = page()
+        page.isGitAvailable = true
+        let withGit = try #require(page.skipRows.first { $0.group == .gitIgnored })
+        page.isGitAvailable = false
+        let withoutGit = try #require(page.skipRows.first { $0.group == .gitIgnored })
+
+        #expect(withoutGit.isSkipped)
+        #expect(withoutGit.detail != withGit.detail)
+        #expect(withoutGit.detail.contains("git isn't installed"))
+        #expect(page.skipRows.filter(\.hasNoEffect).map(\.group) == [.gitIgnored])
     }
 
     @Test func aSkipSwitchChangesTheRules() throws {

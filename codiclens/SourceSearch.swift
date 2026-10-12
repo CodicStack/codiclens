@@ -4,8 +4,8 @@ import Foundation
 /// and Emoji, ranked against each other by score — see
 /// `docs/adr/0012-files-in-subject-search-text-mode-is-cmd-e.md`.
 ///
-/// A copy of everything it ranks, taken on the main actor as typing pauses,
-/// so the ranking itself can run anywhere. `SubjectSearchVM` owns when it runs
+/// A copy of everything it ranks, taken on the main actor as the search
+/// starts, so the ranking itself can run anywhere. `SubjectSearchVM` owns when it runs
 /// and what becomes of the answer; this owns only the order.
 ///
 /// Every Source scores on `fuzzyScore`'s scale, lower is better, and that is
@@ -34,8 +34,12 @@ nonisolated struct SourceSearch: Sendable {
     static let clipboardCap = 3
     static let emojiCap = 3
 
+    /// The File Index's part: the word search on the keystroke, the settled
+    /// search once typing pauses (`SubjectSearchVM`).
+    typealias FileSearch = @Sendable (_ query: String) async -> [FileHit]
+
     let query: String
-    let searchFiles: FileIndex.Search
+    let searchFiles: FileSearch
     /// Text Clipboard Items, or none when Clipboard History is switched off.
     /// An image's name is only its timestamp, so it has nothing to match on.
     let clipboard: [ClipboardItem]
@@ -43,15 +47,17 @@ nonisolated struct SourceSearch: Sendable {
     let emoji: [Emoji]
     let recentEmoji: [String]
 
-    /// Off the main actor: the File Index read and ranking 1,914 Emoji are the
-    /// cost the debounce exists to pay once.
+    /// Off the main actor: the File Index read and ranking 1,914 Emoji are
+    /// paid on the keystroke, and must not hold it up.
     @concurrent
     func ranked() async -> [Ranked] {
-        rank()
+        rank(files: await searchFiles(query))
     }
 
-    func rank() -> [Ranked] {
-        let fileRows = searchFiles(query)
+    /// `files`, the File Index's answer, ranked with the Clipboard Items and
+    /// Emoji that match.
+    func rank(files: [FileHit]) -> [Ranked] {
+        let fileRows = files
             .prefix(Self.fileLimit)
             .map { Ranked(hit: .file($0), score: $0.score) }
 

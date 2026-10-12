@@ -1,4 +1,5 @@
-Parts of the File Index (SQLite.swift, FileIndexStore.swift, FileIndexRules.swift) are adapted from DigUp,
+Parts of the File Index (SQLite.swift, FileIndexStore.swift, FileIndexRules.swift, FileContent.swift,
+FileContentReader.swift) are adapted from DigUp,
 https://github.com/ARahim3/DigUp, under the following licence.
 
 MIT License

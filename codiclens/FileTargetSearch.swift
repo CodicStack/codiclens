@@ -104,14 +104,17 @@ nonisolated final class FileTargetSearch: @unchecked Sendable {
         return indexed + rest
     }
 
-    /// The File Index's Targets for `query`, best first. A few milliseconds,
+    /// The File Index's Targets for `query`, best first: files named like
+    /// it, then files that say it, under their Passage. A few milliseconds,
     /// so the list has rows while Spotlight is still looking. Apps are left
     /// out, as `readPaths` leaves them out of `mdfind`'s.
     func indexTargets() -> [ActionTarget] {
         let hits = Self.signposter.withIntervalSignpost("File Index", id: Self.signposter.makeSignpostID()) {
             searchFiles(query).filter { $0.url.pathExtension != "app" }
         }
-        return Self.targets(for: hits.map(\.url.path))
+        let passages = Dictionary(hits.compactMap { hit in hit.passage.map { (hit.url.path, $0) } },
+                                  uniquingKeysWith: { first, _ in first })
+        return Self.targets(for: hits.map(\.url.path), passages: passages)
     }
 
     /// `mdfind`'s Targets for `query`, best first, leaving out every path
@@ -230,18 +233,22 @@ nonisolated final class FileTargetSearch: @unchecked Sendable {
         targets(for: rank(paths, query: query))
     }
 
-    private static func targets(for rankedPaths: [String]) -> [ActionTarget] {
+    /// A Target per path, under its folder — or, for a file the File Index
+    /// found by its words, under its Passage.
+    private static func targets(for rankedPaths: [String], passages: [String: FileHit.Passage] = [:]) -> [ActionTarget] {
         let home = NSHomeDirectory()
         return signposter.withIntervalSignpost("Icons", id: signposter.makeSignpostID()) {
             rankedPaths.map { path in
                 let url = URL(fileURLWithPath: path)
                 let icon = NSWorkspace.shared.icon(forFile: path)
                 icon.size = NSSize(width: 32, height: 32)
+                let passage = passages[path]
                 return ActionTarget(
                     name: url.lastPathComponent,
                     icon: icon,
                     thumbnailURL: url,
-                    subtitle: shortenPath(path, home: home),
+                    subtitle: passage?.subtitle ?? shortenPath(path, home: home),
+                    subtitleMarks: passage?.subtitleMatches,
                     url: url,
                     sharingService: nil
                 )

@@ -33,6 +33,11 @@ nonisolated struct FileIndexRules: Equatable, Sendable {
         /// another checkout's `.git/worktrees`. The same repo again, file for
         /// file, so it is out by default even while Repos is in.
         case worktrees
+        /// What git ignores in a repo inside a Source (`GitIgnored`): its
+        /// `.gitignore` files, `.git/info/exclude` and the user's global
+        /// excludes. Not `.env` files or keys, which keep to their own
+        /// switches even where a repo ignores them.
+        case gitIgnored
         /// `.env` and its variants.
         case envFiles
         /// Private keys, certificates and keychains.
@@ -47,6 +52,9 @@ nonisolated struct FileIndexRules: Equatable, Sendable {
         case indexWithoutDescending
         /// No row, and nothing inside it.
         case skip
+        /// No row, but what is inside is judged on its own: a folder git
+        /// ignores, walked only for the `.env` files and keys in it.
+        case descendWithoutIndexing
     }
 
     /// Everything the rules look at, read once per entry. `init(url:)` fills
@@ -73,6 +81,9 @@ nonisolated struct FileIndexRules: Equatable, Sendable {
         /// Leading bytes, for the one rule that needs them: `.key` is
         /// Keynote's extension as well as a private key's.
         var startsWithZipMagic = false
+        /// Ignored by git, as the indexer's `GitIgnored` says: nothing on
+        /// disk in the entry's own place says so.
+        var isGitIgnored = false
 
         var name: String { (path as NSString).lastPathComponent }
     }
@@ -84,12 +95,18 @@ nonisolated struct FileIndexRules: Equatable, Sendable {
 
     /// A new install's: tool output and internals out, everything the user
     /// might go looking for in.
-    static let defaultSkipped: Set<SkipGroup> = [.caches, .dependencies, .bundles, .worktrees]
+    static let defaultSkipped: Set<SkipGroup> = [.caches, .dependencies, .bundles, .worktrees, .gitIgnored]
 
     static let defaults = FileIndexRules(skipped: defaultSkipped, patterns: [])
 
     func skips(_ group: SkipGroup) -> Bool {
         skipped.contains(group)
+    }
+
+    /// Whether a `.env` file or a key can be indexed: then a folder git
+    /// ignores is still walked for them.
+    var keepsSecretFiles: Bool {
+        !skips(.envFiles) || !skips(.keys)
     }
 
     /// Whether these rules leave out everything `other` does, and perhaps
@@ -126,6 +143,15 @@ nonisolated struct FileIndexRules: Equatable, Sendable {
             return .skip
         }
 
+        if skips(.gitIgnored), entry.isGitIgnored {
+            if entry.isDirectory {
+                // Never a package or git's own: no `.env` lives in those.
+                let walks = keepsSecretFiles && !entry.isPackage && !entry.isBareRepo
+                return walks ? .descendWithoutIndexing : .skip
+            }
+            // `.env` files and keys keep to their own switches, above.
+            if !Self.isEnvironmentFile(name), !Self.isKey(entry) { return .skip }
+        }
         if skips(.bundles), entry.isPackage || entry.isBareRepo { return .indexWithoutDescending }
         return .index
     }

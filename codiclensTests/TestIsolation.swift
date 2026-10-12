@@ -58,13 +58,18 @@ extension CommandCoordinator {
     /// and Emoji state, and a File Index that finds nothing unless a test
     /// hands in one that does. Defaults are nil because a default argument
     /// cannot build a main-actor value here.
+    ///
+    /// Without `searchSettled` the settled pass asks `searchFiles` again, as
+    /// the File Index's own does with search by meaning off.
     static func isolated(
         runner: EffectRunner? = nil,
         history: ClipboardHistory? = nil,
         emojiVM: EmojiSearchVM? = nil,
         index: AppIndex? = nil,
         sources: SourceStore? = nil,
-        searchFiles: @escaping FileIndex.Search = { _ in [] }
+        searchFiles: @escaping FileIndex.Search = { _ in [] },
+        searchSettled: FileIndex.SettledSearch? = nil,
+        searchSchedule: HeldSearchSchedule? = nil
     ) -> CommandCoordinator {
         CommandCoordinator(
             runner: runner ?? RecordingEffectRunner(),
@@ -72,7 +77,47 @@ extension CommandCoordinator {
             emojiVM: emojiVM ?? throwawayEmojiVM(),
             index: index ?? inertAppIndex,
             sources: sources ?? SourceStore(defaults: ThrowawayDefaults()),
-            searchFiles: searchFiles
+            searchFiles: searchFiles,
+            searchSettled: searchSettled ?? { query in searchFiles(query) },
+            searchSchedule: searchSchedule ?? HeldSearchSchedule()
         )
+    }
+}
+
+/// Subject search's schedule, run by hand: the list below the apps is searched
+/// when a test says so and typing pauses when a test says so, never on a
+/// clock. A test that does neither sees the apps alone, every time.
+@MainActor
+final class HeldSearchSchedule: SearchSchedule {
+    private var searches: [@MainActor () async -> Void] = []
+    private var pause: (@MainActor () -> Void)?
+
+    /// Whether a pause is waiting to be run.
+    var isPauseWaiting: Bool { pause != nil }
+
+    func run(_ search: @escaping @MainActor () async -> Void) {
+        searches.append(search)
+    }
+
+    func afterPause(_ settle: @escaping @MainActor () -> Void) {
+        pause = settle
+    }
+
+    /// Runs the searches asked for so far to the end, including any they ask
+    /// for as they go: the word matches for the Query as typed.
+    func runSearches() async {
+        while !searches.isEmpty {
+            await searches.removeFirst()()
+        }
+    }
+
+    /// Typing pauses: the searches out land, the settled pass runs and lands
+    /// too. What the list is once the Query has settled.
+    func typingPaused() async {
+        await runSearches()
+        let settle = pause
+        pause = nil
+        settle?()
+        await runSearches()
     }
 }

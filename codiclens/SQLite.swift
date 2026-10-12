@@ -18,7 +18,10 @@ nonisolated final class SQLiteConnection {
     /// Opens (and creates) the database at `path` in WAL mode, so readers on
     /// other connections — later, in another process — never wait on the
     /// writer and the writer never waits on them.
-    init(path: String) throws {
+    ///
+    /// `pageSize` applies only to a database this creates: once WAL is on,
+    /// SQLite keeps the size it has.
+    init(path: String, pageSize: Int? = nil) throws {
         var db: OpaquePointer?
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX
         guard sqlite3_open_v2(path, &db, flags, nil) == SQLITE_OK, let db else {
@@ -28,6 +31,7 @@ nonisolated final class SQLiteConnection {
         }
         handle = db
         sqlite3_busy_timeout(db, 5000)
+        if let pageSize { try execute("PRAGMA page_size = \(pageSize)") }
         try execute("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;")
     }
 
@@ -149,11 +153,21 @@ nonisolated final class SQLiteStatement {
         }
     }
 
+    func isNull(_ column: Int32) -> Bool { sqlite3_column_type(statement, column) == SQLITE_NULL }
     func int(_ column: Int32) -> Int64 { sqlite3_column_int64(statement, column) }
     func double(_ column: Int32) -> Double { sqlite3_column_double(statement, column) }
 
     func text(_ column: Int32) -> String? {
         sqlite3_column_text(statement, column).map { String(cString: $0) }
+    }
+
+    /// A blob column's bytes, copied; nil for NULL. An empty blob is empty
+    /// data, not nil.
+    func blob(_ column: Int32) -> Data? {
+        guard !isNull(column) else { return nil }
+        let count = Int(sqlite3_column_bytes(statement, column))
+        guard count > 0, let bytes = sqlite3_column_blob(statement, column) else { return Data() }
+        return Data(bytes: bytes, count: count)
     }
 }
 

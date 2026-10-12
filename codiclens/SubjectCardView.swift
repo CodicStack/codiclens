@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SubjectCardView: View {
     @Bindable var coordinator: CommandCoordinator
@@ -12,6 +13,12 @@ struct SubjectCardView: View {
     /// The editor's caret. Put at the end as the editor opens, so ⌘E on a
     /// Query carries on typing where the Query left off.
     @State private var editorSelection: TextSelection?
+
+    @FocusState private var isRenameFocused: Bool
+
+    /// The name editor's selection: the name without its extension, set once
+    /// the field has focus.
+    @State private var renameSelection: TextSelection?
 
     /// Whether the Query is still the question being asked.
     ///
@@ -28,7 +35,9 @@ struct SubjectCardView: View {
         }
     }
 
-    private var isFocused: Bool { isQueryPhase }
+    /// Renaming is the exception: the name editor holds the keyboard on the
+    /// Action Phase, so Emphasis comes to this Card for as long as it is open.
+    private var isFocused: Bool { isQueryPhase || coordinator.isRenaming }
 
     /// Whether the Card is holding text rather than naming something, which is
     /// the one case that needs a near-solid ground to stay readable.
@@ -111,6 +120,8 @@ struct SubjectCardView: View {
                 resultPreview(result)
             } else if coordinator.isEditingTextSubject {
                 textSubjectEditor
+            } else if coordinator.isRenaming, let subject {
+                renameEditor(subject)
             } else if isClipboardMode {
                 clipboardPreview
             } else if coordinator.isEmojiBrowsing {
@@ -136,6 +147,17 @@ struct SubjectCardView: View {
     /// The Card's bottom-trailing corner: what it holds, and what acts on it.
     private var corner: some View {
         HStack(spacing: 4) {
+            if let note = coordinator.fileOperationNote ?? coordinator.transcriptionNote ?? coordinator.momentOpenNote {
+                Text(note)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .chipSurface()
+            }
+            // Without Codictate, the next Enter on Transcribe opens its
+            // website; the key says so beside the note.
+            if coordinator.transcriptionFailure?.offersDownload == true {
+                KeyHintChip(keys: "⏎")
+            }
             if let characterCount {
                 Text("\(characterCount) chars")
                     .font(.system(size: 10, weight: .medium))
@@ -166,6 +188,7 @@ struct SubjectCardView: View {
         // being the focused Card of the Phase — the editor has it, wherever the
         // Phase happens to be — so this is asked before `isFocused`.
         if coordinator.isEditingTextSubject { return "⌘E" }
+        if coordinator.isRenaming { return "⏎" }
         guard isFocused else { return nil }
         // A text preview already says what it is with its count; the Return chip beside it was noise.
         if characterCount != nil { return nil }
@@ -229,11 +252,10 @@ struct SubjectCardView: View {
         if let item = clipboardItem {
             if let imageURL = coordinator.clipboardVM.imageURL(for: item),
                let nsImage = NSImage(contentsOf: imageURL) {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(12)
+                // The stored PNG itself, not a thumbnail of it, edge to edge
+                // like a file's picture. No caption: a Clipboard Image's name
+                // says nothing the picture does not.
+                CardPicture(image: nsImage, captioned: false)
             } else {
                 ScrollView {
                     Text(item.content)
@@ -314,33 +336,159 @@ struct SubjectCardView: View {
         .padding(20)
     }
 
-    private func subjectContent(_ subject: Subject) -> some View {
-        VStack(spacing: 10) {
-            ThumbnailImage(url: subject.thumbnailURL, side: Style.cardIcon) {
-                Image(nsImage: subject.icon)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-            }
-            .frame(width: Style.cardIcon, height: Style.cardIcon)
-            // Rotate rewrites the file under the same URL and answers with a
-            // fresh Subject; a fresh view is what checks the file again.
-            .id(subject.id)
-
-            // Marked up only where the name is what the Query matched. A
-            // promoted or chosen Subject is not, and underlining the
-            // characters of `find` that happen to line up in a file it was
-            // found through would be marking a match that never happened.
-            Text(
-                highlightedName(
-                    subject.displayName,
-                    query: isQueryPhase ? coordinator.subjectVM.searchText : ""
-                )
-            )
-                .font(.system(size: 15, weight: .bold))
-                .lineLimit(1)
-                .foregroundStyle(.primary)
+    private func subjectIcon(_ subject: Subject) -> some View {
+        ThumbnailImage(url: subject.thumbnailURL, side: Style.cardIcon) {
+            Image(nsImage: subject.icon)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
         }
+        .frame(width: Style.cardIcon, height: Style.cardIcon)
+        // Rotate rewrites the file under the same URL and answers with a
+        // fresh Subject; a fresh view is what checks the file again.
+        .id(subject.id)
+    }
+
+    /// Rename: the name in an editor where it is shown, as Finder edits a name
+    /// in place. Enter or ⌘E renames, Escape leaves it as it was.
+    private func renameEditor(_ subject: Subject) -> some View {
+        VStack(spacing: 10) {
+            subjectIcon(subject)
+
+            TextField("", text: $coordinator.renameText, selection: $renameSelection)
+                .textFieldStyle(.plain)
+                .font(.system(size: 15, weight: .bold))
+                .multilineTextAlignment(.center)
+                .focused($isRenameFocused)
+                .onSubmit { coordinator.commitRename() }
+                .onKeyPress { press in
+                    if (press.modifiers.contains(.command) && press.characters == "e")
+                        || (press.modifiers.contains(.control) && ControlKey.letter(press.characters) == "e") {
+                        coordinator.commitRename()
+                        return .handled
+                    }
+                    if press.key == .escape {
+                        coordinator.cancelRename()
+                        return .handled
+                    }
+                    return .ignored
+                }
+                // A text field selects all of itself as it takes focus, so the
+                // base name is selected once it has — not before, where the
+                // select-all would land on top of it.
+                .onChange(of: isRenameFocused) { _, focused in
+                    guard focused else { return }
+                    renameSelection = TextSelection(range: coordinator.renameSelectedRange)
+                }
+                // Focus after the update that inserted the field has committed,
+                // as the text editor takes it.
+                .task { isRenameFocused = true }
+        }
+        .padding(.horizontal, Style.padding)
+    }
+
+    /// A Subject named on the Card: its icon with its name under it, or — once
+    /// Quick Look has drawn what the file holds — that picture, edge to edge,
+    /// with the name over its bottom edge.
+    ///
+    /// The picture is asked for at the Card's own size (`Style.cardSide`),
+    /// not the icon's, large enough to cover it, and it replaces the icon
+    /// layout the frame it lands — no fade. Everything that is its icon (an
+    /// app, a folder, a file Quick Look cannot draw) never gets one and keeps
+    /// the icon layout.
+    ///
+    /// A File Result that matched inside the file shows where (`CardPassage`):
+    /// the matched PDF page or video frame as the picture, or the excerpt
+    /// with its matched words underlined over the name.
+    private func subjectContent(_ subject: Subject) -> some View {
+        let passage = CardPassage(subject)
+        return ThumbnailReader(url: subject.thumbnailURL, side: Style.cardSide, fills: true,
+                               moment: passage?.moment) { thumbnail in
+            if let thumbnail {
+                CardPicture(
+                    image: thumbnail,
+                    captioned: true,
+                    scrimHeight: passage == nil ? Style.pictureScrimHeight : Style.passageScrimHeight
+                )
+                .overlay(alignment: .bottom) { pictureCaption(subject, passage: passage) }
+            } else {
+                VStack(spacing: passage == nil ? 10 : 8) {
+                    Image(nsImage: subject.icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(
+                            width: passage == nil ? Style.cardIcon : Style.passageIcon,
+                            height: passage == nil ? Style.cardIcon : Style.passageIcon
+                        )
+
+                    subjectName(subject)
+                        .foregroundStyle(.primary)
+
+                    if let passage {
+                        Text(passage.line)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(3)
+                    }
+                }
+                .padding(.horizontal, passage == nil ? 0 : Style.padding)
+            }
+        }
+        // Rotate rewrites the file under the same URL and answers with a
+        // fresh Subject; a fresh view is what checks the file again.
+        .id(subject.id)
+    }
+
+    /// The name over a picture: along its bottom edge, leading, on the
+    /// picture's scrim.
+    ///
+    /// The corner chips sit on the same line, drawn by the Card's own overlay.
+    /// A hidden copy of `corner` holds their place here, so a long name stops
+    /// short of them instead of running underneath — whatever the corner holds
+    /// at the time, a ⏎ or a "Moving…". The corner's own padding is the gap
+    /// between the two, so the name has none on its trailing side.
+    ///
+    /// Truncated in the middle, as Finder truncates a file name: what is
+    /// pictured here is always a file, and its extension is worth keeping.
+    ///
+    /// A Passage's line goes above the name, the Card's full width: the
+    /// corner's stand-in has no height, so the line sits on the name whether
+    /// or not the corner holds a chip.
+    private func pictureCaption(_ subject: Subject, passage: CardPassage?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let passage {
+                Text(passage.line)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Style.padding)
+            }
+            HStack(alignment: .bottom, spacing: 0) {
+                subjectName(subject)
+                    .truncationMode(.middle)
+                    .padding([.leading, .bottom], Style.padding)
+                Spacer(minLength: 0)
+                corner.hidden().frame(height: 0)
+            }
+        }
+        .foregroundStyle(Style.pictureCaption)
+    }
+
+    /// Marked up only where the name is what the Query matched. A promoted or
+    /// chosen Subject is not, and underlining the characters of `find` that
+    /// happen to line up in a file it was found through would be marking a
+    /// match that never happened.
+    private func subjectName(_ subject: Subject) -> some View {
+        Text(
+            highlightedName(
+                subject.displayName,
+                query: isQueryPhase ? coordinator.subjectVM.searchText : ""
+            )
+        )
+        .font(.system(size: 15, weight: .bold))
+        .lineLimit(1)
     }
 
     private var placeholder: some View {
@@ -364,5 +512,77 @@ struct SubjectCardView: View {
     private var placeholderMessage: String {
         if coordinator.subjectVM.searchText.isEmpty { return "Type..." }
         return coordinator.subjectVM.hasAnswered ? "No match" : "Searching…"
+    }
+}
+
+
+/// A picture filling a Card edge to edge: a file's thumbnail, or a Clipboard
+/// Image. It is the Card's **content**, so it is laid out in the frame the
+/// Card's glass is drawn in and steps back with the rest of the content when
+/// the Card is unfocused.
+///
+/// Aspect-fill, centred, and clipped to `Style.pictureShape` — the picture is
+/// clipped, never the glass. With `captioned`, `Style.pictureScrim` darkens its
+/// bottom edge for the name drawn over it; the scrim is part of the picture,
+/// under the same clip.
+struct CardPicture: View {
+    let image: NSImage
+    let captioned: Bool
+    /// How far up the scrim reaches: further when a Passage's lines sit over
+    /// the name.
+    var scrimHeight = Style.pictureScrimHeight
+
+    var body: some View {
+        // `Color.clear` takes the size it is offered and the image fills it;
+        // a `scaledToFill` image laid out on its own would size the Card to the
+        // picture instead.
+        Color.clear
+            .overlay {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFill()
+            }
+            .overlay(alignment: .bottom) {
+                if captioned {
+                    Style.pictureScrim
+                        .frame(height: scrimHeight)
+                }
+            }
+            .clipShape(Style.pictureShape)
+    }
+}
+
+
+/// What of a File Result's Passage the Subject Card shows, by what the file is.
+///
+/// A PDF: the matched page as the picture, and "page 4". A video: the frame
+/// at its second, and "at 14:02"; a recording: its picture as ever, and the
+/// moment. An image: nothing — its picture is the thing, whatever OCR read in
+/// it. Anything else is words: the excerpt, its literally matched words
+/// underlined, as the Result's row marks them. One found by meaning alone has
+/// no marks, and is shown plain.
+struct CardPassage: Equatable {
+    /// The place in the file to picture instead of its start.
+    let moment: Thumbnails.Moment?
+    /// The line over the name.
+    let line: AttributedString
+
+    init?(_ subject: Subject) {
+        guard let passage = subject.passage, let url = subject.url,
+              case .file(let contentType) = subject.kind else { return nil }
+        if let page = passage.page, contentType.conforms(to: .pdf), let label = passage.pageLabel {
+            moment = .page(page)
+            line = AttributedString(label)
+        } else if PassagePreview.isRecording(url), let seconds = passage.seconds, let label = passage.momentLabel {
+            moment = contentType.conforms(to: .movie) ? .second(seconds) : nil
+            line = AttributedString(label)
+        } else if contentType.conforms(to: .image) {
+            return nil
+        } else {
+            moment = nil
+            line = passage.pageLabel.map { AttributedString($0 + " · ") + passage.markedExcerpt }
+                ?? passage.markedExcerpt
+        }
     }
 }

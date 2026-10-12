@@ -8,12 +8,13 @@ import UniformTypeIdentifiers
 ///
 /// Nothing a reader does depends on the writer being in this process. Today
 /// the writer runs on `FileIndex`'s queue; the plan is a helper process that
-/// also reads files' contents, and the database is the only thing the two
-/// sides share.
+/// does the writing and the reading of contents, and the database is the only
+/// thing the two sides share.
 nonisolated enum FileIndexSchema {
     /// An index from any other version is dropped and read again, never
-    /// migrated: everything in it comes from the disk.
-    static let version: Int64 = 2
+    /// migrated: everything in it comes from the disk, and its vectors from
+    /// `VectorCache`, which the drop leaves alone.
+    static let version: Int64 = 5
 
     /// Porter stemming over Unicode words, with diacritics folded where
     /// Unicode decomposes them: `å` matches `a`, `é` matches `e`. `æ` and `ø`
@@ -36,28 +37,41 @@ nonisolated enum FileIndexSchema {
                 mtime REAL NOT NULL,
                 inode INTEGER NOT NULL,
                 device INTEGER NOT NULL,
-                state TEXT NOT NULL DEFAULT 'pending',   -- contents: pending until a later layer reads them
-                detail TEXT,
-                indexed_at REAL
+                content INTEGER,                         -- FileContent: what is read from it, in reading order; NULL: nothing
+                state TEXT NOT NULL DEFAULT 'pending',   -- contents: pending | partial (first step read) | done
+                read_to INTEGER NOT NULL DEFAULT 0,      -- pages or chunks read so far
+                detail TEXT,                             -- why nothing, or not everything, was read
+                indexed_at REAL,
+                vec_state TEXT NOT NULL DEFAULT 'done',  -- meaning: pending | partial (first step embedded) | done
+                vec_to REAL NOT NULL DEFAULT 0           -- how far: PDF pages, or seconds of a recording or video
             );
             CREATE INDEX files_inode ON files(device, inode);
             CREATE INDEX files_source ON files(source, state);
+            -- The background pass's order: unread first, by kind, newest first.
+            CREATE INDEX files_reading ON files(state, content, mtime DESC);
+            -- The meaning pass's order, the same way.
+            CREATE INDEX files_meaning ON files(vec_state, content, mtime DESC);
             -- One row per file, rowid = files.id. The name is weighted over the folder (bm25 3:1).
             CREATE VIRTUAL TABLE names USING fts5(name, folder, tokenize = "\(tokenizer)", prefix = '1 2 3');
-            -- Passages: what a file says, shows or sounds like. Unused until contents are read.
+            -- Passages: what a file says, shows or sounds like. A Passage's words are in
+            -- `passages` (rowid = segments.id); `excerpt` is for one with no words of its own.
             CREATE TABLE segments(
                 id INTEGER PRIMARY KEY,
                 file INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-                kind TEXT NOT NULL,                      -- page | chunk | ocr | transcript | frame
-                loc REAL,                                -- PDF page, or start second
-                loc_end REAL,
+                kind TEXT NOT NULL,                      -- FilePassage.Kind: chunk | page | ocr | image | page_image | frame | audio
+                loc REAL,                                -- PDF page, chunk offset (UTF-16), or start second
+                loc_end REAL,                            -- end second
                 excerpt TEXT,
-                vec BLOB                                 -- 768 × float16
+                vec_key BLOB,                            -- its vector's VectorCache.Key; the vector is in VectorCache.sqlite
+                later INTEGER NOT NULL DEFAULT 0         -- embedded after a long file's first step: scored, not in the scale
             );
             CREATE INDEX segments_file ON segments(file);
             CREATE VIRTUAL TABLE passages USING fts5(body, tokenize = "\(tokenizer)");
             -- What a launch needs to catch up by replaying FSEvents instead of crawling:
             -- 'event_id', 'rules' (FileIndexRules.fingerprint), and 'root:<path>' = volume UUID.
+            -- Search by meaning's: 'meaning' (MeaningPass.fingerprint, what the vectors were
+            -- made with), 'vector_cache' (VectorCache.id, the cache the keys point into) and
+            -- 'vector_rows' (rows the vector file should hold, `MeaningVectors`).
             CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
             PRAGMA user_version = \(version);
             """)
@@ -114,6 +128,8 @@ nonisolated struct FileIndexRow: Equatable, Sendable {
     var mtime: Double
     var inode: UInt64
     var device: UInt64
+    /// What is read from it besides its name, if anything.
+    var content: FileContent?
 
     /// Same file as far as a move is concerned: the identity and version a
     /// rename keeps.
@@ -128,27 +144,42 @@ nonisolated struct FileIndexRow: Equatable, Sendable {
 /// queue (or, later, in one process).
 nonisolated final class FileIndexWriter {
     let db: SQLiteConnection
+    /// The index was made here, new or after a drop: it is being read from
+    /// the disk again, and the vector cache is not pruned this session
+    /// (`VectorCache.pruneIfCaughtUp`).
+    private(set) var isNew = false
 
-    init(url: URL) throws {
+    /// Opens or makes the index at `url`. One of another version is dropped;
+    /// with `cache`, the vectors it holds go there first
+    /// (`VectorCache.seed(fromIndex:)`), so the drop costs no embedding.
+    init(url: URL, cache: VectorCache? = nil) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         db = try SQLiteConnection(path: url.path)
-        try migrate()
+        try migrate(seeding: cache)
     }
 
-    private func migrate() throws {
+    private func migrate(seeding cache: VectorCache?) throws {
+        var version: Int64 = 0
+        try db.query("PRAGMA user_version") { version = $0.int(0) }
+        if version != 0, version != FileIndexSchema.version, let cache {
+            let seeding = try cache.seed(fromIndex: db)
+            NSLog("File Index: schema %lld → %lld, %ld text and %ld media vectors kept in the cache, %ld stale",
+                  version, FileIndexSchema.version, seeding.texts, seeding.media, seeding.stale)
+        }
         let dropped = try db.transaction {
             var version: Int64 = 0
             try db.query("PRAGMA user_version") { version = $0.int(0) }
             guard version != FileIndexSchema.version else { return false }
             if version != 0 { try FileIndexSchema.drop(in: db) }
             try FileIndexSchema.create(in: db)
+            isNew = true
             return version != 0
         }
         // Hands back the pages the old rows held. Cheap: the tables are empty.
         if dropped { try? db.execute("VACUUM") }
     }
 
-    private static let columns = "id, path, source, kind, size, mtime, inode, device"
+    private static let columns = "id, path, source, kind, size, mtime, inode, device, content"
 
     private static func row(_ statement: SQLiteStatement) -> FileIndexRow {
         FileIndexRow(
@@ -159,7 +190,8 @@ nonisolated final class FileIndexWriter {
             size: statement.int(4),
             mtime: statement.double(5),
             inode: UInt64(bitPattern: statement.int(6)),
-            device: UInt64(bitPattern: statement.int(7))
+            device: UInt64(bitPattern: statement.int(7)),
+            content: statement.isNull(8) ? nil : FileContent(rawValue: Int(statement.int(8)))
         )
     }
 
@@ -185,23 +217,59 @@ nonisolated final class FileIndexWriter {
         return rows
     }
 
-    func insert(_ row: FileIndexRow) throws {
+    /// A new row, with its contents waiting to be read — or, with no words
+    /// in it, already as read as it will be — and, with anything in it at
+    /// all, waiting for its vectors. Returns its id.
+    @discardableResult
+    func insert(_ row: FileIndexRow) throws -> Int64 {
         try db.run("""
-            INSERT INTO files(path, source, kind, size, mtime, inode, device) VALUES(?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO files(path, source, kind, size, mtime, inode, device, content, state, vec_state)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [.text(row.path), .text(row.source), .text(row.kind.rawValue), .int(row.size), .double(row.mtime),
-                  .int(Int64(bitPattern: row.inode)), .int(Int64(bitPattern: row.device))])
+                  .int(Int64(bitPattern: row.inode)), .int(Int64(bitPattern: row.device)), Self.content(row),
+                  .text(Self.contentState(row)), .text(row.content == nil ? "done" : "pending")])
+        let id = db.lastInsertID
         try db.run("INSERT INTO names(rowid, name, folder) VALUES(?, ?, ?)",
-                   [.int(db.lastInsertID), .text(FileIndexSchema.nameText(row.path)),
+                   [.int(id), .text(FileIndexSchema.nameText(row.path)),
                     .text(FileIndexSchema.folderText(row.path))])
+        return id
     }
 
-    /// The file at a known path changed on disk. Its contents are read again.
-    func update(_ id: Int64, to row: FileIndexRow) throws {
+    /// The file at a known path changed on disk: its Passages go and its
+    /// contents are read again. With `keepingContents` — only its Source
+    /// changed, as when a Source is added inside another — they stay.
+    func update(_ id: Int64, to row: FileIndexRow, keepingContents: Bool = false) throws {
+        guard !keepingContents else {
+            try db.run("UPDATE files SET source = ? WHERE id = ?", [.text(row.source), .int(id)])
+            return
+        }
+        try deletePassages(ofFile: id)
         try db.run("""
-            UPDATE files SET source = ?, kind = ?, size = ?, mtime = ?, inode = ?, device = ?,
-                state = 'pending', detail = NULL, indexed_at = NULL WHERE id = ?
+            UPDATE files SET source = ?, kind = ?, size = ?, mtime = ?, inode = ?, device = ?, content = ?,
+                state = ?, read_to = 0, detail = NULL, indexed_at = NULL, vec_state = ?, vec_to = 0 WHERE id = ?
             """, [.text(row.source), .text(row.kind.rawValue), .int(row.size), .double(row.mtime),
-                  .int(Int64(bitPattern: row.inode)), .int(Int64(bitPattern: row.device)), .int(id)])
+                  .int(Int64(bitPattern: row.inode)), .int(Int64(bitPattern: row.device)), Self.content(row),
+                  .text(Self.contentState(row)), .text(row.content == nil ? "done" : "pending"), .int(id)])
+        onVectorsRemoved?([id])
+    }
+
+    private static func content(_ row: FileIndexRow) -> SQLiteValue {
+        row.content.map { .int(Int64($0.rawValue)) } ?? .null
+    }
+
+    /// Pending for the contents pass only where there are words to read.
+    private static func contentState(_ row: FileIndexRow) -> String {
+        row.content?.hasWords == true ? "pending" : "done"
+    }
+
+    /// Told the files whose vectors just went with their rows or Passages,
+    /// so the vectors search scores (`MeaningVectors`) can drop them too.
+    /// Called on the writer's queue, inside its transaction.
+    var onVectorsRemoved: (([Int64]) -> Void)?
+
+    private func deletePassages(ofFile id: Int64) throws {
+        try db.run("DELETE FROM passages WHERE rowid IN (SELECT id FROM segments WHERE file = ?)", [.int(id)])
+        try db.run("DELETE FROM segments WHERE file = ?", [.int(id)])
     }
 
     /// Same file at a new path: a move or a rename. Only the path changes, so
@@ -220,10 +288,12 @@ nonisolated final class FileIndexWriter {
         }
     }
 
+    /// The row, its name and its Passages; the segments go by cascade.
     func delete(_ id: Int64) throws {
         try db.run("DELETE FROM names WHERE rowid = ?", [.int(id)])
         try db.run("DELETE FROM passages WHERE rowid IN (SELECT id FROM segments WHERE file = ?)", [.int(id)])
         try db.run("DELETE FROM files WHERE id = ?", [.int(id)])
+        onVectorsRemoved?([id])
     }
 
     /// The row at `path` and every row inside it, or with `keepingRoot` only
@@ -237,8 +307,19 @@ nonisolated final class FileIndexWriter {
         var tree = keepingRoot ? "(path >= ? AND path < ?)" : "(path = ? OR (path >= ? AND path < ?))"
         var values: [SQLiteValue] = keepingRoot ? [.text(low), .text(high)] : [.text(path), .text(low), .text(high)]
         if let source {
-            tree += " AND source = ?"
+            // `+`: not by `files_source`. Without statistics SQLite picks that
+            // index for the equality and walks the whole Source per call,
+            // which made a prune deleting row by row take ten minutes.
+            tree += " AND +source = ?"
             values.append(.text(source))
+        }
+        if let onVectorsRemoved {
+            var files: [Int64] = []
+            try db.query("""
+                SELECT DISTINCT s.file FROM files JOIN segments s ON s.file = files.id
+                WHERE \(tree) AND s.vec_key IS NOT NULL
+                """, values) { files.append($0.int(0)) }
+            if !files.isEmpty { onVectorsRemoved(files) }
         }
         try db.run("DELETE FROM names WHERE rowid IN (SELECT id FROM files WHERE \(tree))", values)
         try db.run("""
@@ -263,6 +344,81 @@ nonisolated final class FileIndexWriter {
         var sources = Set<String>()
         try db.query("SELECT DISTINCT source FROM files") { sources.insert($0.text(0) ?? "") }
         return sources
+    }
+
+    // MARK: Contents
+
+    private static let jobColumns = "id, path, content, size, mtime, read_to"
+
+    private static func job(_ statement: SQLiteStatement) -> FileContentJob? {
+        guard let content = FileContent(rawValue: Int(statement.int(2))) else { return nil }
+        return FileContentJob(id: statement.int(0), path: statement.text(1) ?? "", content: content,
+                              size: statement.int(3), mtime: statement.double(4), readTo: Int(statement.int(5)))
+    }
+
+    /// The next files of the background pass in `sources`: every file's first
+    /// step before any file's later ones, and within each by `FileContent`'s
+    /// order, newest first.
+    func contentJobs(limit: Int, sources: [String]) throws -> [FileContentJob] {
+        var jobs: [FileContentJob] = []
+        let list = FileIndexReader.jsonList(sources)
+        for state in ["pending", "partial"] where jobs.count < limit {
+            try db.query("""
+                SELECT \(Self.jobColumns) FROM files
+                WHERE state = ? AND content IS NOT NULL AND source IN (SELECT value FROM json_each(?))
+                ORDER BY content, mtime DESC LIMIT ?
+                """, [.text(state), .text(list), .int(Int64(limit - jobs.count))]) { row in
+                if let job = Self.job(row) { jobs.append(job) }
+            }
+        }
+        return jobs
+    }
+
+    /// The files among `ids` that still have contents to read.
+    func contentJobs(ids: [Int64]) throws -> [FileContentJob] {
+        var jobs: [FileContentJob] = []
+        for id in ids {
+            try db.query("""
+                SELECT \(Self.jobColumns) FROM files WHERE id = ? AND state != 'done' AND content IS NOT NULL
+                """, [.int(id)]) { row in
+                if let job = Self.job(row) { jobs.append(job) }
+            }
+        }
+        return jobs
+    }
+
+    /// Stores what reading a file came to, if the file is still the one that
+    /// was read: same size and date, and no other step stored meanwhile.
+    /// Otherwise the result is dropped — the file is waiting to be read again,
+    /// or is gone. Returns whether it was stored.
+    @discardableResult
+    func storeContents(_ result: FileContentResult) throws -> Bool {
+        let job = result.job
+        var isCurrent = false
+        try db.query("SELECT size, mtime, read_to, state FROM files WHERE id = ?", [.int(job.id)]) { row in
+            isCurrent = row.int(0) == job.size && abs(row.double(1) - job.mtime) < 0.001
+                && Int(row.int(2)) == job.readTo && row.text(3) != "done"
+        }
+        guard isCurrent else { return false }
+        if job.readTo == 0 { try deletePassages(ofFile: job.id) }
+        for passage in result.passages {
+            try db.run("INSERT INTO segments(file, kind, loc) VALUES(?, ?, ?)",
+                       [.int(job.id), .text(passage.kind.rawValue), passage.location.map { .double($0) } ?? .null])
+            try db.run("INSERT INTO passages(rowid, body) VALUES(?, ?)", [.int(db.lastInsertID), .text(passage.text)])
+        }
+        try db.run("""
+            UPDATE files SET state = ?, read_to = ?, detail = ?, indexed_at = ? WHERE id = ?
+            """, [.text(result.isComplete ? "done" : "partial"), .int(Int64(result.readTo)),
+                  result.detail.map { .text($0) } ?? .null, .double(Date().timeIntervalSince1970), .int(job.id)])
+        // The meaning pass embeds what this read: a later step of a file it
+        // had finished gives it more, and a file with no words and no pages
+        // to look at has nothing for it at all.
+        if !result.passages.isEmpty || (job.content == .pdf && result.readTo > job.readTo) {
+            try db.run("UPDATE files SET vec_state = 'partial' WHERE id = ? AND vec_state = 'done'", [.int(job.id)])
+        } else if job.readTo == 0, result.isComplete, job.content != .pdf, job.content != .screenshot {
+            try db.run("UPDATE files SET vec_state = 'done' WHERE id = ?", [.int(job.id)])
+        }
+        return true
     }
 
     // MARK: Catch-up
@@ -333,19 +489,72 @@ nonisolated final class FileIndexWriter {
 
 // MARK: - Reader
 
-/// A file the File Index matched by name: what a File Result or a Finder
-/// Target is built from.
+/// A file the File Index matched, by its name or by what it says: what a
+/// File Result or a Finder Target is built from.
 nonisolated struct FileHit: Hashable, Sendable {
+    /// The part of the file that matched (`CONTEXT.md`, **Passage**), as a
+    /// row shows it.
+    struct Passage: Hashable, Sendable {
+        /// A few words either side of the match, on one line. Empty for a
+        /// page, a frame or a stretch of sound found by meaning: those have
+        /// no words.
+        let excerpt: String
+        /// Where the Query's words are in `excerpt`, in characters.
+        let matches: [Range<Int>]
+        /// The PDF page it is on, from 1.
+        let page: Int?
+        /// In a recording or a video, the span it is, in seconds from the
+        /// start: what the Card shows as "at 14:02" and plays from
+        /// (`SubjectPassage.seconds`).
+        var start: Double? = nil
+        var end: Double? = nil
+        /// What found it by meaning — its text, a picture of it, its sound —
+        /// or nil when its words matched the Query's.
+        var modality: MeaningModality? = nil
+
+        /// The second line of a File Result found by what it says: the page
+        /// or the moment where there is one, then the excerpt — "page 4 ·
+        /// …the words…", "at 14:02".
+        var subtitle: String {
+            let place = page.map { "page \($0)" } ?? start.map { "at " + Self.clock($0) }
+            guard let place else { return excerpt }
+            return excerpt.isEmpty ? place : place + " · " + excerpt
+        }
+
+        /// `seconds` as a clock reads: 0:07, 14:02, 1:02:03.
+        static func clock(_ seconds: Double) -> String {
+            let total = max(0, Int(seconds.rounded(.down)))
+            let (hours, minutes, rest) = (total / 3600, total / 60 % 60, total % 60)
+            return hours > 0 ? String(format: "%d:%02d:%02d", hours, minutes, rest) : String(format: "%d:%02d", minutes, rest)
+        }
+
+        /// `matches`, as places in `subtitle`.
+        var subtitleMatches: [Range<Int>] {
+            let shift = subtitle.count - excerpt.count
+            return matches.map { ($0.lowerBound + shift)..<($0.upperBound + shift) }
+        }
+    }
+
     let url: URL
     let name: String
     /// The folder it is in, home abbreviated: `~/Documents/Skat`.
     let folder: String
     let kind: FileIndexRow.Kind
     /// On `fuzzyScore`'s scale — lower is better — so a File Result ranks
-    /// against the app's other searches. A match on the folder alone, where
-    /// the name has nothing to show for it, is `folderOnlyScore`.
+    /// against the app's other searches. A match on what the file says is
+    /// `contentScore` and up, below every match on the name; a match on the
+    /// folder alone, where neither the name nor the words have anything to
+    /// show for it, is `folderOnlyScore`.
     let score: Int
+    /// Set when the file is here for what it says. A file whose name matched
+    /// has none, whatever its words do; nor does a picture found by meaning,
+    /// which matched whole.
+    var passage: Passage? = nil
+    /// Set when the file is here because its meaning stood out for the Query
+    /// (`MeaningRanking.zGate`): what found it.
+    var meaning: MeaningModality? = nil
 
+    static let contentScore = 120
     static let folderOnlyScore = 200
 
     var contentType: UTType {
@@ -363,17 +572,29 @@ nonisolated struct FileHit: Hashable, Sendable {
 /// first asks — the writer creates them. Every query then answers empty and
 /// tries again next time.
 nonisolated final class FileIndexReader: @unchecked Sendable {
-    /// How many keyword matches bm25 ranks. Ranking costs per match, and a
-    /// short prefix matches nearly everything — "a*" is most of the index,
-    /// "png*" every PNG — so ranking all of them grew with the index (12 ms
-    /// for "a" at 22,000 files). Capped, a search costs the same at any size.
-    /// Past the cap the ranked set is an arbitrary slice of the matches, which
-    /// is why names that *begin* with the Query are fetched on their own.
+    /// How many keyword matches bm25 ranks, in names and in Passages each.
+    /// Ranking costs per match, and a short prefix matches nearly everything —
+    /// "a*" is most of the index, "png*" every PNG — so ranking all of them
+    /// grew with the index (12 ms for "a" at 22,000 files). Capped, a search
+    /// costs the same at any size. Past the cap the ranked set is an arbitrary
+    /// slice of the matches, which is why names that *begin* with the Query
+    /// are fetched on their own.
     static let rankingCap = 2000
 
     /// How many of the ranked matches are re-scored by name, and how many
     /// names beginning with the Query join them. `fuzzyScore` decides.
     static let candidateLimit = 200
+
+    /// How long the last word has to be before it is a prefix in Passages.
+    /// Names have a prefix index and take any length; Passages have none — it
+    /// would grow an already large database — and "a*" over 1.2 million of
+    /// them cost 860 ms (7.8 ms as a whole word). A shorter last word matches
+    /// whole words only.
+    static let contentPrefixMinimum = 3
+
+    /// How many words either side of a match an excerpt shows. A row has one
+    /// line; it is cut at its end, and FTS5 centres the match.
+    static let excerptWords = 10
 
     private let url: URL
     private let home: String
@@ -392,42 +613,366 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
         statements = nil
     }
 
-    /// Files whose name — or failing that, folder — has every word of
-    /// `query`, the last one as a prefix, best first. Only files in `sources`
-    /// (folder Source paths) are returned.
-    func search(_ query: String, limit: Int, sources: [String]) -> [FileHit] {
+    /// How the Query's last word is matched in Passages. Names always take
+    /// it as a prefix: they have a prefix index.
+    enum PassageMatch: Sendable {
+        /// On the keystroke: whole words only. A prefix over Passages merges
+        /// the posting list of every word that begins with it, and a common
+        /// one ("con", "type", "202") cost 20–60 ms on the dev machine's 1.02
+        /// million Passages before a single row came back.
+        case wholeWords
+        /// Once typing pauses: the last word as a prefix too, from
+        /// `contentPrefixMinimum` letters, unless a space after it says it is
+        /// finished.
+        case lastWordPrefix
+    }
+
+    /// Files in `sources` (folder Source paths) whose name or folder, or one
+    /// of whose Passages, has every word of `query`, the last one as a
+    /// prefix (in Passages only with `.lastWordPrefix`). Best first, one row
+    /// per file; a file that matched on its words carries the best Passage
+    /// that did.
+    func search(_ query: String, limit: Int, sources: [String], passages: PassageMatch = .wholeWords) -> [FileHit] {
+        lock.withLock { searchLocked(query, limit: limit, sources: sources, passages: passages) }
+    }
+
+    /// `search`, called with the lock held.
+    private func searchLocked(_ query: String, limit: Int, sources: [String], passages: PassageMatch) -> [FileHit] {
         let words = Self.words(query)
         guard !words.isEmpty, !sources.isEmpty, limit > 0 else { return [] }
-        let sourceList = (try? JSONSerialization.data(withJSONObject: sources))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let sourceList = Self.jsonList(sources)
+        let match = Self.matchExpression(words)
+        let isLastWordOpen = passages == .lastWordPrefix && query.last?.isWhitespace != true
+        let contentMatch = Self.matchExpression(words, prefixMinimum: isLastWordOpen ? Self.contentPrefixMinimum : .max)
+        let foldedQuery = Self.fold(query)
 
-        var candidates: [String: (kind: FileIndexRow.Kind, order: Int)] = [:]
-        lock.withLock {
-            guard let statements = prepared() else { return }
+        do {
+            guard let statements = prepared() else { return [] }
+            var candidates: [String: Candidate] = [:]
             func collect(_ statement: SQLiteStatement, _ match: String) {
                 try? statement.run([.text(match), .text(sourceList), .int(Int64(Self.candidateLimit))]) { row in
                     let path = row.text(0) ?? ""
                     guard candidates[path] == nil else { return }
-                    let kind = FileIndexRow.Kind(rawValue: row.text(1) ?? "") ?? .file
-                    candidates[path] = (kind, candidates.count)
+                    candidates[path] = Candidate(kind: FileIndexRow.Kind(rawValue: row.text(1) ?? "") ?? .file,
+                                                 score: 0, order: candidates.count)
                 }
             }
-            collect(statements.ranked, Self.matchExpression(words))
+            collect(statements.ranked, match)
             if words.count == 1 { collect(statements.unranked, Self.namePrefixExpression(words[0])) }
-        }
 
-        // Scored by name, and only the survivors become hits: a `URL` each
-        // for four hundred candidates was a third of a search.
-        let foldedQuery = Self.fold(query)
-        return candidates
-            .map { path, candidate in
+            // Scored by name; a `URL` each only for the survivors, since one
+            // for four hundred candidates was a third of a search.
+            for path in Array(candidates.keys) {
                 let name = (path as NSString).lastPathComponent
-                let score = fuzzyScore(Self.fold(name), foldedQuery) ?? FileHit.folderOnlyScore
-                return (path: path, kind: candidate.kind, score: score, order: candidate.order)
+                candidates[path]?.score = fuzzyScore(Self.fold(name), foldedQuery) ?? FileHit.folderOnlyScore
             }
-            .sorted { ($0.score, $0.order) < ($1.score, $1.order) }
-            .prefix(limit)
-            .map { hit(path: $0.path, kind: $0.kind, score: $0.score) }
+
+            // What files say, a row per file at its best Passage, ranked
+            // below every name: DigUp weighs a name 3:1 over the words in
+            // one bm25, and two tables cannot share one, so the name wins by
+            // band instead.
+            var rank = 0
+            try? statements.passages.run([.text(contentMatch), .text(sourceList), .int(Int64(limit))]) { row in
+                let path = row.text(0) ?? ""
+                let score = FileHit.contentScore + min(rank, FileHit.folderOnlyScore - FileHit.contentScore - 1)
+                rank += 1
+                if let existing = candidates[path], existing.score <= score { return }
+                candidates[path] = Candidate(
+                    kind: FileIndexRow.Kind(rawValue: row.text(1) ?? "") ?? .file,
+                    score: score,
+                    order: candidates[path]?.order ?? candidates.count,
+                    segment: row.int(2),
+                    page: row.text(3) == FilePassage.Kind.page.rawValue && !row.isNull(4) ? Int(row.double(4)) : nil
+                )
+            }
+
+            return candidates
+                .sorted { ($0.value.score, $0.value.order) < ($1.value.score, $1.value.order) }
+                .prefix(limit)
+                .map { path, candidate in
+                    var hit = hit(path: path, kind: candidate.kind, score: candidate.score)
+                    if let segment = candidate.segment {
+                        hit.passage = passage(segment, page: candidate.page, words: words,
+                                              match: contentMatch, statements: statements)
+                    }
+                    return hit
+                }
+        }
+    }
+
+    // MARK: Words and meaning
+
+    /// The settled pass's search: the word search with the last word a
+    /// prefix, then fused with `meaning` as DigUp fuses them
+    /// (`MeaningRanking`) — files that stand out by meaning join, files with
+    /// most of the Query's words rise, and the Query's kind word lifts its
+    /// kind.
+    ///
+    /// **The scale it lands on** is the word search's, lower is better, so
+    /// the list below the apps ranks it against Clipboard Items and Emoji as
+    /// before:
+    ///
+    /// - A file whose **name** matched keeps its `fuzzyScore` (0 to ~110) and
+    ///   no Passage: a name match is still above every file found by what it
+    ///   says or means.
+    /// - Every other candidate — by its words (`contentScore` before), by
+    ///   meaning, or by both — is ordered by the fused score and placed at
+    ///   `contentScore + rank` (120…199): the band content matches had, now
+    ///   ordered by meaning and words together.
+    /// - A file found by its **folder** alone and by nothing else keeps
+    ///   `folderOnlyScore` (200).
+    func fusedSearch(_ query: String, limit: Int, sources: [String], meaning: MeaningScores) -> [FileHit] {
+        lock.withLock {
+            let wordHits = searchLocked(query, limit: limit, sources: sources, passages: .lastWordPrefix)
+            guard let db = connection(), !sources.isEmpty, limit > 0 else { return wordHits }
+            let terms = MeaningRanking.terms(query)
+            let isLastOpen = query.last?.isWhitespace != true
+            let sourceList = Self.jsonList(sources)
+
+            // Every file in the running, by id: the word search's, the files
+            // with any of the Query's words, and the files meaning found.
+            var entries: [Int64: Fused] = [:]
+            for (order, hit) in wordHits.enumerated() {
+                var id: Int64?
+                try? db.query("SELECT id FROM files WHERE path = ?", [.text(hit.url.path)]) { id = $0.int(0) }
+                guard let id else { continue }
+                let isNameMatch = hit.passage == nil && hit.score < FileHit.folderOnlyScore
+                entries[id] = Fused(order: order, hit: hit, isNameMatch: isNameMatch,
+                                    coverage: hit.passage != nil ? 1 : nil)
+            }
+            if terms.count >= 2 {
+                let any = terms.enumerated().map { index, term in
+                    "\"\(term)\"" + (index == terms.count - 1 && isLastOpen && term.count >= Self.contentPrefixMinimum ? "*" : "")
+                }.joined(separator: " OR ")
+                try? db.query("""
+                    SELECT s.file, MIN(matched.rank) AS best FROM (
+                        SELECT passages.rowid AS id, bm25(passages) AS rank
+                        FROM passages JOIN segments s ON s.id = passages.rowid JOIN files f ON f.id = s.file
+                        WHERE passages MATCH ?1 AND f.source IN (SELECT value FROM json_each(?2))
+                        LIMIT \(Self.rankingCap)
+                    ) matched JOIN segments s ON s.id = matched.id
+                    GROUP BY s.file ORDER BY best LIMIT \(Self.anyWordFiles)
+                    """, [.text(any), .text(sourceList)]) { row in
+                    let id = row.int(0)
+                    if entries[id] == nil { entries[id] = Fused(order: Int.max) }
+                }
+            }
+            for match in meaning.top where entries[match.file] == nil {
+                entries[match.file] = Fused(order: Int.max)
+            }
+
+            // Where each one is and what it is; a file meaning found outside
+            // the enabled Sources drops out here.
+            var info: [Int64: (path: String, kind: FileIndexRow.Kind, content: FileContent?)] = [:]
+            try? db.query("""
+                SELECT id, path, kind, content FROM files
+                WHERE id IN (SELECT value FROM json_each(?1)) AND source IN (SELECT value FROM json_each(?2))
+                """, [.text(Self.jsonList(entries.keys.map(String.init))), .text(sourceList)]) { row in
+                info[row.int(0)] = (row.text(1) ?? "", FileIndexRow.Kind(rawValue: row.text(2) ?? "") ?? .file,
+                                    row.isNull(3) ? nil : FileContent(rawValue: Int(row.int(3))))
+            }
+            entries = entries.filter { info[$0.key] != nil }
+
+            // How many of the Query's words each has, in its Passages or its
+            // name, where the word search did not already say all of them.
+            let unmeasured = entries.filter { $0.value.coverage == nil }.map(\.key)
+            if !unmeasured.isEmpty {
+                var found: [Int64: Int] = [:]
+                let files = Self.jsonList(unmeasured.map(String.init))
+                for (index, term) in terms.enumerated() {
+                    let isPrefix = index == terms.count - 1 && isLastOpen && term.count >= Self.contentPrefixMinimum
+                    let phrase = "\"\(term)\"" + (isPrefix ? "*" : "")
+                    var has = Set<Int64>()
+                    try? db.query("""
+                        SELECT DISTINCT s.file FROM segments s WHERE s.file IN (SELECT value FROM json_each(?2))
+                            AND s.id IN (SELECT rowid FROM passages WHERE passages MATCH ?1)
+                        """, [.text(phrase), .text(files)]) { has.insert($0.int(0)) }
+                    try? db.query("""
+                        SELECT value FROM json_each(?2) WHERE value IN (SELECT rowid FROM names WHERE names MATCH ?1)
+                        """, [.text("{name} : " + phrase), .text(files)]) { has.insert($0.int(0)) }
+                    for file in has { found[file, default: 0] += 1 }
+                }
+                for id in unmeasured {
+                    entries[id]?.coverage = terms.isEmpty ? 0 : Double(found[id] ?? 0) / Double(terms.count)
+                }
+            }
+
+            let isLookup = MeaningRanking.isLookup(terms)
+            let hinted = MeaningRanking.kindHints(query)
+            var fused: [(id: Int64, score: Double, order: Int)] = []
+            for (id, entry) in entries where !entry.isNameMatch {
+                let z = meaning.best(id)?.z
+                let coverage = entry.coverage ?? 0
+                guard MeaningRanking.isCandidate(z: z, coverage: coverage) else { continue }
+                let isAskedFor = info[id]?.content.map(hinted.contains) ?? false
+                fused.append((id, MeaningRanking.score(z: z, coverage: coverage, isKindAskedFor: isAskedFor,
+                                                       isLookup: isLookup), entry.order))
+            }
+            fused.sort { ($0.score, -$0.order, -$0.id) > ($1.score, -$1.order, -$1.id) }
+
+            var hits = wordHits.filter { hit in
+                // Name matches stay; a folder-only match stays unless it is
+                // fused below.
+                hit.passage == nil && !fused.contains { entries[$0.id]?.hit?.url == hit.url }
+            }
+            for (rank, candidate) in fused.prefix(limit).enumerated() {
+                guard let file = info[candidate.id], let entry = entries[candidate.id] else { continue }
+                var hit = self.hit(path: file.path, kind: file.kind,
+                                   score: FileHit.contentScore + min(rank, FileHit.folderOnlyScore - FileHit.contentScore - 1))
+                hit.passage = entry.hit?.passage
+                // Pointed at the best segment by meaning where it stands out,
+                // else where the words matched. A picture found whole borrows
+                // the words of its OCR, which describe the same picture.
+                if let match = meaning.best(candidate.id), match.z >= MeaningRanking.zGate,
+                   let modality = segmentModality(match.segment, db: db) {
+                    hit.meaning = modality
+                    hit.passage = meaningPassage(match.segment, db: db) ?? hit.passage
+                }
+                hits.append(hit)
+            }
+            return Array(hits.enumerated()
+                .sorted { ($0.element.score, $0.offset) < ($1.element.score, $1.offset) }
+                .map(\.element)
+                .prefix(limit))
+        }
+    }
+
+    /// Files the any-word query brings into the running.
+    static let anyWordFiles = 100
+
+    private struct Fused {
+        var order: Int
+        var hit: FileHit?
+        var isNameMatch = false
+        /// The share of the Query's words in the file; nil until measured.
+        var coverage: Double?
+    }
+
+    /// Nil when the segment is gone: its file changed since the vectors were
+    /// scored. Called with the lock held.
+    private func segmentModality(_ segment: Int64, db: SQLiteConnection) -> MeaningModality? {
+        var modality: MeaningModality?
+        try? db.query("SELECT kind FROM segments WHERE id = ?", [.int(segment)]) {
+            modality = FilePassage.Kind(rawValue: $0.text(0) ?? "")?.modality
+        }
+        return modality
+    }
+
+    /// The Passage a file was found by meaning on: its page, its moment, or
+    /// the start of its text. A picture found whole has none. Called with
+    /// the lock held.
+    private func meaningPassage(_ segment: Int64, db: SQLiteConnection) -> FileHit.Passage? {
+        var passage: FileHit.Passage?
+        try? db.query("SELECT kind, loc, loc_end FROM segments WHERE id = ?", [.int(segment)]) { row in
+            guard let kind = FilePassage.Kind(rawValue: row.text(0) ?? ""), let modality = kind.modality else { return }
+            let location = row.isNull(1) ? nil : row.double(1)
+            let end = row.isNull(2) ? nil : row.double(2)
+            switch kind {
+            case .image, .ocr:
+                break
+            case .page, .pageImage:
+                passage = FileHit.Passage(excerpt: "", matches: [], page: location.map { Int($0) }, modality: modality)
+            case .chunk:
+                passage = FileHit.Passage(excerpt: "", matches: [], page: nil, modality: modality)
+            case .frame, .audio:
+                passage = FileHit.Passage(excerpt: "", matches: [], page: nil, start: location, end: end, modality: modality)
+            }
+        }
+        guard let found = passage, found.modality == .text else { return passage }
+        var body: String?
+        try? db.query("SELECT body FROM passages WHERE rowid = ?", [.int(segment)]) { body = $0.text(0) }
+        return FileHit.Passage(excerpt: Self.opening(of: body ?? ""), matches: [], page: found.page,
+                               modality: found.modality)
+    }
+
+    /// The first `openingCharacters` of `text` on one line, cut at a word.
+    static func opening(of text: String) -> String {
+        let line = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard line.count > openingCharacters else { return line }
+        let cut = line.prefix(openingCharacters)
+        return (cut.lastIndex(of: " ").map { String(cut[..<$0]) } ?? String(cut)) + "…"
+    }
+
+    static let openingCharacters = 120
+
+    private struct Candidate {
+        let kind: FileIndexRow.Kind
+        var score: Int
+        let order: Int
+        var segment: Int64?
+        var page: Int?
+    }
+
+    /// The Passage `segment` as a row shows it: FTS5's own snippet, so the
+    /// marked words are the ones it matched — stemmed, prefixed, folded.
+    /// Called with the lock held.
+    ///
+    /// A prefix is spelled out first, as the words in this Passage that begin
+    /// with it (`expandingPrefix`): FTS5 evaluates the expression again for
+    /// every snippet, and a prefix's posting lists with it. "the " cost 23 ms
+    /// a row that way, half a second for a list of them.
+    private func passage(_ segment: Int64, page: Int?, words: [String], match: String,
+                         statements: Statements) -> FileHit.Passage? {
+        var expression = match
+        if match.hasSuffix("*"), let prefix = words.last {
+            var body: String?
+            try? statements.body.run([.int(segment)]) { body = $0.text(0) }
+            expression = Self.expandingPrefix(prefix, of: words, in: body ?? "") ?? match
+        }
+        var snippet: String?
+        try? statements.snippet.run([.text(expression), .int(segment)]) { snippet = $0.text(0) }
+        return snippet.map { Self.passage(snippet: $0, page: page) }
+    }
+
+    /// The match expression for `words` with the last, `prefix`, replaced by
+    /// the words of `body` that begin with it — `"faktura" AND ("husleje" OR
+    /// "huslejen")` — or nil when `body` has none (the match was a stem or a
+    /// fold the split here does not make). At most `maxPrefixWords` of them.
+    static func expandingPrefix(_ prefix: String, of words: [String], in body: String) -> String? {
+        let folded = fold(prefix)
+        var found: [String] = []
+        var seen = Set<String>()
+        for word in body.components(separatedBy: CharacterSet.alphanumerics.inverted) where word.count >= prefix.count {
+            let candidate = fold(word.precomposedStringWithCanonicalMapping)
+            guard candidate.hasPrefix(folded), seen.insert(candidate).inserted else { continue }
+            found.append(candidate)
+            if found.count == maxPrefixWords { break }
+        }
+        guard !found.isEmpty else { return nil }
+        let alternatives = "(" + found.map { "\"\($0)\"" }.joined(separator: " OR ") + ")"
+        // FTS5 takes no implicit AND before a bracket.
+        let before = words.dropLast().map { "\"\($0)\" AND " }.joined()
+        return before + alternatives
+    }
+
+    static let maxPrefixWords = 16
+
+    /// A snippet with its matches between U+0001 and U+0002, as one line.
+    static func passage(snippet: String, page: Int?) -> FileHit.Passage {
+        var excerpt = ""
+        var matches: [Range<Int>] = []
+        var count = 0
+        var start: Int?
+        var lastWasSpace = false
+        for character in snippet {
+            switch character {
+            case "\u{1}":
+                start = count
+            case "\u{2}":
+                if let begin = start, count > begin { matches.append(begin..<count) }
+                start = nil
+            case let blank where blank.isWhitespace:
+                guard !lastWasSpace, count > 0 else { continue }
+                excerpt.append(" ")
+                count += 1
+                lastWasSpace = true
+            default:
+                excerpt.append(character)
+                count += 1
+                lastWasSpace = false
+            }
+        }
+        return FileHit.Passage(excerpt: excerpt.trimmingCharacters(in: .whitespaces), matches: matches, page: page)
     }
 
     /// The indexed file at exactly `path`, if there is one.
@@ -442,13 +987,53 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
         }
     }
 
-    /// How many files each folder Source has in the index.
-    func counts() -> [String: Int] {
+    /// How much of each folder Source is in the index: every row in it, and
+    /// how many of those have their contents read — at least a first step,
+    /// or nothing to read.
+    func counts() -> [String: SourceCounts] {
         lock.withLock {
             guard let db = connection() else { return [:] }
-            var counts: [String: Int] = [:]
-            try? db.query("SELECT source, COUNT(*) FROM files GROUP BY source") { row in
-                counts[row.text(0) ?? ""] = Int(row.int(1))
+            var counts: [String: SourceCounts] = [:]
+            try? db.query("SELECT source, COUNT(*), SUM(state != 'pending') FROM files GROUP BY source") { row in
+                counts[row.text(0) ?? ""] = SourceCounts(indexed: Int(row.int(2)), total: Int(row.int(1)))
+            }
+            return counts
+        }
+    }
+
+    /// The rows the vector files should hold (`FileIndexWriter.vectorRows`),
+    /// for opening them from a reader: the eval, and measurements.
+    func vectorRows() -> Int {
+        lock.withLock {
+            var rows = 0
+            try? connection()?.query("SELECT value FROM meta WHERE key = 'vector_rows'") { rows = Int($0.text(0) ?? "") ?? 0 }
+            return rows
+        }
+    }
+
+    /// What the file at `path` has to read, if it is indexed.
+    func content(atPath path: String) -> FileContent? {
+        lock.withLock {
+            var content: FileContent?
+            try? connection()?.query("SELECT content FROM files WHERE path = ?", [.text(path)]) { row in
+                content = row.isNull(0) ? nil : FileContent(rawValue: Int(row.int(0)))
+            }
+            return content
+        }
+    }
+
+    /// How far the meaning pass has got in `sources`: files with anything to
+    /// embed, and how many of those are through.
+    func meaningCounts(sources: [String]) -> MeaningCounts {
+        lock.withLock {
+            guard let db = connection() else { return MeaningCounts() }
+            var counts = MeaningCounts()
+            try? db.query("""
+                SELECT COUNT(*), SUM(vec_state = 'done') FROM files
+                WHERE content IS NOT NULL AND source IN (SELECT value FROM json_each(?))
+                """, [.text(Self.jsonList(sources))]) { row in
+                counts.files = Int(row.int(0))
+                counts.embedded = Int(row.int(1))
             }
             return counts
         }
@@ -475,10 +1060,10 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
     }
 
     /// Every word quoted, all of them required, the last a prefix because it
-    /// is still being typed.
-    static func matchExpression(_ words: [String]) -> String {
+    /// is still being typed — if it has `prefixMinimum` characters.
+    static func matchExpression(_ words: [String], prefixMinimum: Int = 1) -> String {
         words.enumerated().map { index, word in
-            "\"\(word)\"" + (index == words.count - 1 ? "*" : "")
+            "\"\(word)\"" + (index == words.count - 1 && word.count >= prefixMinimum ? "*" : "")
         }.joined(separator: " ")
     }
 
@@ -491,6 +1076,12 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
     /// re-score agrees with the match: `å` → `a`, `ø` stays `ø`.
     static func fold(_ text: String) -> String {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+    }
+
+    /// `values` as a JSON array, for `json_each`: one bound parameter for a
+    /// list of any length.
+    static func jsonList(_ values: [String]) -> String {
+        (try? JSONSerialization.data(withJSONObject: values)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
     }
 
     // MARK: Connection
@@ -507,6 +1098,9 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
     private struct Statements {
         let ranked: SQLiteStatement
         let unranked: SQLiteStatement
+        let passages: SQLiteStatement
+        let snippet: SQLiteStatement
+        let body: SQLiteStatement
     }
 
     /// Called with the lock held. Prepared once; preparing fails until the
@@ -527,9 +1121,25 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
                 SELECT f.path, f.kind FROM names JOIN files f ON f.id = names.rowid
                 WHERE names MATCH ?1 AND f.source IN (SELECT value FROM json_each(?2))
                 LIMIT ?3
-                """)
+                """),
+              // A file's best Passage: SQLite takes a bare column's value
+              // from the row MIN() chose.
+              let passages = try? db.prepare("""
+                SELECT f.path, f.kind, matched.id, s.kind, s.loc, MIN(matched.rank) AS best FROM (
+                    SELECT passages.rowid AS id, bm25(passages) AS rank
+                    FROM passages JOIN segments s ON s.id = passages.rowid JOIN files f ON f.id = s.file
+                    WHERE passages MATCH ?1 AND f.source IN (SELECT value FROM json_each(?2))
+                    LIMIT \(Self.rankingCap)
+                ) matched JOIN segments s ON s.id = matched.id JOIN files f ON f.id = s.file
+                GROUP BY s.file ORDER BY best LIMIT ?3
+                """),
+              let snippet = try? db.prepare("""
+                SELECT snippet(passages, 0, char(1), char(2), '…', \(Self.excerptWords))
+                FROM passages WHERE passages MATCH ?1 AND rowid = ?2
+                """),
+              let body = try? db.prepare("SELECT body FROM passages WHERE rowid = ?1")
         else { return nil }
-        statements = Statements(ranked: ranked, unranked: unranked)
+        statements = Statements(ranked: ranked, unranked: unranked, passages: passages, snippet: snippet, body: body)
         return statements
     }
 }

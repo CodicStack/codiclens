@@ -1,0 +1,6 @@
+// llama.cpp for Swift (`import CLlama`, arm64 only). The headers are Scripts/build-llama.sh's, in Vendor/llama; the
+// library is linked by the app target's arm64 linker flags rather than from here, so an x86_64 slice links without it.
+module CLlama [system] {
+    header "CLlama.h"
+    export *
+}

@@ -7,8 +7,10 @@ struct ActionCardView: View {
     /// Subject Card's, and the Target Card's grows out of this one.
     let glassNamespace: Namespace.ID
 
+    /// Not while Rename's editor is open on the Subject Card: it has the
+    /// keyboard, so it has the Emphasis.
     private var isFocused: Bool {
-        if case .pickingAction = coordinator.phase { return true }
+        if case .pickingAction = coordinator.phase { return !coordinator.isRenaming }
         return false
     }
 

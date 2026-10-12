@@ -89,7 +89,7 @@ struct ThumbnailsTests {
     /// on a 2x screen gets 64 pixels drawn in 32 points.
     @Test(arguments: [
         (PanelLayout.resultIconSize, CGFloat(2)),
-        (Style.cardIcon, 2),
+        (Style.cardSide, 2),
         (PanelLayout.resultIconSize, 1),
     ])
     func aRequestIsTheSlotAndTheScreensScale(side: CGFloat, scale: CGFloat) async throws {
@@ -176,11 +176,11 @@ struct ThumbnailsTests {
         let thumbnails = Thumbnails(generator: standIn.generator)
 
         let row = await thumbnails.thumbnail(for: .init(url: url, side: PanelLayout.resultIconSize, scale: 2))
-        let card = await thumbnails.thumbnail(for: .init(url: url, side: Style.cardIcon, scale: 2))
+        let card = await thumbnails.thumbnail(for: .init(url: url, side: Style.cardSide, scale: 2))
 
-        #expect(standIn.requests.map(\.side) == [PanelLayout.resultIconSize, Style.cardIcon])
+        #expect(standIn.requests.map(\.side) == [PanelLayout.resultIconSize, Style.cardSide])
         #expect(row?.size.width == PanelLayout.resultIconSize)
-        #expect(card?.size.width == Style.cardIcon)
+        #expect(card?.size.width == Style.cardSide)
     }
 
     // MARK: - Falling back to the icon

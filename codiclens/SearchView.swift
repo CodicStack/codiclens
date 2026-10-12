@@ -258,15 +258,11 @@ private struct ResultRow: View {
                 if !item.subtitle.isEmpty {
                     // Marked up like the title where the subtitle names the
                     // thing — under "Clipboard" it reads "Clipboard History",
-                    // and the characters the Query matched are in both. Left
-                    // plain where the subtitle is derived rather than named;
-                    // `ResultDisplayItem.highlightsSubtitle` is where that is
-                    // decided, per kind of Result.
-                    Text(
-                        item.highlightsSubtitle
-                            ? highlightedName(item.subtitle, query: query)
-                            : AttributedString(item.subtitle)
-                    )
+                    // and the characters the Query matched are in both. A
+                    // Passage has its matched words marked; anything derived
+                    // is left plain. `ResultDisplayItem.attributedSubtitle`
+                    // decides, per kind of Result.
+                    Text(item.attributedSubtitle(query: query))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

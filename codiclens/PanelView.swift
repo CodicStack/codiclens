@@ -39,6 +39,9 @@ struct PanelView: View {
     /// know the Panel shook about it.
     @State private var shakeTrigger = 0
 
+    /// Where the hidden field's keys reach the preview while one is open.
+    @State private var previewDriver = PassagePreviewDriver()
+
     var body: some View {
         // One container for every piece of glass in the Panel, which is what
         // lets a Card's **Arrival** morph out of the Card before it. Its spacing
@@ -49,7 +52,11 @@ struct PanelView: View {
         GlassEffectContainer(spacing: Style.glassMergeDistance) {
             VStack(spacing: Style.gap) {
                 cardRow
-                resultsSlab
+                if let preview = coordinator.passagePreview {
+                    previewSlab(preview)
+                } else {
+                    resultsSlab
+                }
             }
         }
         .frame(
@@ -62,10 +69,10 @@ struct PanelView: View {
         // what it *contains* hard-cuts, because the user already asked for it.
         // The Slab growing and shrinking with its content is the same curve,
         // applied where that height is computed — the Results area's own frame.
-        .animation(Motion.resize, value: showsResults)
+        .animation(Motion.resize, value: showsSlab)
         .panelEntrance(visible: presentation.visible)
         .coordinateSpace(.named(PanelLayout.coordinateSpace))
-        .onChange(of: showsResults) { _, shows in
+        .onChange(of: showsSlab) { _, shows in
             // The Slab's frame stops being reported the moment it leaves, so its
             // hit region has to be surrendered explicitly or clicks keep landing
             // on a surface that is no longer there.
@@ -85,6 +92,17 @@ struct PanelView: View {
             guard failed else { return }
             withAnimation(Motion.entrance) { shakeTrigger += 1 }
         }
+        // A Move, Rename or Compress that did not happen, a taken name among
+        // them. The Subject Card's corner says which.
+        .onChange(of: coordinator.fileOperationFailure) { _, failure in
+            guard failure != nil else { return }
+            withAnimation(Motion.entrance) { shakeTrigger += 1 }
+        }
+        // A Transcribe that came to nothing, Codictate missing among them.
+        .onChange(of: coordinator.transcriptionFailure) { _, failure in
+            guard failure != nil else { return }
+            withAnimation(Motion.entrance) { shakeTrigger += 1 }
+        }
     }
 
     // MARK: - The Card row
@@ -94,7 +112,7 @@ struct PanelView: View {
     /// `CardContainerView` keeps the keyboard: it owns the hidden `TextField`
     /// that everything is typed into, and that must not move.
     private var cardRow: some View {
-        CardContainerView(coordinator: coordinator)
+        CardContainerView(coordinator: coordinator, previewDriver: previewDriver)
             .frame(
                 width: PanelLayout.cardRowWidth(coordinator.cardCount),
                 height: PanelLayout.cardHeight
@@ -135,6 +153,29 @@ struct PanelView: View {
                 }
                 .transition(.scale(scale: 0.97, anchor: .top).combined(with: .opacity))
         }
+    }
+
+    /// The Panel's own preview of a File Result, where the Results Slab was:
+    /// as wide as the widest Card row and as tall as the tallest Slab, so a
+    /// page is worth reading at any Phase. Its frame is the Slab's hit region,
+    /// so a click in it scrolls or plays rather than dismissing.
+    private func previewSlab(_ preview: PassagePreview) -> some View {
+        PassagePreviewView(preview: preview, driver: previewDriver)
+            .id(preview)
+            .frame(width: PanelLayout.contentWidth, height: PanelLayout.maxResultsHeight)
+            .slabSurface()
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .named(PanelLayout.coordinateSpace))
+            } action: { frame in
+                presentation.hitRegions.results = frame
+            }
+            .transition(.scale(scale: 0.97, anchor: .top).combined(with: .opacity))
+    }
+
+    /// Whether a Slab is showing: the Results Slab, or the preview in its
+    /// place.
+    private var showsSlab: Bool {
+        coordinator.passagePreview != nil || showsResults
     }
 
     /// Whether the Results Slab is showing at all.

@@ -20,6 +20,12 @@ import Foundation
 /// applies it like any other batch. A root is crawled instead only when the
 /// replay cannot be trusted for it: nothing stored yet, its volume's event
 /// history replaced, the rules changed, or its last crawl never finished.
+///
+/// **What git ignores is git's to say** (`GitIgnored`). A crawl lists each
+/// repo it walks into; a batch asks about the paths it brings that have no
+/// row; and a `.gitignore`, `.git/info/exclude` or `.git` that changes reads
+/// its repo again. A launch that replays asks git only about what the replay
+/// brings.
 nonisolated final class FileIndexer: @unchecked Sendable {
     /// What a caller is told as work happens. Called on the indexer's queue.
     enum Progress {
@@ -27,6 +33,8 @@ nonisolated final class FileIndexer: @unchecked Sendable {
         case reading(source: String, isReading: Bool)
         /// Rows were written; counts are worth reading again.
         case wrote
+        /// The contents backfill started or stopped (`FileContentScheduler`).
+        case readingContents(isReading: Bool)
     }
 
     /// How many rows a crawl writes per transaction, and so how often counts
@@ -34,6 +42,7 @@ nonisolated final class FileIndexer: @unchecked Sendable {
     static let batchSize = 500
 
     private let writer: FileIndexWriter
+    private let gitIgnored: GitIgnored
     private let home: String
     private let volumeID: (String) -> String?
     private let onProgress: (Progress) -> Void
@@ -53,18 +62,30 @@ nonisolated final class FileIndexer: @unchecked Sendable {
 
     private var pendingWrites = 0
 
-    /// - Parameter volumeID: the FSEvents history a path's events are kept
-    ///   in, `volumeID(of:)`. Tests pass their own to stand for a disk whose
-    ///   history was replaced.
+    /// The files with contents to read that the batch being handled added or
+    /// changed; nil outside `handle`.
+    private var changedFiles: [Int64]?
+
+    /// The repos listed again during the batch being handled, so a burst of
+    /// new folders in one repo lists it once; nil outside `handle`.
+    private var relistedRepos: Set<String>?
+
+    /// - Parameters:
+    ///   - gitIgnored: who asks git. Tests pass one without git.
+    ///   - volumeID: the FSEvents history a path's events are kept in,
+    ///     `volumeID(of:)`. Tests pass their own to stand for a disk whose
+    ///     history was replaced.
     init(
         writer: FileIndexWriter,
         rules: FileIndexRules = .defaults,
+        gitIgnored: GitIgnored = GitIgnored(),
         home: String = NSHomeDirectory(),
         volumeID: @escaping (String) -> String? = FileIndexer.volumeID(of:),
         onProgress: @escaping (Progress) -> Void = { _ in }
     ) {
         self.writer = writer
         self.rules = rules
+        self.gitIgnored = gitIgnored
         self.home = home
         self.volumeID = volumeID
         self.onProgress = onProgress
@@ -126,14 +147,14 @@ nonisolated final class FileIndexer: @unchecked Sendable {
     /// is crawled after it.
     private func caughtUpRoots() throws -> Set<String> {
         let stored = try writer.eventID()
-        let rulesMatch = try writer.rulesFingerprint() == rules.fingerprint
+        let rulesMatch = try writer.rulesFingerprint() == rulesFingerprint
         let known = try writer.caughtUpRoots()
         eventID = stored ?? FSEventsGetCurrentEventId()
         try writer.db.transaction {
             if stored == nil { try writer.setEventID(eventID) }
             if !rulesMatch {
                 try writer.forgetCaughtUpRoots()
-                try writer.setRulesFingerprint(rules.fingerprint)
+                try writer.setRulesFingerprint(rulesFingerprint)
             }
         }
         guard stored != nil, rulesMatch else { return [] }
@@ -146,6 +167,19 @@ nonisolated final class FileIndexer: @unchecked Sendable {
     }
 
     // MARK: - Rules
+
+    /// What the rows are read under, as kept beside them: the rules, and with
+    /// "Ignored by git" on, git's own setup (`GitIgnored.setupStamp`), which
+    /// no event in a Source reports changing.
+    var rulesFingerprint: String {
+        guard rules.skips(.gitIgnored) else { return rules.fingerprint }
+        return rules.fingerprint + "\n--\n" + gitIgnored.setupStamp
+    }
+
+    /// Whether git is asked at all: the switch is on and there is a git.
+    private var asksGit: Bool {
+        rules.skips(.gitIgnored) && gitIgnored.isAvailable
+    }
 
     /// Adopts new skip rules and returns the roots to `crawl` under them.
     ///
@@ -162,15 +196,17 @@ nonisolated final class FileIndexer: @unchecked Sendable {
     func setRules(_ rules: FileIndexRules) throws -> [String] {
         let old = self.rules
         self.rules = rules
+        // Asked again from scratch when the switch next comes on.
+        if !rules.skips(.gitIgnored) { gitIgnored.forgetAll() }
         guard hasSources, rules != old else { return [] }
         if rules.skipsAtLeast(old) {
             try prune()
-            try writer.setRulesFingerprint(rules.fingerprint)
+            try writer.setRulesFingerprint(rulesFingerprint)
             return []
         }
         try writer.db.transaction {
             try writer.forgetCaughtUpRoots()
-            try writer.setRulesFingerprint(rules.fingerprint)
+            try writer.setRulesFingerprint(rulesFingerprint)
         }
         return allRoots.reversed().filter(enabledRoots.contains)
     }
@@ -178,24 +214,35 @@ nonisolated final class FileIndexer: @unchecked Sendable {
     /// Deletes the rows `rules` leave out, judged from the index: a row's
     /// path and kind, and the disk only where a rule has to look. Parents
     /// sort before their contents, so a folder is judged before what is in
-    /// it, and what is in a skipped folder goes with it, unjudged.
+    /// it, and what is in a skipped folder goes with it, unjudged. A repo is
+    /// listed by git, if it was not already, before what is in it is judged.
     private func prune() throws {
+        let asksGit = asksGit
         try writer.db.transaction {
             for root in allRoots where enabledRoots.contains(root) {
+                if asksGit, FileIndexRules.Entry(url: URL(fileURLWithPath: root)).containsGit {
+                    gitIgnored.loadIfNeeded(repo: root)
+                }
                 // Folders whose contents are gone: skipped, or no longer descended into.
                 var emptied = Set<String>()
                 for row in try writer.rows(inTree: root).sorted(by: { $0.path < $1.path })
                 where row.path != root && self.root(containing: row.path) == root
                     && !Self.isInside(row.path, anyOf: emptied, below: root) {
-                    switch rules.verdict(for: FileIndexRules.Entry(row: row), root: root, home: home) {
+                    var entry = FileIndexRules.Entry(row: row)
+                    entry.isGitIgnored = asksGit && gitIgnored.isIgnored(row.path, below: root)
+                    switch rules.verdict(for: entry, root: root, home: home) {
                     case .skip:
                         pendingWrites += try writer.deleteTree(row.path, source: root)
                         if row.kind != .file { emptied.insert(row.path) }
                     case .indexWithoutDescending:
                         pendingWrites += try writer.deleteTree(row.path, keepingRoot: true, source: root)
                         emptied.insert(row.path)
+                    case .descendWithoutIndexing:
+                        // Its own row only: what is in it is judged in turn.
+                        try writer.delete(row.id)
+                        pendingWrites += 1
                     case .index:
-                        break
+                        if asksGit, entry.containsGit { gitIgnored.loadIfNeeded(repo: row.path) }
                     }
                 }
             }
@@ -218,6 +265,8 @@ nonisolated final class FileIndexer: @unchecked Sendable {
     func crawl(_ root: String) throws {
         onProgress(.reading(source: root, isReading: true))
         defer { onProgress(.reading(source: root, isReading: false)) }
+        // Every repo in it is listed again as the walk reaches it.
+        gitIgnored.forget(below: root)
         try reconcile(root, root: root)
         try writer.setCaughtUp(root, volume: volumeID(root))
     }
@@ -225,7 +274,9 @@ nonisolated final class FileIndexer: @unchecked Sendable {
     // MARK: - FSEvents
 
     /// Applies one batch from `FileIndexWatcher`, live or replayed, and
-    /// stores its last event ID as how far the index has caught up.
+    /// stores its last event ID as how far the index has caught up. Returns
+    /// the files it added or changed that have contents to read, for those to
+    /// be read before the backfill (`FileContentScheduler`).
     ///
     /// Each path is looked at on disk; the flags are only trusted to say that
     /// FSEvents lost track. A path that exists is added or updated — or, if a
@@ -233,13 +284,18 @@ nonisolated final class FileIndexer: @unchecked Sendable {
     /// moved. A path that does not exist is removed with everything under it.
     /// Present paths go first, so a rename's new name claims the row before
     /// its old name is deleted.
-    func handle(_ events: [FileIndexWatcher.Event]) throws {
+    @discardableResult
+    func handle(_ events: [FileIndexWatcher.Event]) throws -> [Int64] {
+        changedFiles = []
+        relistedRepos = []
+        defer { (changedFiles, relistedRepos) = (nil, nil) }
         let latest = events.last { !$0.historyDone && $0.id != nil }?.id
         try apply(events.filter { !$0.historyDone })
         if let latest {
             eventID = latest
             try writer.setEventID(latest)
         }
+        return changedFiles ?? []
     }
 
     private func apply(_ events: [FileIndexWatcher.Event]) throws {
@@ -261,6 +317,11 @@ nonisolated final class FileIndexer: @unchecked Sendable {
         for (path, root) in rescans {
             if path == root { try crawl(root) } else { try reconcile(path, root: root) }
         }
+        for (repo, root) in reposToRead(after: events) {
+            // Its `.git` may be gone, and then nothing lists it again.
+            gitIgnored.forget(repo: repo)
+            if repo == root { try crawl(root) } else { try reconcile(repo, root: root) }
+        }
 
         var present: [String: String] = [:]
         var absent: [String] = []
@@ -277,6 +338,16 @@ nonisolated final class FileIndexer: @unchecked Sendable {
             }
         }
         let ordered = present.sorted { $0.key.count < $1.key.count }
+
+        // What git makes of the paths the index has never seen: one question
+        // per repo for the whole batch.
+        if asksGit {
+            var unseen: [String: [String]] = [:]
+            for (path, root) in ordered {
+                if try writer.row(atPath: path) == nil { unseen[root, default: []].append(path) }
+            }
+            for (root, paths) in unseen { gitIgnored.ask(paths, below: root) }
+        }
 
         var excluded = ExclusionCache()
         try writer.db.transaction {
@@ -306,6 +377,40 @@ nonisolated final class FileIndexer: @unchecked Sendable {
         return [path] + parent
     }
 
+    /// The repos whose ignore rules the batch changed — a `.gitignore`
+    /// anywhere in one, its `.git/info/exclude`, or its `.git` arriving or
+    /// leaving — each with its root: they are listed and read again. Not in a
+    /// folder skipped by name or one git ignores: npm puts a `.gitignore` all
+    /// over `node_modules`, and git reads none of them. A repo inside another
+    /// being read is read with it.
+    private func reposToRead(after events: [FileIndexWatcher.Event]) -> [(String, String)] {
+        guard asksGit else { return [] }
+        var repos: [String: String] = [:]
+        for event in events {
+            let name = (event.path as NSString).lastPathComponent
+            let folder = (event.path as NSString).deletingLastPathComponent
+            guard let root = root(containing: folder), enabledRoots.contains(root) else { continue }
+            let repo: String?
+            switch name {
+            case ".gitignore": repo = GitIgnored.repos(containing: event.path, below: root).last
+            case ".git": repo = folder
+            case "exclude" where folder.hasSuffix("/.git/info"): repo = String(folder.dropLast("/.git/info".count))
+            default: repo = nil
+            }
+            // The folder the rules came from: the `.gitignore`'s, or the repo.
+            guard let repo, self.root(containing: repo) == root else { continue }
+            let source = name == ".gitignore" ? folder : repo
+            let names = source.dropFirst(root.count).split(separator: "/")
+            if names.contains(where: { rules.skipsFolder(named: String($0)) })
+                || gitIgnored.isIgnored(source, below: root) { continue }
+            repos[repo] = root
+        }
+        let outermost = repos.filter { repo, _ in
+            !repos.keys.contains { repo.hasPrefix($0 + "/") }
+        }
+        return outermost.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+    }
+
     /// What to read again when FSEvents lost track at `path`: that subtree, or
     /// — when `path` is above the roots, as a dropped-events path can be —
     /// every enabled root under it.
@@ -318,7 +423,14 @@ nonisolated final class FileIndexer: @unchecked Sendable {
     }
 
     private func apply(presentPath path: String, root: String, excluded: inout ExclusionCache) throws {
-        guard let row = scan(path, root: root, excluded: &excluded) else {
+        let (verdict, scanned) = scan(path, root: root, excluded: &excluded)
+        guard let row = scanned else {
+            if verdict == .descendWithoutIndexing {
+                // A folder git ignores: no row, but a `.env` or a key that
+                // came with it has one.
+                try reconcile(path, root: root, inTransaction: true)
+                return
+            }
             // Exists but is not to be indexed — perhaps it just became so,
             // as a folder does when a `.git` appears in it. A Source inside
             // it is the user's choice, and stays.
@@ -327,10 +439,7 @@ nonisolated final class FileIndexer: @unchecked Sendable {
         }
 
         if let existing = try writer.row(atPath: path) {
-            if !existing.isSameVersion(as: row) || existing.kind != row.kind || existing.source != row.source {
-                try writer.update(existing.id, to: row)
-                pendingWrites += 1
-            }
+            try update(existing, to: row)
             return
         }
 
@@ -350,14 +459,16 @@ nonisolated final class FileIndexer: @unchecked Sendable {
             // their own, so it is read whole.
             try reconcile(path, root: root, inTransaction: true)
         } else {
-            try writer.insert(row)
-            pendingWrites += 1
+            try insert(row)
         }
     }
 
-    /// The row for `path` if it is to be indexed, judging it *and* every folder
-    /// between it and its root by `FileIndexRules`.
-    private func scan(_ path: String, root: String, excluded: inout ExclusionCache) -> FileIndexRow? {
+    /// The verdict on `path`, judging it *and* every folder between it and
+    /// its root by `FileIndexRules` — `.skip` when one of those leaves it out
+    /// — and the row for it if it is to have one.
+    private func scan(
+        _ path: String, root: String, excluded: inout ExclusionCache
+    ) -> (verdict: FileIndexRules.Verdict, row: FileIndexRow?) {
         var folder = (path as NSString).deletingLastPathComponent
         var ancestors: [String] = []
         while folder.count > root.count, folder.hasPrefix(root) {
@@ -366,14 +477,25 @@ nonisolated final class FileIndexer: @unchecked Sendable {
         }
         for ancestor in ancestors.reversed() {
             let verdict = excluded.verdict(for: ancestor) {
-                rules.verdict(for: FileIndexRules.Entry(url: URL(fileURLWithPath: ancestor)), root: root, home: home)
+                rules.verdict(for: entry(atPath: ancestor, root: root), root: root, home: home)
             }
-            if verdict != .index { return nil }
+            if verdict != .index, verdict != .descendWithoutIndexing { return (.skip, nil) }
         }
 
-        let entry = FileIndexRules.Entry(url: URL(fileURLWithPath: path))
-        guard rules.verdict(for: entry, root: root, home: home) != .skip else { return nil }
-        return Self.row(for: entry, source: root)
+        let judged = entry(atPath: path, root: root)
+        let verdict = rules.verdict(for: judged, root: root, home: home)
+        switch verdict {
+        case .skip, .descendWithoutIndexing: return (verdict, nil)
+        case .index, .indexWithoutDescending: return (verdict, Self.row(for: judged, source: root))
+        }
+    }
+
+    /// `path` as the rules see it: read from disk, and ignored by git if git
+    /// has said so, for it or a folder above it.
+    private func entry(atPath path: String, root: String) -> FileIndexRules.Entry {
+        var entry = FileIndexRules.Entry(url: URL(fileURLWithPath: path))
+        entry.isGitIgnored = asksGit && gitIgnored.isIgnored(path, below: root)
+        return entry
     }
 
     // MARK: - Reconcile
@@ -392,11 +514,15 @@ nonisolated final class FileIndexer: @unchecked Sendable {
         }
         var seen = Set<String>()
 
+        if path != root { relistGit(around: path, root: root) }
+
         if !inTransaction { try writer.db.execute("BEGIN IMMEDIATE") }
         do {
             var excluded = ExclusionCache()
-            if path == root || scan(path, root: root, excluded: &excluded) != nil {
-                try walk(path, root: root) { row in
+            let verdict: FileIndexRules.Verdict = path == root
+                ? .index : scan(path, root: root, excluded: &excluded).verdict
+            if verdict != .skip {
+                try walk(path, root: root, verdict: verdict) { row in
                     seen.insert(row.path)
                     try record(row, existing: &existing)
                     if !inTransaction, pendingWrites >= Self.batchSize {
@@ -417,12 +543,21 @@ nonisolated final class FileIndexer: @unchecked Sendable {
         if !inTransaction { flushProgress() }
     }
 
+    /// Before a folder inside a Source is walked: lists again the repo it is
+    /// in, so what is in the folder is judged as git sees it now, not as it
+    /// was at the last crawl — once a batch. Outside a batch the folder itself
+    /// is asked about too; in one, `apply` asked about every new path.
+    private func relistGit(around path: String, root: String) {
+        guard asksGit else { return }
+        if relistedRepos == nil { gitIgnored.ask([path], below: root) }
+        guard let repo = GitIgnored.repos(containing: path, below: root).last,
+              relistedRepos?.insert(repo).inserted ?? true else { return }
+        gitIgnored.load(repo: repo)
+    }
+
     private func record(_ row: FileIndexRow, existing: inout [String: FileIndexRow]) throws {
         if let current = existing[row.path] {
-            if !current.isSameVersion(as: row) || current.kind != row.kind || current.source != row.source {
-                try writer.update(current.id, to: row)
-                pendingWrites += 1
-            }
+            try update(current, to: row)
             return
         }
         // Files only: a folder that moved during a walk is a new folder row,
@@ -433,17 +568,44 @@ nonisolated final class FileIndexer: @unchecked Sendable {
             pendingWrites += 1
             return
         }
-        try writer.insert(row)
+        try insert(row)
+    }
+
+    private func insert(_ row: FileIndexRow) throws {
+        let id = try writer.insert(row)
         pendingWrites += 1
+        if row.content != nil { changedFiles?.append(id) }
+    }
+
+    /// Writes `row` over `existing` if anything changed. Contents are read
+    /// again only when the file did: a row that only changed Source keeps
+    /// its Passages.
+    private func update(_ existing: FileIndexRow, to row: FileIndexRow) throws {
+        let isSameFile = existing.isSameVersion(as: row) && existing.kind == row.kind
+        guard !isSameFile || existing.source != row.source else { return }
+        try writer.update(existing.id, to: row, keepingContents: isSameFile)
+        pendingWrites += 1
+        if !isSameFile, row.content != nil { changedFiles?.append(existing.id) }
     }
 
     /// Calls `body` with a row for `path` and every indexable entry under it.
-    private func walk(_ path: String, root: String, body: (FileIndexRow) throws -> Void) throws {
+    /// `verdict` is `path`'s own: a folder git ignores has no row, and is
+    /// walked for what keeps to its own switches. Each repo the walk reaches
+    /// is listed by git before anything in it is judged.
+    private func walk(
+        _ path: String, root: String, verdict: FileIndexRules.Verdict, body: (FileIndexRow) throws -> Void
+    ) throws {
         let url = URL(fileURLWithPath: path)
         let top = FileIndexRules.Entry(url: url)
         guard top.isDirectory || Self.exists(exactly: path) else { return }
-        try body(Self.row(for: top, source: root))
-        guard top.isDirectory, rules.verdict(for: top, root: root, home: home) == .index else { return }
+        if verdict != .descendWithoutIndexing { try body(Self.row(for: top, source: root)) }
+        guard top.isDirectory, verdict == .index || verdict == .descendWithoutIndexing else { return }
+        let asksGit = asksGit
+        if asksGit, verdict == .index, top.containsGit { gitIgnored.load(repo: path) }
+        // The folder git ignores that the walk is in: everything in it is
+        // ignored too. A walk is depth first, so once a path is not inside
+        // it, none after will be.
+        var ignoredFolder = verdict == .descendWithoutIndexing ? path : nil
 
         // Hidden files and packages are the rules' to judge, not the
         // enumerator's: either can be switched back in.
@@ -463,15 +625,20 @@ nonisolated final class FileIndexer: @unchecked Sendable {
                     return
                 }
                 let values = try? next.resourceValues(forKeys: Set(FileIndexRules.resourceKeys))
-                let entry = FileIndexRules.Entry(url: next, values: values)
+                var entry = FileIndexRules.Entry(url: next, values: values)
+                if let folder = ignoredFolder, !entry.path.hasPrefix(folder + "/") { ignoredFolder = nil }
+                entry.isGitIgnored = asksGit && (ignoredFolder != nil || gitIgnored.contains(entry.path, below: root))
                 switch rules.verdict(for: entry, root: root, home: home) {
                 case .skip:
                     if entry.isDirectory { enumerator.skipDescendants() }
                     return
                 case .indexWithoutDescending:
                     enumerator.skipDescendants()
+                case .descendWithoutIndexing:
+                    if ignoredFolder == nil { ignoredFolder = entry.path }
+                    return
                 case .index:
-                    break
+                    if asksGit, entry.containsGit { gitIgnored.load(repo: entry.path) }
                 }
                 do { try body(Self.row(for: entry, source: root)) } catch { failure = error }
             }
@@ -543,7 +710,8 @@ nonisolated final class FileIndexer: @unchecked Sendable {
             size: kind == .folder ? 0 : Int64(info.st_size),
             mtime: kind == .folder ? 0 : Double(info.st_mtimespec.tv_sec) + Double(info.st_mtimespec.tv_nsec) / 1e9,
             inode: UInt64(info.st_ino),
-            device: UInt64(bitPattern: Int64(info.st_dev))
+            device: UInt64(bitPattern: Int64(info.st_dev)),
+            content: FileContent.of(entry)
         )
     }
 }

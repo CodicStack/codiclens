@@ -23,6 +23,20 @@ class CommandCoordinator {
             if phase == .browsingClipboard || phase == .browsingEmoji {
                 isSubjectFromSearch = false
             }
+            // A failed Move or Rename is about the Phase it failed in, and so
+            // is a Transcribe that came to nothing.
+            if phase != oldValue {
+                fileOperationFailure = nil
+                transcriptionFailure = nil
+                momentOpenFailed = false
+                // The preview is of the Phase's Subject, and Tab or Shift+Tab
+                // moves on from it.
+                passagePreview = nil
+            }
+            // A transcript can only land on the Actions of the file it is
+            // for. Leaving them, by any route, stops the command rather than
+            // let it run on for an answer that would be dropped.
+            if phase != .pickingAction { cancelTranscription() }
         }
     }
 
@@ -51,6 +65,7 @@ class CommandCoordinator {
 
     private let runner: EffectRunner
     private let history: ClipboardHistory
+    private let sources: SourceStore
 
     /// Everything that reaches the user's own data is a parameter without a
     /// default: `PanelController` hands in the shared ones, and a test that
@@ -65,16 +80,24 @@ class CommandCoordinator {
     ///   - sources: the Sources and their switches.
     ///   - searchFiles: the File Index, read by Subject search and by Finder's
     ///     Target list. Tests pass a stand-in.
+    ///   - searchSettled: the File Index's settled search, where search by
+    ///     meaning joins Subject search once typing pauses. Tests pass a
+    ///     stand-in.
+    ///   - searchSchedule: when Subject search asks for the list below the
+    ///     apps. Tests pass one they run by hand.
     init(
         runner: EffectRunner,
         history: ClipboardHistory,
         emojiVM: EmojiSearchVM,
         index: AppIndex,
         sources: SourceStore,
-        searchFiles: @escaping FileIndex.Search
+        searchFiles: @escaping FileIndex.Search,
+        searchSettled: @escaping FileIndex.SettledSearch,
+        searchSchedule: SearchSchedule = LiveSearchSchedule()
     ) {
         self.runner = runner
         self.history = history
+        self.sources = sources
         self.clipboardVM = ClipboardSearchVM(history: history)
         self.emojiVM = emojiVM
         self.subjectVM = SubjectSearchVM(
@@ -82,7 +105,9 @@ class CommandCoordinator {
             sources: sources,
             history: history,
             emoji: emojiVM,
-            searchFiles: searchFiles
+            searchFiles: searchFiles,
+            searchSettled: searchSettled,
+            schedule: searchSchedule
         )
         self.targetVM = TargetSearchVM(searchFiles: searchFiles)
     }
@@ -160,9 +185,14 @@ class CommandCoordinator {
     /// bundle in Downloads is an app, not a file. `nil` when it is gone. A
     /// Path Subject was resolved as it was typed, and anything else is
     /// already what it is.
+    ///
+    /// Its Passage comes with it: the Card goes on showing where the file
+    /// matched, Shift+Space opens it there and Enter plays it from there.
     private func chosen(_ result: Subject) -> Subject? {
         guard case .file? = subjectVM.sourceResult(for: result)?.hit else { return result }
-        return result.url.flatMap { PathSubject.subject(for: $0) }
+        guard var subject = result.url.flatMap({ PathSubject.subject(for: $0) }) else { return nil }
+        subject.passage = result.passage
+        return subject
     }
 
     /// The Emoji selection as it would be pasted — the base wearing the tone in
@@ -355,8 +385,9 @@ class CommandCoordinator {
     /// delayed. Subject search is the exception — it matches against the app
     /// Index, and until the first scan lands there is nothing to match against
     /// and no honest way to say "No results"; and below the apps it has a
-    /// second list, which answers once typing pauses. It says "No results" only
-    /// when both have answered (`SubjectSearchVM.hasAnswered`). Target search is answering out of
+    /// second list, which answers each Query a moment after the keystroke. It
+    /// says "No results" only when both have answered this Query
+    /// (`SubjectSearchVM.hasAnswered`). Target search is answering out of
     /// process, so it reports `isSearchInFlight` instead. OCR is not a search
     /// at all, but while it runs the Slab is showing "Reading text…" and must
     /// not be able to claim anything about Results either.
@@ -396,6 +427,8 @@ class CommandCoordinator {
     ///   was typed whenever a settled query has just been replaced.
     @discardableResult
     func acceptTypedText(_ typed: String) -> String {
+        // Typing is a new question; the preview was of the old answer.
+        passagePreview = nil
         let startsNewQuery = phase == .searchingSubject && subjectVM.isSearchCommitted
         if phase == .searchingSubject { isLastSubjectStanding = false }
 
@@ -414,6 +447,23 @@ class CommandCoordinator {
     /// Returns true if Escape was consumed (phase retreated or editor closed).
     /// Returns false if caller should dismiss the panel entirely.
     func handleEscape() -> Bool {
+        // Escape stops a Transcribe and leaves the Panel on the file's
+        // Actions; the next one dismisses as it always does.
+        if isTranscriptionInFlight {
+            cancelTranscription()
+            return true
+        }
+
+        if isRenaming {
+            cancelRename()
+            return true
+        }
+
+        if passagePreview != nil {
+            passagePreview = nil
+            return true
+        }
+
         if isEditingTextSubject {
             isEditingTextSubject = false
             focusTrigger.toggle()
@@ -635,18 +685,191 @@ class CommandCoordinator {
 
     /// Fills the Target Phase for a non-Final Action.
     ///
-    /// Share is the one Action whose Targets come from the *Payload* rather
-    /// than the Subject, and resolving a Payload is this object's job: a
-    /// Clipboard Image shares as its stored PNG, which only the history can
-    /// name. Going through `sharePayload(for:)` here is also what keeps the
-    /// list the user picks from and the item the service is handed the same
-    /// thing.
+    /// Share's Targets come from the *Payload* rather than the Subject, and
+    /// resolving a Payload is this object's job: a Clipboard Image shares as
+    /// its stored PNG, which only the history can name. Going through
+    /// `sharePayload(for:)` here is also what keeps the list the user picks
+    /// from and the item the service is handed the same thing. Move To… and
+    /// Copy To… are the other two: their folders come from the Sources and
+    /// the recent destinations, which are this object's too.
     private func loadTargets(for subject: Subject, action: SubjectAction) {
         if case .share = action.handler, let payload = sharePayload(for: subject) {
             targetVM.loadShareTargets(for: payload)
-        } else {
+            return
+        }
+        switch action.handler {
+        case .moveTo, .copyTo:
+            targetVM.loadFolderTargets(destinationFolders())
+        default:
             targetVM.loadTargets(for: subject, action: action)
         }
+    }
+
+    // MARK: - Moving, copying, renaming, compressing
+
+    /// Folders a Move or Copy went to in this run of the app, latest first. In
+    /// memory only, like the Last Subject.
+    private var recentDestinations: [URL] = []
+
+    /// What Move To… and Copy To… offer before anything is typed: where the
+    /// last ones went, the folder Sources, then Desktop, Documents, Downloads
+    /// and Home. Each once, and only if it is still a folder.
+    func destinationFolders() -> [URL] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let common = ["Desktop", "Documents", "Downloads"].map {
+            home.appendingPathComponent($0, isDirectory: true)
+        } + [home]
+        let candidates = recentDestinations
+            + sources.folders.compactMap(\.folderPath).map { URL(fileURLWithPath: $0, isDirectory: true) }
+            + common
+
+        var seen = Set<String>()
+        return candidates.filter { url in
+            let path = url.standardizedFileURL.path
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else { return false }
+            return seen.insert(path).inserted
+        }
+    }
+
+    /// Whether a Move, Copy, Rename or Compress is on disk being done. Gates a
+    /// second Enter the way `isImageActionInFlight` does.
+    private(set) var isFileOperationInFlight = false
+
+    /// What the last one that failed said, for the Subject Card's corner, and
+    /// what the Panel shakes about. Cleared as the next one starts and as the
+    /// Phase moves on.
+    private(set) var fileOperationFailure: String?
+
+    private var fileOperationGeneration = 0
+    private var pendingFileOperation: FileOperation?
+    private var pendingFileSubjectID: UUID?
+
+    /// What the Subject Card's corner says about file work: under way, or why
+    /// it did not happen.
+    var fileOperationNote: String? {
+        if isFileOperationInFlight { return pendingFileOperation?.progressNote }
+        return fileOperationFailure
+    }
+
+    /// The file or folder on disk behind a Subject, and nothing else. A
+    /// Clipboard Item's `url` is the file it was copied *from* — a name and
+    /// nothing more — and no Action moves, renames or zips that.
+    private func fileOnDisk(_ subject: Subject) -> URL? {
+        switch subject.kind {
+        case .file, .folder: subject.url
+        default: nil
+        }
+    }
+
+    private func beginFileOperation(_ operation: FileOperation, on subject: Subject) -> [Effect] {
+        fileOperationGeneration += 1
+        isFileOperationInFlight = true
+        fileOperationFailure = nil
+        pendingFileOperation = operation
+        pendingFileSubjectID = subject.id
+        return [.fileOperation(operation, generation: fileOperationGeneration)]
+    }
+
+    /// Where a Move, Copy, Rename or Compress landed, handed back by the
+    /// runner. The Subject follows it there — the moved file, the copy, the
+    /// renamed file, the zip — and the Panel stays on the Action Phase with
+    /// that Subject's Actions, as it does after Rotate or "Use as Subject".
+    ///
+    /// A failure leaves everything where it was, Rename's editor included, so
+    /// a taken name can be changed and tried again.
+    func receiveFileOperation(_ result: Result<URL, FileOperation.Failure>, generation: Int) {
+        guard isFileOperationInFlight, generation == fileOperationGeneration else { return }
+        isFileOperationInFlight = false
+        let operation = pendingFileOperation
+        let expectedSubjectID = pendingFileSubjectID
+        pendingFileOperation = nil
+        pendingFileSubjectID = nil
+        guard phase == .pickingAction || phase == .pickingTarget,
+              selectedSubject?.id == expectedSubjectID,
+              let operation else { return }
+
+        let landed: Subject
+        switch result {
+        case .failure(let failure):
+            fileOperationFailure = operation.failureNote(failure)
+            return
+        case .success(let url):
+            guard let subject = PathSubject.subject(for: url) else {
+                fileOperationFailure = operation.failureNote(.failed)
+                return
+            }
+            landed = subject
+        }
+
+        switch operation {
+        case .move(_, let folder), .copy(_, let folder):
+            recentDestinations.removeAll { $0.standardizedFileURL.path == folder.standardizedFileURL.path }
+            recentDestinations.insert(folder, at: 0)
+            recentDestinations = Array(recentDestinations.prefix(Self.recentDestinationLimit))
+        case .rename:
+            isRenaming = false
+            focusTrigger.toggle()
+        case .compress:
+            break
+        }
+
+        selectedSubject = landed
+        selectedAction = nil
+        actionVM.loadActions(for: landed)
+        phase = .pickingAction
+        onPhaseChange?()
+    }
+
+    private static let recentDestinationLimit = 5
+
+    // MARK: - Renaming
+
+    /// Whether the Subject Card is holding a file's name for editing. Not
+    /// Editing (`CONTEXT.md`), which is a text Subject's text.
+    private(set) var isRenaming = false
+
+    /// What the name editor holds, until `commitRename` acts on it.
+    var renameText = ""
+
+    /// Opens the name editor on the Subject Card, holding the current name.
+    private func beginRename(_ subject: Subject) {
+        guard let url = fileOnDisk(subject) else { return }
+        fileOperationFailure = nil
+        renameText = url.lastPathComponent
+        isRenaming = true
+    }
+
+    /// The part of the name the editor selects as it opens: the name without
+    /// its extension, as Finder does. A folder's whole name.
+    var renameSelectedRange: Range<String.Index> {
+        let isFolder = if case .folder? = selectedSubject?.kind { true } else { false }
+        return FileOperation.baseNameRange(in: renameText, isFolder: isFolder)
+    }
+
+    /// Enter or ⌘E in the name editor. An unchanged name just closes it. Any
+    /// other goes to disk, and the editor stays open until the answer: a
+    /// taken name leaves it open to try another.
+    @discardableResult
+    func commitRename() -> [Effect] {
+        guard isRenaming, !isFileOperationInFlight,
+              let subject = selectedSubject, let url = fileOnDisk(subject) else { return [] }
+        guard renameText != url.lastPathComponent else {
+            cancelRename()
+            return []
+        }
+        let effects = beginFileOperation(.rename(url, to: renameText), on: subject)
+        runner.run(effects)
+        return effects
+    }
+
+    /// Escape in the name editor: the name stays what it was.
+    func cancelRename() {
+        guard isRenaming else { return }
+        isRenaming = false
+        fileOperationFailure = nil
+        focusTrigger.toggle()
     }
 
     /// Advances the machine and hands the resulting effects to the runner.
@@ -656,7 +879,8 @@ class CommandCoordinator {
         // A second Enter while OCR is running must do nothing at all. Not a
         // debounce and not a delay: the run either is or is not in flight, and
         // while it is, the answer it will bring back owns the Subject.
-        guard !isOCRInFlight, !isImageActionInFlight else { return [] }
+        guard !isOCRInFlight, !isImageActionInFlight, !isFileOperationInFlight,
+              !isTranscriptionInFlight, !isMomentOpenInFlight else { return [] }
         let effects = submitEffects()
         runner.run(effects)
         return effects
@@ -844,6 +1068,84 @@ class CommandCoordinator {
         onPhaseChange?()
     }
 
+    // MARK: - Transcribing
+
+    /// Whether Codictate is transcribing the Subject. Gates a second Enter the
+    /// way `isOCRInFlight` does, and says "Transcribing…" in the Subject
+    /// Card's corner: a long recording takes a while (11.5 minutes of audio
+    /// took ~27 s), and the command reports no progress to show.
+    private(set) var isTranscriptionInFlight = false
+
+    /// Why the last Transcribe gave no text Subject, for the Subject Card's
+    /// corner, and what the Panel shakes about. Cleared as the next one starts
+    /// and as the Phase moves on.
+    private(set) var transcriptionFailure: Transcription.Failure?
+
+    private var transcriptionGeneration = 0
+    private var pendingTranscriptionSubjectID: UUID?
+
+    /// What the Subject Card's corner says about Transcribe: under way, or why
+    /// it came to nothing.
+    var transcriptionNote: String? {
+        if isTranscriptionInFlight { return "Transcribing…" }
+        return transcriptionFailure?.note
+    }
+
+    /// Transcribe on Enter. Without a Codictate to run, the first Enter says
+    /// so and the next one opens Codictate's website, so a missing Codictate
+    /// is never a silent failure and never a dead end.
+    private func transcribeEffects(for subject: Subject) -> [Effect] {
+        guard let url = fileOnDisk(subject) else { return [] }
+        if transcriptionFailure?.offersDownload == true {
+            return [.hide, .open(Transcription.downloadURL)]
+        }
+        transcriptionGeneration += 1
+        isTranscriptionInFlight = true
+        transcriptionFailure = nil
+        pendingTranscriptionSubjectID = subject.id
+        // **No `.hide`.** The transcript lands *in* the Panel, as OCR Text does.
+        return [.transcribe(url, generation: transcriptionGeneration)]
+    }
+
+    /// The transcript, handed back by the runner.
+    ///
+    /// It becomes a text Subject in place of the file, exactly as OCR Text
+    /// replaces an image, so Copy, Paste, Share, Editing and the transforms
+    /// all work on it. Silence produces no text Subject at all, never an empty
+    /// one: the file stays the Subject and the Panel shakes.
+    func receiveTranscription(_ result: Result<String, Transcription.Failure>, generation: Int) {
+        guard isTranscriptionInFlight, generation == transcriptionGeneration else { return }
+        isTranscriptionInFlight = false
+        let expectedSubjectID = pendingTranscriptionSubjectID
+        pendingTranscriptionSubjectID = nil
+        guard phase == .pickingAction, selectedSubject?.id == expectedSubjectID else { return }
+
+        switch result {
+        case .failure(let failure):
+            transcriptionFailure = failure
+        case .success(let transcript):
+            // A Speech Engine's text often opens with a space.
+            let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else {
+                transcriptionFailure = .noSpeech
+                return
+            }
+            retarget(at: text, writingTheQuery: false)
+        }
+    }
+
+    /// Stops the Transcribe under way, if there is one. Its answer is dropped
+    /// by the generation. Called on Escape, on leaving the file's Actions, and
+    /// by `PanelController` as the Panel goes away: a hidden Panel has nowhere
+    /// to put a transcript, and the next one starts afresh.
+    func cancelTranscription() {
+        guard isTranscriptionInFlight else { return }
+        transcriptionGeneration += 1
+        isTranscriptionInFlight = false
+        pendingTranscriptionSubjectID = nil
+        runner.run([.cancelTranscription])
+    }
+
     /// Asks that the next `reset` open straight into Emoji Mode.
     ///
     /// The panel resets itself as it appears, so the hotkey cannot simply set
@@ -876,6 +1178,20 @@ class CommandCoordinator {
         isImageActionInFlight = false
         imageActionFailed = false
         pendingImageSubjectID = nil
+        fileOperationGeneration += 1
+        isFileOperationInFlight = false
+        fileOperationFailure = nil
+        pendingFileOperation = nil
+        pendingFileSubjectID = nil
+        cancelTranscription()
+        transcriptionFailure = nil
+        isRenaming = false
+        renameText = ""
+        passagePreview = nil
+        momentOpenGeneration += 1
+        isMomentOpenInFlight = false
+        momentOpenFailed = false
+        pendingMoment = nil
         isSubjectFromSearch = false
         subjectVM.isSearchCommitted = true
         actionVM.reset()
@@ -893,30 +1209,165 @@ class CommandCoordinator {
         focusTrigger.toggle()
     }
 
+    /// Shift+Space. The Quick Look Action is the same thing on Enter, so both
+    /// go through `quickLookEffects()`.
     func triggerQuickLook() {
-        guard let context = quickLookContext() else { return }
-        runner.run([.quickLook(context)])
+        runner.run(quickLookEffects())
     }
 
-    func quickLookContext() -> QuickLookContext? {
+    /// Quick Look, or the Panel's own preview where a File Result matched
+    /// inside the file — which opens, or closes if it is open, and is no
+    /// Effect: it is drawn in the Panel, as the rename editor is, and changes
+    /// nothing outside it.
+    private func quickLookEffects() -> [Effect] {
+        if passagePreview != nil {
+            passagePreview = nil
+            return []
+        }
+        if let preview = passagePreviewContext() {
+            passagePreview = preview
+            return []
+        }
+        return quickLookContext().map { [.quickLook($0)] } ?? []
+    }
+
+    // MARK: - The Panel's own preview
+
+    /// What the Results Slab has given way to: a File Result's file, open at
+    /// its Passage. See `PassagePreview`.
+    private(set) var passagePreview: PassagePreview?
+
+    /// Closes the preview, as the Panel goes away: a video in it must not go
+    /// on playing behind a hidden Panel.
+    func closePassagePreview() {
+        passagePreview = nil
+    }
+
+    /// The preview Shift+Space opens in this Phase, if the Subject it is about
+    /// matched inside its file: the selected Result in Subject search, the
+    /// chosen Subject in the Action Phase.
+    private func passagePreviewContext() -> PassagePreview? {
+        let subject: Subject?
         switch phase {
+        case .searchingSubject:
+            let results = subjectVM.results
+            subject = standingSubject == nil && subjectVM.selectedIndex < results.count
+                ? results[subjectVM.selectedIndex] : nil
+        case .pickingAction:
+            subject = selectedSubject
+        default:
+            subject = nil
+        }
+        guard let subject, let passage = subject.passage, let url = subject.url,
+              case .file(let contentType) = subject.kind else { return nil }
+        return PassagePreview(url: url, title: subject.displayName, contentType: contentType, passage: passage)
+    }
+
+    // MARK: - Opening a recording at its moment
+
+    /// Whether QuickTime is being asked to open a file at its moment. Gates a
+    /// second Enter.
+    private(set) var isMomentOpenInFlight = false
+
+    /// Whether QuickTime could not, and the file was opened from the start.
+    private(set) var momentOpenFailed = false
+
+    private var momentOpenGeneration = 0
+    private var pendingMoment: (url: URL, label: String)?
+
+    /// What the Subject Card's corner says about it.
+    var momentOpenNote: String? {
+        if isMomentOpenInFlight, let label = pendingMoment?.label { return "Opening \(label)…" }
+        return momentOpenFailed ? "Opened from the start" : nil
+    }
+
+    /// Enter on a recording or a video that matched at a moment: QuickTime,
+    /// there. Anything else, or a Subject with no moment, opens as files do.
+    private func openEffects(for subject: Subject, url: URL) -> [Effect] {
+        guard let passage = subject.passage, let seconds = passage.seconds, let label = passage.momentLabel,
+              PassagePreview.isRecording(url) else { return [.hide, .open(url)] }
+        momentOpenGeneration += 1
+        isMomentOpenInFlight = true
+        momentOpenFailed = false
+        pendingMoment = (url, label)
+        return [.openAtMoment(url, seconds: seconds, generation: momentOpenGeneration)]
+    }
+
+    /// QuickTime's answer, handed back by the runner. Opened: the Panel goes,
+    /// if QuickTime coming forward has not already sent it. Not — the user
+    /// said no, or QuickTime could not open it: the file opens the ordinary
+    /// way, from the start, and the Card's corner says so.
+    func receiveMomentOpen(succeeded: Bool, generation: Int) {
+        guard isMomentOpenInFlight, generation == momentOpenGeneration, let moment = pendingMoment else { return }
+        isMomentOpenInFlight = false
+        pendingMoment = nil
+        if succeeded {
+            runner.run([.hide])
+        } else {
+            momentOpenFailed = true
+            runner.run([.open(moment.url)])
+        }
+    }
+
+    /// What Quick Look shows in this Phase: the one thing the Phase is about,
+    /// and arrowing inside Quick Look moves the selection and asks again.
+    ///
+    /// In Subject search that is the selected Result, or the standing Last
+    /// Subject. Every row with a file has a preview: a File Result, a Path
+    /// Subject, an app (Quick Look shows its info, as for an app among
+    /// Finder's Targets), and a Clipboard Item through its written-out preview.
+    /// An Emoji, text and a Built-in have none, and Shift+Space does nothing
+    /// on them. In the Action Phase it is the Subject chosen; in the Target
+    /// Phase, the selected Target.
+    func quickLookContext() -> QuickLookContext? {
+        let item: QuickLookPreviewItem?
+        switch phase {
+        case .searchingSubject:
+            if let standing = standingSubject {
+                item = quickLookItem(for: standing)
+            } else {
+                let results = subjectVM.results
+                guard subjectVM.selectedIndex < results.count else { return nil }
+                item = quickLookItem(for: results[subjectVM.selectedIndex])
+            }
+
+        case .pickingAction:
+            item = selectedSubject.flatMap(quickLookItem(for:))
+
         case .pickingTarget:
             let targets = targetVM.filteredTargets
             guard targetVM.selectedIndex < targets.count,
                   let url = targets[targetVM.selectedIndex].url else { return nil }
-            let item = QuickLookPreviewItem(url: url, title: targets[targetVM.selectedIndex].name)
-            return QuickLookContext(items: [item], selectedIndex: 0)
+            item = quickLookItem(url, title: targets[targetVM.selectedIndex].name)
 
         case .browsingClipboard:
-            let items = clipboardVM.filteredItems
-            guard clipboardVM.selectedIndex < items.count,
-                  let url = history.previewURL(for: items[clipboardVM.selectedIndex]) else { return nil }
-            let item = QuickLookPreviewItem(url: url, title: items[clipboardVM.selectedIndex].displayName)
-            return QuickLookContext(items: [item], selectedIndex: 0)
+            item = currentClipboardItem.flatMap(quickLookItem(for:))
 
-        default:
+        case .browsingEmoji, .showingResult:
+            item = nil
+        }
+        return item.map { QuickLookContext(items: [$0], selectedIndex: 0) }
+    }
+
+    private func quickLookItem(for subject: Subject) -> QuickLookPreviewItem? {
+        switch subject.kind {
+        case .clipboard(let clipboardItem):
+            return quickLookItem(for: clipboardItem)
+        case .app, .file, .folder:
+            return subject.url.map { quickLookItem($0, title: subject.displayName) }
+        case .text, .emoji, .builtIn:
             return nil
         }
+    }
+
+    /// A Clipboard Item's snapshot, never the file it was copied from
+    /// (`ClipboardHistory.previewURL(for:)`).
+    private func quickLookItem(for clipboardItem: ClipboardItem) -> QuickLookPreviewItem? {
+        history.previewURL(for: clipboardItem).map { quickLookItem($0, title: clipboardItem.displayName) }
+    }
+
+    private func quickLookItem(_ url: URL, title: String) -> QuickLookPreviewItem {
+        QuickLookPreviewItem(url: url, title: title, textCopies: history.fileTextPreviewsDirectory)
     }
 
     // MARK: - Execution
@@ -989,9 +1440,12 @@ class CommandCoordinator {
 
     private func defaultEffects(for subject: Subject) -> [Effect] {
         switch subject.kind {
-        case .app, .file, .folder:
+        case .app, .folder:
             guard let url = subject.url else { return [.hide] }
             return [.hide, .open(url)]
+        case .file:
+            guard let url = subject.url else { return [.hide] }
+            return openEffects(for: subject, url: url)
         case .text(let rawText):
             return [.hide, .copy(.text(rawText))]
         case .clipboard:
@@ -1037,7 +1491,8 @@ class CommandCoordinator {
 
         case .openFile:
             guard let url = fileURL(for: subject, target: target) else { return [.hide] }
-            return [.hide, .open(url)]
+            // Open on the Subject is Enter on it, at its moment where it has one.
+            return target == nil ? openEffects(for: subject, url: url) : [.hide, .open(url)]
 
         case .openWith:
             guard let appURL = target?.url, let url = subject.url else { return [.hide] }
@@ -1057,12 +1512,36 @@ class CommandCoordinator {
             }
             return [.hide, .copy(.text(path))]
 
+        case .copyFile:
+            // The file itself, not its path: Finder and Mail paste the file.
+            guard let url = fileOnDisk(subject) else { return [.hide] }
+            return [.hide, .copy(.fileURL(url))]
+
+        case .moveTo:
+            guard let url = fileOnDisk(subject), let folder = target?.url else { return [] }
+            return beginFileOperation(.move(url, into: folder), on: subject)
+
+        case .copyTo:
+            guard let url = fileOnDisk(subject), let folder = target?.url else { return [] }
+            return beginFileOperation(.copy(url, into: folder), on: subject)
+
+        case .rename:
+            // Nothing on disk yet: the name editor opens, and its Enter is
+            // `commitRename`.
+            beginRename(subject)
+            return []
+
+        case .compress:
+            // **No `.hide`.** The Subject becomes the zip, in the Panel, so
+            // Share and Reveal in Finder are one Enter away.
+            guard let url = fileOnDisk(subject) else { return [] }
+            return beginFileOperation(.compress(url), on: subject)
+
         case .quickLook:
-            guard let url = quickLookURL(for: subject, target: target) else { return [] }
-            return [.quickLook(QuickLookContext(
-                items: [QuickLookPreviewItem(url: url, title: subject.displayName)],
-                selectedIndex: 0
-            ))]
+            // Exactly Shift+Space. This only runs in the Action Phase, on the
+            // Subject, or the Target Phase, on the selected Target — what
+            // `quickLookContext()` already reads.
+            return quickLookEffects()
 
         // MARK: Images
 
@@ -1098,6 +1577,11 @@ class CommandCoordinator {
         case .openInPreview:
             guard let url = fileURL(for: subject, target: target) else { return [.hide] }
             return [.hide, .openInPreview(url)]
+
+        // MARK: Audio and video
+
+        case .transcribe:
+            return transcribeEffects(for: subject)
 
         // MARK: Promotion
 
@@ -1206,14 +1690,6 @@ class CommandCoordinator {
         imageActionFailed = false
         pendingImageSubjectID = subject.id
         return [effect(imageActionGeneration)]
-    }
-
-    private func quickLookURL(for subject: Subject, target: ActionTarget?) -> URL? {
-        if let targetURL = target?.url { return targetURL }
-        if case .clipboard(let item) = subject.kind {
-            return history.previewURL(for: item)
-        }
-        return subject.url
     }
 
     private func saveEffects(for subject: Subject) -> [Effect] {

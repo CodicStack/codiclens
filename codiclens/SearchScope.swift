@@ -30,10 +30,11 @@ extension SubjectSearchVM: SearchScope {
     /// That is the whole of the reported defect, and a debounce cannot fix it
     /// because a debounce is what it is.
     ///
-    /// The list below the apps is the one thing that does wait, for typing to
-    /// pause, and it is not withheld either: until it lands there is nothing
-    /// there, and "No results" waits for it (`hasAnswered`). Its rows carry
-    /// their own display, which names the Source each came from.
+    /// The list below the apps answers a moment after the keystroke, off the
+    /// main actor, and is not withheld either: until a Query's own answer lands
+    /// the previous one stays, and "No results" waits for it (`hasAnswered`).
+    /// Its rows carry their own display, which names the Source each came
+    /// from.
     var displayResults: [ResultDisplayItem] {
         results.map { sourceResult(for: $0)?.display ?? ResultDisplayItem(from: $0) }
     }

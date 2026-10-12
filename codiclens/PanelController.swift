@@ -26,6 +26,8 @@ class PanelController {
     private(set) var quickLookActive = false
     private var savePanelActive = false
     private let focus = FocusHandoff()
+    /// Search by meaning's query encoder, held while the Panel is up.
+    private let queryEncoder = QueryEncoderHold.fileIndex
     private var isTornDown = false
 
     /// Whether the Panel is up as far as this controller is concerned.
@@ -40,7 +42,7 @@ class PanelController {
     private var showGeneration = 0
 
     init() {
-        let runner = SystemEffectRunner()
+        let runner = SystemEffectRunner(pasteboard: .general)
         effectRunner = runner
         coordinator = CommandCoordinator(
             runner: runner,
@@ -48,7 +50,8 @@ class PanelController {
             emojiVM: EmojiSearchVM(recents: .shared, preferences: .shared),
             index: .shared,
             sources: .shared,
-            searchFiles: FileIndex.shared.searcher
+            searchFiles: FileIndex.shared.searcher,
+            searchSettled: FileIndex.shared.settledSearcher
         )
         panel = FloatingPanel(
             contentRect: NSRect(
@@ -90,6 +93,18 @@ class PanelController {
 
         runner.onImageRotation = { [weak self] generation, succeeded in
             self?.coordinator.receiveImageRotation(succeeded: succeeded, generation: generation)
+        }
+
+        runner.onFileOperation = { [weak self] generation, result in
+            self?.coordinator.receiveFileOperation(result, generation: generation)
+        }
+
+        runner.onTranscription = { [weak self] generation, result in
+            self?.coordinator.receiveTranscription(result, generation: generation)
+        }
+
+        runner.onMomentOpen = { [weak self] generation, opened in
+            self?.coordinator.receiveMomentOpen(succeeded: opened, generation: generation)
         }
 
         quickLookHelper.onDismiss = { [weak self] in
@@ -209,6 +224,7 @@ class PanelController {
         isShowing = true
 
         coordinator.reset()
+        queryEncoder.panelShown()
         updatePanelAppearance()
         focus.capture(frontmost: NSWorkspace.shared.frontmostApplication)
         centerOnScreen()
@@ -286,6 +302,9 @@ class PanelController {
         guard isShowing else { return }
         isShowing = false
         let generation = showGeneration
+        coordinator.cancelTranscription()
+        coordinator.closePassagePreview()
+        queryEncoder.panelHidden()
 
         dismissQuickLook()
         removeObservers()
@@ -307,6 +326,9 @@ class PanelController {
     private func hideImmediately() {
         isShowing = false
         showGeneration += 1
+        coordinator.cancelTranscription()
+        coordinator.closePassagePreview()
+        queryEncoder.panelHidden()
         presentation.visible = false
         panel.orderOut(nil)
     }
@@ -470,6 +492,7 @@ class PanelController {
             NSApp.activate(ignoringOtherApps: true)
             isShowing = true
             showGeneration += 1
+            queryEncoder.panelShown()
             presentation.visible = true
             panel.makeKeyAndOrderFront(nil)
             coordinator.focusTrigger.toggle()

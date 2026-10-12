@@ -33,6 +33,12 @@ struct ResultDisplayItem: Identifiable {
     /// be information.
     let highlightsSubtitle: Bool
 
+    /// Where the subtitle is the words a file matched on (a Passage), the
+    /// places FTS5 matched the Query in them, in characters. Marked instead of
+    /// `highlightsSubtitle`'s guess: a long excerpt holds the Query's letters
+    /// as a subsequence almost always, and underlining those would be noise.
+    private(set) var subtitleMarks: [Range<Int>]?
+
     init(from subject: Subject) {
         self.id = subject.id.uuidString
         self.name = subject.displayName
@@ -61,6 +67,7 @@ struct ResultDisplayItem: Identifiable {
         self.thumbnailURL = target.thumbnailURL
         self.subtitle = target.subtitle
         self.highlightsSubtitle = true
+        self.subtitleMarks = target.subtitleMarks
     }
 
     /// `imageURL` is the item's stored PNG, from `ClipboardHistory`; the row
@@ -82,14 +89,22 @@ struct ResultDisplayItem: Identifiable {
 
     /// A File Result: its folder under its name, which is the Source as the
     /// user added it. Marked up, because a file found by its folder is there
-    /// for the folder's name.
+    /// for the folder's name. A file found by what it says shows that
+    /// instead — its Passage, with the matched words marked. The id is the
+    /// file's either way.
     init(file hit: FileHit, icon: NSImage) {
         self.id = "file:" + hit.url.path
         self.name = hit.name
         self.icon = .nsImage(icon)
         self.thumbnailURL = hit.kind == .file ? hit.url : nil
-        self.subtitle = hit.folder
-        self.highlightsSubtitle = true
+        if let passage = hit.passage {
+            self.subtitle = passage.subtitle
+            self.highlightsSubtitle = false
+            self.subtitleMarks = passage.subtitleMatches
+        } else {
+            self.subtitle = hit.folder
+            self.highlightsSubtitle = true
+        }
     }
 
     /// A Clipboard Item, named as one — "Clipboard · 5m ago".
@@ -112,6 +127,15 @@ struct ResultDisplayItem: Identifiable {
         self.thumbnailURL = nil
         self.subtitle = "Emoji"
         self.highlightsSubtitle = false
+    }
+
+    /// The subtitle as the row draws it: a Passage's matched words
+    /// underlined, a name marked up against the Query, or plain.
+    func attributedSubtitle(query: String) -> AttributedString {
+        guard let marks = subtitleMarks else {
+            return highlightsSubtitle ? highlightedName(subtitle, query: query) : AttributedString(subtitle)
+        }
+        return underlined(subtitle, marks: marks)
     }
 
     private static func age(of item: ClipboardItem) -> String {
