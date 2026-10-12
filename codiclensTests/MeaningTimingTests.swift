@@ -72,7 +72,7 @@ struct MeaningTimingTests {
         let vectors = MeaningVectors(databaseURL: url)
         let cache = try VectorCache(url: VectorCache.url(besideDatabase: url))
         let meaning = MeaningScheduler(writer: writer, vectors: vectors, cache: cache, queue: DispatchQueue(label: "timing.meaning"),
-                                       embed: MeaningScheduler.embedAll(with: embedder, cache: cache))
+                                       embed: MeaningScheduler.embedAll(with: embedder, cache: cache), machine: .atDesk)
         meaning.setSources(roots)
         try meaning.enable()
         // The helper's model load, apart from the work.

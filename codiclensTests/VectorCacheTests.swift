@@ -323,6 +323,8 @@ private final class RewritingEmbedder: MeaningEmbedder, @unchecked Sendable {
     func embedAudio(at url: URL, from start: TimeInterval, duration: TimeInterval) async throws -> [Float] {
         KeywordEmbedder.vector(for: "sound")
     }
+
+    func setFullSpeed(_ isFullSpeed: Bool) async {}
 }
 
 extension MeaningFixture {

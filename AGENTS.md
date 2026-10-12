@@ -99,7 +99,10 @@ the top three (`MeaningRealModelTests`); `TEST_RUNNER_CODICLENS_TIME_MEANING=<s>
 and reads the real Sources into a temp database, embeds up to `<s>` seconds of each kind
 and estimates the rest, and times Queries (`MeaningTimingTests`);
 `TEST_RUNNER_CODICLENS_MEANING_EVAL=1` is the ship gate (see Search by meaning).
-`TEST_RUNNER_CODICLENS_TIME_KEYSTROKES=<database>` times every prefix of a few Queries
+`TEST_RUNNER_CODICLENS_MEASURE_THROUGHPUT=<s>` measures the backfill's speed on text cut from
+this repository into files shaped like the real backlog: texts per helper call, files per batch,
+and the gentle and full pace through the real batch loop with a warm Query's latency beside each
+(`MeaningThroughputTests`). `TEST_RUNNER_CODICLENS_TIME_KEYSTROKES=<database>` times every prefix of a few Queries
 against an index already on disk, read-only (`FileIndexKeystrokeTimingTests`).
 `TEST_RUNNER_CODICLENS_MEASURE_VECTOR_CACHE=<copy of a FileIndex.sqlite>` seeds a temp vector
 cache from a schema-4 index and prints what came over and the disk before and after
@@ -284,9 +287,13 @@ runs the installed command, the dev build included, on a `say` m4a
   **alone** — no message row,
   which is the shortest Slab there is (`PanelLayout.queryOnlyResultsHeight`).
   Its list below the apps answers each Query a moment after the keystroke, and
-  until it has, "No results" is not said either: `SubjectSearchVM.hasAnswered`
-  waits for both, and while a newer Query is out the previous list stays on
-  screen rather than a claim about a Query nobody has answered yet.
+  until its **settled pass** has, "No results" is not said either:
+  `SubjectSearchVM.hasAnswered` waits for both, and while a newer Query is out
+  the previous list stays on screen rather than a claim about a Query nobody has
+  answered yet. The keystroke's word answer is not enough: a Passage's last word
+  is a prefix, and meaning joins, only in the settled pass, so "budg" found
+  nothing on the keystroke and the budget report a moment later — and the Card
+  said "No match", the Panel shook, and both changed their minds.
   Target search answers out of process and says "Searching…" instead, and OCR
   — which is not a search at all — says "Reading text…" off
   `CommandCoordinator.isOCRInFlight`. Subject
@@ -294,6 +301,14 @@ runs the installed command, the dev build included, on a `say` m4a
   all that, which left "No results" as the only thing the Slab could draw in the
   meantime: every search said no and then changed its mind. A debounce cannot
   fix that, because a debounce is what it was.
+- **The Subject Card is never blank in Subject search.** It shows
+  `SubjectSearchVM.cardSubject`: the highlighted row, or, while the Query has
+  not been answered (`hasAnswered`) and nothing is highlighted, the last thing
+  it showed — a row, the text ⌘E stood, or a Last Subject typing ended
+  (`holdOnCard`). "No match" only once the Query has been answered with
+  nothing; "Type..." with no Query. It never reads `results[selectedIndex]`
+  itself: that is empty between a keystroke and its answer, and the Card fell
+  to a faint placeholder on bare glass, which read as the Card disappearing.
 - **A matched name is marked with an underline, in `highlightedName`.** Weight
   was tried and is no difference at all against a selected row, whose title is
   already bold. The subsequence tier only marks up when the *whole* Query is a
@@ -314,7 +329,9 @@ runs the installed command, the dev build included, on a `say` m4a
   had already built — so a filtered grid went on showing the previous Query's results
   while the Subject Card showed the right one. `ResultDisplayItem.id` is a `String`
   taken from the source for the same reason: it was a `UUID` and one initialiser
-  minted a fresh one per call, re-identifying every row on every keystroke.
+  minted a fresh one per call, re-identifying every row on every keystroke. An
+  app's row is its path (`path:`), because the Index makes a fresh `Subject` per
+  keystroke.
 - **The grid and the Subject Card must draw the same glyph.** Both go through the tone
   in force — `EmojiSearchVM.displayed` for a cell, `resolvedSelection` for the Card.
   Toning is presentation only: selection, ordering and identity stay with the base,
@@ -474,9 +491,16 @@ Owns four view models, one per search phase:
   connection, so the first of a session waiting for the query encoder holds up no
   keystroke. An answer for a Query typed past is dropped, and only the newest settled
   pass lands: the File Index answers one superseded or cancelled with `[]`, which is
-  not an answer. An untouched selection stays on the first row; one moved by hand
-  follows its row's id through re-ranks and falls back to the first row when the
-  row goes. `SearchSchedule` is the seam for both moments: `LiveSearchSchedule` in
+  not an answer. An untouched selection stays on the first row. One moved by hand
+  picks its row (by `ResultDisplayItem.id`): under the same Query it follows the
+  row through re-ranks; once the Query changes the row is **pinned** — first in
+  the whole list, above the apps, selected, listed once, and the list scrolls to
+  the top (`pinCount`) — for as long as the new Query matches it. A pinned list
+  row the word answer leaves out waits for the settled pass; when it no longer
+  matches, the pin goes and the selection is the first row, and the row coming
+  back is not pinned again. Moving onto row 0 by hand, clearing the Query, ⌘E,
+  a path and the Panel opening again (`forgetPick`) pin nothing. The only thing
+  ever above the apps, and only because the user chose it (2026-10-12). `SearchSchedule` is the seam for both moments: `LiveSearchSchedule` in
   the app, `HeldSearchSchedule` in tests, which run them by hand. Each row names
   its Source (`ResultDisplayItem(file:)`, `(clipboardResult:)`, `(emoji:base:)`,
   ids prefixed by Source). A File Result found by what the file says shows its
@@ -554,8 +578,8 @@ as the only Result (`SubjectSearchVM.standAsText`), so Enter copies it and Tab
 opens its Actions. Escape in the editor discards it; Escape on the saved text goes
 back to what the Query matched. The next keystroke is a new Query: the text was
 written in the editor, not in the Query. `hasAnswered` — the Index landed and the
-list below the apps answered this Query — gates only "No results", the Card's "No
-match" and the shake. A list landing while text stands is kept for Escape.
+settled pass of the list below the apps answered this Query — gates only "No
+results", the Card's "No match" and the shake. A list landing while text stands is kept for Escape.
 
 **Last Subject** (`CONTEXT.md`): Enter or a Final Action on a Clipboard Item or an
 Emoji makes it `lastSubject`; acting on anything else clears it. In memory only.
@@ -563,7 +587,8 @@ Emoji makes it `lastSubject`; acting on anything else clears it. In memory only.
 Clipboard Item up in history again — deleted or trimmed means none. It is not a
 Result, so the Slab stays away and `SubjectCardView.subject` reads it from the
 coordinator. Enter runs its default action, Tab opens its Actions and Shift+Tab
-comes back to it; the first keystroke ends it standing.
+comes back to it; the first keystroke ends it standing, and the Card keeps it
+until the new Query has something to show.
 
 ### FloatingPanel — Non-activating NSPanel
 ```swift
@@ -942,7 +967,8 @@ from DigUp (MIT, `digup-license.txt`); each such file says so in its first line.
   `EmbeddingService.start()` before anything else, so it has no Panel, hotkeys, File
   Index or clipboard recorder. It loads the model, writes an `EmbeddingServiceHello`, then
   answers JSON lines (`EmbeddingServiceProtocol.swift`: `embedText`, `embedImage`,
-  `embedAudio`, `hold`, `shutdown`; vectors as base64 float16) until shutdown, stdin EOF
+  `embedAudio`, `hold`, `shutdown`; vectors as base64 float16; a vector request marked
+  `fullSpeed` is answered with App Nap off) until shutdown, stdin EOF
   (the app went away) or its idle exit. Its stdout is the protocol's alone: fd 1 is
   pointed at stderr so nothing else that prints can corrupt a line.
 - **`EmbeddingClient`** (actor) — starts the helper on first use, `hold()`s it while the
@@ -961,9 +987,19 @@ from DigUp (MIT, `digup-license.txt`); each such file says so in its first line.
 the same shape). Everything with a `FileContent` gets vectors, in the helper (the full model,
 ~1 GB while it works, gone after its 60 s idle exit; `.utility` QoS):
 - **Text**: every Passage the contents pass read (`chunk`, `page`; code, notes, documents,
-  PDFs, data files and JSON alike), with the card's document prompt and the file's name as
-  title, cut at 4,000 characters. Text that is mostly digits gets no vector (keyword search
-  has it). OCR text stays keyword-only.
+  PDFs), with the card's document prompt and the file's name as title, cut at 4,000
+  characters. Text that is mostly digits gets no vector (keyword search has it). OCR text
+  stays keyword-only. **Data and logs get vectors for their first 40 chunks only**
+  (`FileContent.isDataOrLog`, beside the other `FileContent` rules: `.json`, `.jsonl`,
+  `.ndjson`, `.geojson`, `.csv`, `.tsv`, `.log`, `.err`, `.out`, and a `.txt` in a folder named
+  `log`/`logs` at any depth or named `*.log.txt`/`log_*`). Every Passage of theirs is still read
+  and found by its words; the rest are simply never handed to the meaning pass: the first step
+  stores the file `done`, a later contents step does not flip it back to `partial`, and one left
+  `partial` by an older build is finished by an empty step, keeping the later vectors it has.
+  They have no vectors, so nothing of the scale counts them. On the dev machine's index
+  (2026-10-12, read-only) this took **144,554** of the 217,414 text vectors still waiting off
+  the queue (151,827 Passages; the rest mostly digits): `.json` 77,939, `.jsonl` 48,347, `.csv`
+  7,833, `.err` 6,694, `.txt` logs 3,687.
 - **Pictures** (`image` segments): a screenshot at 280 soft tokens, from the picture, as
   DigUp does; a photo at 140 if its shorter side is at least 256 px (icons and badges are
   not, `detail = 'too small to embed'`).
@@ -976,13 +1012,42 @@ the same shape). Everything with a `FileContent` gets vectors, in the helper (th
   the soundtrack as a recording. Its start is how the Card shows "at 14:02" (and a video's
   frame there), and where the Passage Preview and QuickTime play from.
 - **Long files go a step at a time**, like the contents pass: first 30 pages / 40 chunks /
-  10 minutes, then 100 pages / 200 chunks / 30 minutes per step after every file's first.
+  10 minutes, then 100 pages / 200 chunks / 30 minutes per step after every file's first
+  (data and logs: the first step only).
   First-step vectors set each Query's scale; later ones (`segments.later`) are scored on it.
 - **Order**: changed files first (FSEvents, the newest 50 of a burst; a text file as soon as
   the contents pass has read it), then the backfill, every file's first step before any
   later one, by `FileContent` — screenshots, photos, PDFs, documents, notes, recordings,
-  videos, code last — newest first. Pictures and text go 8 to a batch; a PDF, a recording
-  or a video alone. **Low Power Mode pauses the backfill**, never the changed files.
+  videos, code last — newest first. A PDF, a recording or a video goes alone; pictures and
+  text go 8 or 32 to a batch by the pace (below), and **a batch's texts go to the helper
+  together** (`MeaningReader.read(_:with:cache:)`, into the cache, where each file then finds
+  them; requests of up to 64): half the waiting files are one chunk, and a request a file left
+  each model call a third full. A helper crash on them together has each file ask again alone,
+  so only the one at fault gives up.
+- **Pace** (`MeaningPace`), decided as each batch starts — nothing polls, so a change takes
+  effect at the next batch: **full** on AC power (`IOPSGetProvidingPowerSourceType`) with no
+  input for 2 minutes (`CGEventSource.secondsSinceLastEventType(.combinedSessionState, any)`)
+  and the Panel closed: 32 files a batch, the batch's Task at `.utility`, App Nap off in the
+  app while it is out and in the helper while it answers (`ProcessInfo.beginActivity
+  (.userInitiatedAllowingIdleSystemSleep)`, per batch and per request: the Mac and its display
+  still sleep as the user set them, and the work stops with them). **Gentle** otherwise —
+  battery, the user at the Mac, the Panel open — 8 files a batch at `.background`, App Nap
+  allowed. **Low Power Mode pauses the backfill**, never the changed files. The Panel opening
+  (`holdQueryEncoder`) also takes the helper off full speed at once, for the rest of a batch
+  that is out; the query encoder is a helper of its own, so a Query never queues behind the
+  backfill's requests, only shares the GPU with them.
+  Measured on the dev machine (2026-10-12, M4 Max, Debug, `MeaningThroughputTests`, **with the
+  installed app's own backfill on the same GPU throughout**, so absolute rates are about half):
+  texts of 1,700 characters 14 a second one a call, 17–19 at 4–64 (the 2,048-token model call is
+  full at 3–4 of them); texts of 700 characters 22 one a call, 35–51 at 4–64. Files per batch on
+  the backlog-shaped mix, texts sent together: 1 → 18.4, 8 → 19.0, 16 → 19.2, 32 → 19.7, 64 →
+  19.3 vectors a second — the mix is mostly long chunks, which fill a call on their own; the gain
+  is the one-chunk files. Gentle against full through the real loop, six 45–60 s runs: gentle
+  18.4–19.4, full 17.5–21.3 — no difference beyond the noise here: the test host is not napped
+  and the GPU is the limit. What full turns off (App Nap, background priority) is what the
+  installed app meets while hidden, which a test cannot reproduce. A warm Query took 24 ms
+  (median) with only the installed app's backfill running and 61–73 ms with this one beside it,
+  at either pace: gentle does not give the GPU back.
   Progress is `files.vec_state` (pending → partial → done) and `vec_to` (pages, chunks or
   seconds), so a restart carries on. A file waits until the contents pass has read its
   first step (`state != 'pending'`); a later contents step flips a finished file back to
@@ -1000,8 +1065,9 @@ title included; a photo or screenshot as its file's SHA-256 and budget; a PDF pa
 picture as the file, the page, the 1,400 px and the budget; a video frame as the file, its
 stored start and every setting that decides which frame lands there; a window of sound as the
 file and its start and end. `MeaningReader` keys every input first (`JobVectors`): hits never
-reach the helper, misses are embedded and kept once the step is done — what came from a file
-only if the file still has the size and date it was hashed at. The same input in two files,
+reach the helper, misses are embedded and kept once the step is done (a batch's texts, asked
+for together, at once) — what came from a file only if the file still has the size and date
+it was hashed at. The same input in two files,
 a copy, a move to another Source, is embedded once. The index keeps `vec_key`, never the
 vector, and `meta.vector_cache` = `VectorCache.id`: a cache emptied or deleted since makes
 `enable()` drop the index's vectors and embed again. Cleared only when
@@ -1209,8 +1275,9 @@ User types query → Enter
 | `MeaningSearch.swift` | `isSupported`, and `MeaningRanking`: the per-modality scale, the gates, the fusion, the Query's words (from DigUp) |
 | `MeaningSettings.swift` | Search by meaning's switch (on by default): download, then the pass; its status line |
 | `MeaningJobs.swift` | `MeaningPass` (steps, fingerprint), job and result values, and the writer's side: jobs, storing vectors, the fingerprint |
-| `MeaningReader.swift` | One step of a file to vectors: text, pictures, PDF pages as pictures, windows of sound, video frames; the cache first (`JobVectors`) |
-| `MeaningScheduler.swift` | The meaning pass: changed files first, then the backfill, paused in Low Power Mode |
+| `MeaningReader.swift` | One step of a file to vectors: text, pictures, PDF pages as pictures, windows of sound, video frames; the cache first (`JobVectors`); a batch's texts together |
+| `MeaningScheduler.swift` | The meaning pass: changed files first, then the backfill, at the pace decided per batch |
+| `MeaningPace.swift` | How hard the backfill works: full on power with the user away, gentle otherwise, paused in Low Power Mode |
 | `MeaningVectors.swift` | The vector files beside the database, appended to, mapped and scored; derived from the cache |
 | `VectorCache.swift` | The vector cache: content-addressed keys per input, `VectorCache.sqlite`, last-used days and the daily prune, seeding from a schema-4 index, `FileDigest` |
 | `ModelFiles.swift` | The pinned EmbeddingGemma 2 GGUFs: resumable download, SHA-256 check, observable state |
@@ -1242,7 +1309,7 @@ Real, unfixed, none urgent.
   `L256GR2793`, while the project-level default is `HHNPP7C8GB`. Will bite on a clean
   checkout.
 - **A Subject Card outside a Query Phase shows `selectedSubject`, not
-  `subjectVM.results[selectedIndex]`.** `SubjectCardView.isQueryPhase` is the
+  `subjectVM.cardSubject`.** `SubjectCardView.isQueryPhase` is the
   switch. The two values are only the same while the Query is still the question
   being asked; once a Subject has been *chosen* they diverge, and reading the
   results is how "Use as Subject" left Finder on the Card after promoting a file
@@ -1274,7 +1341,10 @@ Real, unfixed, none urgent.
   `.glassEffect` comes back fully transparent from `ImageRenderer` in the test host,
   content included. `SubjectCardPictureTests` renders through an unshown
   `NSHostingView` and `cacheDisplay` instead, which draws the content layer
-  deterministically and leaves the glass material out.
+  deterministically and leaves the glass material out. A whole `PanelView` comes back
+  empty that way too: the entrance's `.blur`, even at radius 0, and the Slab's
+  `.shadow` each leave nothing of what is under them, so `SubjectCardHoldTests`
+  lays the Card row and the Slab's list out without either.
 - **Release-configuration tests fail and have nothing to do with the Panel.** Run
   with `-configuration Release SWIFT_ENABLE_TESTABILITY=YES` (Release lacks
   testability, so `@testable import` will not resolve without it), the

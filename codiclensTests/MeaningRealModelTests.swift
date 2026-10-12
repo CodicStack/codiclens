@@ -106,7 +106,7 @@ struct MeaningRealModelTests {
         let vectors = MeaningVectors(databaseURL: url)
         let cache = try VectorCache(url: VectorCache.url(besideDatabase: url))
         let meaning = MeaningScheduler(writer: writer, vectors: vectors, cache: cache, queue: DispatchQueue(label: "real.meaning"),
-                                       embed: MeaningScheduler.embedAll(with: indexing, cache: cache))
+                                       embed: MeaningScheduler.embedAll(with: indexing, cache: cache), machine: .atDesk)
         meaning.setSources([root])
         try meaning.enable()
         var perKind: [String: (files: Int, time: Duration)] = [:]

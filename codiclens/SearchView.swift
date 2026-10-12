@@ -232,6 +232,13 @@ struct ResultsListView: View {
                     }
                 }
             }
+            // A row picked by hand, pinned first under a new Query: back to the
+            // top, where it is, with the best of the new Query under it. A
+            // jump, not a scroll: the rows already changed in one frame.
+            .onChange(of: coordinator.subjectVM.pinCount) {
+                guard let first = coordinator.currentResults.first else { return }
+                proxy.scrollTo(first.id, anchor: .top)
+            }
         }
     }
 }

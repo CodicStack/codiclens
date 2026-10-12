@@ -76,8 +76,8 @@ struct SearchReadinessTests {
 
     // MARK: - Once it has
 
-    /// The other half: with the Index in, and the list below the apps in for
-    /// this Query, zero matches is an answer. The message is allowed and
+    /// The other half: with the Index in, and the list below the apps settled
+    /// for this Query, zero matches is an answer. The message is allowed and
     /// the Panel is entitled to shake — and that is all. The Query does not
     /// turn into text on its own; ⌘E does that (ADR 0012).
     @Test func aQueryPutAfterTheIndexLandsIsAnswered() async throws {
@@ -87,7 +87,7 @@ struct SearchReadinessTests {
         let coordinator = makeCoordinator(index: index, schedule: schedule)
 
         coordinator.subjectVM.searchText = "zzqqzz"
-        await schedule.runSearches()
+        await schedule.typingPaused()
 
         #expect(coordinator.subjectVM.isIndexReady)
         #expect(coordinator.canReportNoResults)

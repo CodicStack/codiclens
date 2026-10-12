@@ -16,26 +16,27 @@ import Foundation
 /// the contents pass has read it. Then the backfill: every file's first step
 /// before any file's later ones, in `FileContent`'s order — screenshots,
 /// photos, PDFs, documents, notes, recordings, videos, code last — newest
-/// first. Low Power Mode pauses the backfill. How far each file got is
-/// `files.vec_state` and `vec_to`, so a restart carries on.
+/// first. How far each file got is `files.vec_state` and `vec_to`, so a
+/// restart carries on.
+///
+/// Pace (`MeaningPace`), decided as each batch starts: full speed on power
+/// with the user away and the Panel closed, gentle otherwise, and Low Power
+/// Mode pauses the backfill.
 ///
 /// Off until `enable()`: the switch in Settings is on and the model files
 /// are there (`MeaningSettings`).
 nonisolated final class MeaningScheduler: @unchecked Sendable {
-    typealias Embed = @Sendable ([MeaningJob]) async throws -> [MeaningResult]
+    typealias Embed = @Sendable ([MeaningJob], MeaningPace) async throws -> [MeaningResult]
 
-    /// Files embedded per batch: pictures and text go eight at a time; a PDF,
-    /// a recording or a video alone (`MeaningJob.isHeavy`).
-    static let batchSize = 8
     /// The changed files embedded ahead of the backfill from one burst.
     static let burstCap = FileContentScheduler.burstCap
 
-    /// Each job read in turn with `embedder`, `cache` first.
+    /// The batch's texts together, then each job in turn, with `embedder`
+    /// at `pace`, `cache` first.
     static func embedAll(with embedder: some MeaningEmbedder, cache: VectorCache) -> Embed {
-        { jobs in
-            var results: [MeaningResult] = []
-            for job in jobs { results.append(try await MeaningReader.read(job, with: embedder, cache: cache)) }
-            return results
+        { jobs, pace in
+            await embedder.setFullSpeed(pace == .full)
+            return try await MeaningReader.read(jobs, with: embedder, cache: cache)
         }
     }
 
@@ -44,11 +45,13 @@ nonisolated final class MeaningScheduler: @unchecked Sendable {
     private let cache: VectorCache
     private let queue: DispatchQueue
     private let embed: Embed
+    private let machine: MeaningPace.Machine
     private let onProgress: (FileIndexer.Progress) -> Void
 
     private var changed: [Int64] = []
     private var sources: [String] = []
     private var isLowPower = false
+    private var isPanelOpen = false
     private var isBusy = false
     private(set) var isEnabled = false
     /// The helper could not start, or kept crashing: no more batches until
@@ -62,12 +65,15 @@ nonisolated final class MeaningScheduler: @unchecked Sendable {
     ///   - cache: where the vectors the database points to are kept.
     ///   - queue: the writer's. Every method is called on it.
     ///   - embed: the embedding itself; tests pass their own.
+    ///   - machine: the power source and the user's idle time, read as each
+    ///     batch starts; `.system` in the app, a test's own in tests.
     init(
         writer: FileIndexWriter,
         vectors: MeaningVectors,
         cache: VectorCache,
         queue: DispatchQueue,
         embed: @escaping Embed,
+        machine: MeaningPace.Machine,
         onProgress: @escaping (FileIndexer.Progress) -> Void = { _ in }
     ) {
         self.writer = writer
@@ -75,6 +81,7 @@ nonisolated final class MeaningScheduler: @unchecked Sendable {
         self.cache = cache
         self.queue = queue
         self.embed = embed
+        self.machine = machine
         self.onProgress = onProgress
     }
 
@@ -92,6 +99,16 @@ nonisolated final class MeaningScheduler: @unchecked Sendable {
 
     func setLowPower(_ isLowPower: Bool) {
         self.isLowPower = isLowPower
+    }
+
+    /// The Panel is open: the backfill goes gently until it closes.
+    func setPanelOpen(_ isPanelOpen: Bool) {
+        self.isPanelOpen = isPanelOpen
+    }
+
+    /// The pace for the next batch, decided now.
+    var pace: MeaningPace {
+        MeaningPace(isLowPower: isLowPower, isPanelOpen: isPanelOpen, machine: machine)
     }
 
     /// Starts embedding: the database's vectors under `MeaningPass.fingerprint`
@@ -116,25 +133,31 @@ nonisolated final class MeaningScheduler: @unchecked Sendable {
         vectors.close()
     }
 
-    /// The next files to embed: changed ones first, then the backfill unless
-    /// Low Power Mode is on. Empty when there is nothing to do now.
-    func nextBatch() throws -> [MeaningJob] {
+    /// The next files to embed at `pace`: changed ones first, then the
+    /// backfill unless it is paused. Empty when there is nothing to do now.
+    func nextBatch(_ pace: MeaningPace) throws -> [MeaningJob] {
         guard isEnabled, !isFailed else { return [] }
         if !changed.isEmpty {
             let (jobs, waiting) = try writer.meaningJobs(ids: changed)
-            let batch = Self.batch(from: jobs)
+            let batch = Self.batch(from: jobs, size: pace.batchSize)
             changed = jobs.dropFirst(batch.count).map(\.id) + waiting
             if !batch.isEmpty { return batch }
         }
-        guard !isLowPower, !sources.isEmpty else { return [] }
-        return Self.batch(from: try writer.meaningJobs(limit: Self.batchSize, sources: sources))
+        guard pace != .paused, !sources.isEmpty else { return [] }
+        return Self.batch(from: try writer.meaningJobs(limit: pace.batchSize, sources: sources), size: pace.batchSize)
     }
 
-    /// A heavy job alone, or the light ones from the front.
-    static func batch(from jobs: [MeaningJob]) -> [MeaningJob] {
+    /// `nextBatch(_:)` at the pace in force now.
+    func nextBatch() throws -> [MeaningJob] {
+        try nextBatch(pace)
+    }
+
+    /// A heavy job alone (`MeaningJob.isHeavy`: a PDF, a recording or a
+    /// video), or up to `size` light ones from the front.
+    static func batch(from jobs: [MeaningJob], size: Int) -> [MeaningJob] {
         guard let first = jobs.first else { return [] }
         if first.isHeavy { return [first] }
-        return Array(jobs.prefix { !$0.isHeavy }.prefix(batchSize))
+        return Array(jobs.prefix { !$0.isHeavy }.prefix(size))
     }
 
     /// Stores a batch's vectors in one transaction, then hands them to the
@@ -162,19 +185,21 @@ nonisolated final class MeaningScheduler: @unchecked Sendable {
     /// does across two queues. For tests and measurements.
     @discardableResult
     func readBatch() async throws -> Int {
-        let jobs = try nextBatch()
+        let pace = self.pace
+        let jobs = try nextBatch(pace)
         guard !jobs.isEmpty else { return 0 }
-        try store(try await embed(jobs))
+        try store(try await embed(jobs, pace))
         return jobs.count
     }
 
-    /// Starts the next batch unless one is out. Its results come back to the
-    /// queue, and the one after starts from there.
+    /// Starts the next batch unless one is out, at the pace decided now. Its
+    /// results come back to the queue, and the one after starts from there.
     func resume() {
         guard !isBusy, isEnabled, !isFailed else { return }
+        let pace = self.pace
         let jobs: [MeaningJob]
         do {
-            jobs = try nextBatch()
+            jobs = try nextBatch(pace)
         } catch {
             NSLog("File Index meaning: %@", String(describing: error))
             return
@@ -183,10 +208,17 @@ nonisolated final class MeaningScheduler: @unchecked Sendable {
         isBusy = true
         let embed = self.embed
         let generation = self.generation
-        Task.detached(priority: .background) { [self] in
+        // At full speed App Nap stays off this process while the batch is
+        // out; the helper does the same for its requests. Idle sleep and the
+        // display's are left to the system.
+        let activity = pace == .full ? ProcessInfo.processInfo.beginActivity(
+            options: .userInitiatedAllowingIdleSystemSleep, reason: "Search by meaning is catching up while the Mac is idle"
+        ) : nil
+        Task.detached(priority: pace == .full ? .utility : .background) { [self] in
             let outcome: Result<[MeaningResult], Error>
-            do { outcome = .success(try await embed(jobs)) } catch { outcome = .failure(error) }
+            do { outcome = .success(try await embed(jobs, pace)) } catch { outcome = .failure(error) }
             queue.async { [self] in
+                if let activity { ProcessInfo.processInfo.endActivity(activity) }
                 isBusy = false
                 guard generation == self.generation else { return }
                 do {

@@ -47,6 +47,7 @@ actor EmbeddingClient {
     /// The helper the hold was last sent to, so each one is told once.
     private var holdSentTo: Int?
     private var crashes = 0
+    private var isFullSpeed = false
 
     private struct Pending {
         let request: EmbeddingRequest
@@ -125,6 +126,13 @@ actor EmbeddingClient {
 
     // MARK: - Vectors
 
+    /// Whether the vectors asked for from now on are the meaning backfill's
+    /// at full speed (`MeaningPace.full`): each request says so, and the
+    /// helper keeps App Nap off while it answers one.
+    func setFullSpeed(_ isFullSpeed: Bool) {
+        self.isFullSpeed = isFullSpeed
+    }
+
     /// `texts` already prompted (`EmbeddingPrompt`), one vector each.
     func embed(texts: [String]) async throws -> [[Float]] {
         guard !texts.isEmpty else { return [] }
@@ -163,6 +171,8 @@ actor EmbeddingClient {
     }
 
     private func vectors(_ request: EmbeddingRequest) async throws -> [[Float]] {
+        var request = request
+        request.fullSpeed = isFullSpeed ? true : nil
         let response = try await self.request(request)
         if let error = response.error { throw EmbeddingClientError.failed(error) }
         guard let vectors = response.floatVectors else { throw EmbeddingClientError.malformed }

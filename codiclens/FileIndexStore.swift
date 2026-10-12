@@ -411,9 +411,11 @@ nonisolated final class FileIndexWriter {
             """, [.text(result.isComplete ? "done" : "partial"), .int(Int64(result.readTo)),
                   result.detail.map { .text($0) } ?? .null, .double(Date().timeIntervalSince1970), .int(job.id)])
         // The meaning pass embeds what this read: a later step of a file it
-        // had finished gives it more, and a file with no words and no pages
-        // to look at has nothing for it at all.
-        if !result.passages.isEmpty || (job.content == .pdf && result.readTo > job.readTo) {
+        // had finished gives it more — not a data file's or a log's, whose
+        // later Passages get no vectors (`FileContent.isDataOrLog`) — and a
+        // file with no words and no pages to look at has nothing for it at all.
+        let isMoreToEmbed = !result.passages.isEmpty && (job.readTo == 0 || !FileContent.isDataOrLog(job.path))
+        if isMoreToEmbed || (job.content == .pdf && result.readTo > job.readTo) {
             try db.run("UPDATE files SET vec_state = 'partial' WHERE id = ? AND vec_state = 'done'", [.int(job.id)])
         } else if job.readTo == 0, result.isComplete, job.content != .pdf, job.content != .screenshot {
             try db.run("UPDATE files SET vec_state = 'done' WHERE id = ?", [.int(job.id)])

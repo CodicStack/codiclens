@@ -190,6 +190,11 @@ nonisolated final class EmbeddingServiceLoop: @unchecked Sendable {
             return
         }
         var response = EmbeddingResponse(id: request.id)
+        // The backfill at full speed: App Nap off for this request.
+        let activity = request.fullSpeed == true ? ProcessInfo.processInfo.beginActivity(
+            options: .userInitiatedAllowingIdleSystemSleep, reason: "Search by meaning is catching up while the Mac is idle"
+        ) : nil
+        defer { if let activity { ProcessInfo.processInfo.endActivity(activity) } }
         do {
             switch request.kind {
             case .embedText:

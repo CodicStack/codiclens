@@ -126,7 +126,8 @@ final class FileIndex {
         sources.onRulesChange = { [weak self] in self?.sourcesChanged() }
         worker.onProgress = { [weak self] progress in self?.received(progress) }
         // Low Power Mode pauses both backfills; files that change are read
-        // regardless.
+        // regardless. The meaning pass reads the power source and the user's
+        // idle time itself, as each batch starts (`MeaningPace`).
         powerChanged()
         powerObserver = NotificationCenter.default.addObserver(
             forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: nil
@@ -216,9 +217,11 @@ final class FileIndex {
     }
 
     /// The Panel opened: load the query encoder now, before the first
-    /// keystroke, and keep it while the Panel stays open. Nothing without
+    /// keystroke, and keep it while the Panel stays open, and the meaning
+    /// backfill goes gently meanwhile (`MeaningPace`). Nothing more without
     /// search by meaning on.
     nonisolated func holdQueryEncoder() {
+        worker.setPanelOpen(true)
         guard isMeaningApplied.withLock({ $0 }) else { return }
         let encoder = queryEncoder
         Task { try? await encoder.hold() }
@@ -228,6 +231,7 @@ final class FileIndex {
     /// Nothing without search by meaning on: turning it off has already
     /// told the encoder to go.
     nonisolated func releaseQueryEncoder() {
+        worker.setPanelOpen(false)
         guard isMeaningApplied.withLock({ $0 }) else { return }
         let encoder = queryEncoder
         Task { await encoder.release() }
@@ -334,6 +338,7 @@ extension FileIndex {
         private var meaning: MeaningScheduler?
         private var watcher: FileIndexWatcher?
         private var isLowPower = false
+        private var isPanelOpen = false
         private var writer: FileIndexWriter?
         private var cache: VectorCache?
         private var isMeaningOn = false
@@ -377,6 +382,19 @@ extension FileIndex {
                 contents?.resume()
                 meaning?.setLowPower(isLowPower)
                 meaning?.resume()
+            }
+        }
+
+        /// The Panel opened or closed. Opening it also takes the helper off
+        /// full speed at once, for the rest of a batch that is out.
+        func setPanelOpen(_ isPanelOpen: Bool) {
+            if isPanelOpen {
+                let embedder = self.embedder
+                Task { await embedder.setFullSpeed(false) }
+            }
+            queue.async { [self] in
+                self.isPanelOpen = isPanelOpen
+                meaning?.setPanelOpen(isPanelOpen)
             }
         }
 
@@ -476,6 +494,7 @@ extension FileIndex {
                 cache: cache,
                 queue: queue,
                 embed: MeaningScheduler.embedAll(with: embedder, cache: cache),
+                machine: .system,
                 onProgress: { [weak self] progress in self?.onProgress?(progress) }
             )
             let contents = FileContentScheduler(
@@ -492,6 +511,7 @@ extension FileIndex {
             self.cache = cache
             contents.setLowPower(isLowPower)
             meaning.setLowPower(isLowPower)
+            meaning.setPanelOpen(isPanelOpen)
             self.indexer = indexer
             self.contents = contents
             self.meaning = meaning

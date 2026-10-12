@@ -7,7 +7,10 @@ nonisolated enum MeaningPass {
     /// A long file is embedded a step at a time, like the contents pass reads
     /// it: the first step with every file's first, the rest after. The first
     /// steps' vectors set each Query's scale (`MeaningRanking.zScores`); the
-    /// later ones are scored on it.
+    /// later ones are scored on it. Data and logs (`FileContent.isDataOrLog`)
+    /// get the first step and no more; the contents pass's first step
+    /// (`FileContentReader.firstStep`) is at least as long, and this pass
+    /// waits for it, so that is always their first 40 chunks.
     static let firstPages = 30
     static let laterPages = 100
     static let firstChunks = 40
@@ -215,11 +218,15 @@ nonisolated extension FileIndexWriter {
                 job.texts.append(Self.text(segment))
             }
         case .document, .text, .code:
+            // Data and logs past their first step: nothing to embed, and
+            // `storeMeaning` calls them done.
+            let limit = row.isFirstStep ? MeaningPass.firstChunks
+                : FileContent.isDataOrLog(row.path) ? 0 : MeaningPass.laterChunks
+            guard limit > 0 else { break }
             try db.query("""
                 SELECT s.id, s.kind, s.loc, p.body FROM segments s JOIN passages p ON p.rowid = s.id
                 WHERE s.file = ? AND s.id > ? AND s.kind IN ('chunk', 'page') ORDER BY s.id LIMIT ?
-                """, [.int(row.id), .int(Int64(row.vecTo)),
-                      .int(Int64(row.isFirstStep ? MeaningPass.firstChunks : MeaningPass.laterChunks))]) {
+                """, [.int(row.id), .int(Int64(row.vecTo)), .int(Int64(limit))]) {
                 job.texts.append(Self.text($0))
             }
         case .screenshot, .image, .audio, .video:
@@ -276,10 +283,14 @@ nonisolated extension FileIndexWriter {
         case .pdf:
             isComplete = result.vecTo >= Double(readTo)
         case .document, .text, .code:
+            // Data and logs have nothing left after their first step: their
+            // later Passages are found by their words alone.
             var left = false
-            try db.query("""
-                SELECT 1 FROM segments WHERE file = ? AND id > ? AND kind IN ('chunk', 'page') LIMIT 1
-                """, [.int(job.id), .int(Int64(result.vecTo))]) { _ in left = true }
+            if !FileContent.isDataOrLog(job.path) {
+                try db.query("""
+                    SELECT 1 FROM segments WHERE file = ? AND id > ? AND kind IN ('chunk', 'page') LIMIT 1
+                    """, [.int(job.id), .int(Int64(result.vecTo))]) { _ in left = true }
+            }
             isComplete = !left
         case .screenshot, .image:
             isComplete = true

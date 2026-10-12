@@ -106,6 +106,30 @@ nonisolated enum FileContent: Int, Sendable, CaseIterable {
         "ckpt", "h5", "pb", "tflite", "mlmodel", "pdb", "car", "nib", "xls", "ppt"
     ]
 
+    /// Data and logs: what a program wrote, not a person. Every Passage of one
+    /// is read and found by its words, but only the meaning pass's first step
+    /// (`MeaningPass.firstChunks`) gets vectors: the 1,500th chunk of a
+    /// training log or a JSON Lines dump says what its first ones did. On the
+    /// dev machine (2026-10-12) these were ~65% of the text left to embed,
+    /// 144,554 vectors, most of them `.json` and `.jsonl`.
+    static let dataExtensions: Set<String> = ["json", "jsonl", "ndjson", "geojson", "csv", "tsv", "log", "err", "out"]
+
+    /// A `.txt` is a log too in a folder of these names, at any depth, or
+    /// named `*.log.txt` or `log_*`.
+    static let logFolders: Set<String> = ["log", "logs"]
+
+    /// Whether `path` is data or a log (`dataExtensions`, `logFolders`),
+    /// judged from its name alone.
+    static func isDataOrLog(_ path: String) -> Bool {
+        let name = (path as NSString).lastPathComponent.lowercased()
+        let ext = (name as NSString).pathExtension
+        if dataExtensions.contains(ext) { return true }
+        guard ext == "txt" else { return false }
+        if name.hasSuffix(".log.txt") || name.hasPrefix("log_") { return true }
+        let folders = ((path as NSString).deletingLastPathComponent as NSString).pathComponents
+        return folders.contains { logFolders.contains($0.lowercased()) }
+    }
+
     /// Names macOS and the common screenshot tools give a screenshot, in
     /// English and Danish.
     static let screenshotPrefixes = ["Screenshot", "Screen Shot", "Skærmbillede", "CleanShot", "SCR-"]

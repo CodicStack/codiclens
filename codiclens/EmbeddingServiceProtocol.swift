@@ -9,7 +9,7 @@ import Foundation
 //
 //   → {"id":1,"kind":"embedText","texts":["task: search result | query: banana"]}
 //   ← {"id":1,"vectors":["<768 float16s, base64>"]}
-//   → {"id":2,"kind":"embedImage","path":"/…/Zebra.heic","budget":140}
+//   → {"id":2,"kind":"embedImage","path":"/…/Zebra.heic","budget":140,"fullSpeed":true}
 //   ← {"id":2,"error":"can't read /…/Zebra.heic"}
 //   → {"id":3,"kind":"hold","on":true}
 //   → {"id":4,"kind":"shutdown"}
@@ -41,10 +41,14 @@ nonisolated struct EmbeddingRequest: Codable, Equatable, Sendable {
     var start: Double?
     var duration: Double?
     var on: Bool?
+    /// On a vector request: the backfill is at full speed (`MeaningPace`), so
+    /// the helper answers it with App Nap off.
+    var fullSpeed: Bool?
 
     init(
         id: Int, kind: Kind, texts: [String]? = nil, path: String? = nil, imageData: Data? = nil,
-        budget: ImageBudget? = nil, start: Double? = nil, duration: Double? = nil, on: Bool? = nil
+        budget: ImageBudget? = nil, start: Double? = nil, duration: Double? = nil, on: Bool? = nil,
+        fullSpeed: Bool? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -55,6 +59,7 @@ nonisolated struct EmbeddingRequest: Codable, Equatable, Sendable {
         self.start = start
         self.duration = duration
         self.on = on
+        self.fullSpeed = fullSpeed
     }
 }
 
