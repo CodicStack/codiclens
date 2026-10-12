@@ -42,7 +42,14 @@ class PanelController {
     init() {
         let runner = SystemEffectRunner()
         effectRunner = runner
-        coordinator = CommandCoordinator(runner: runner, history: .shared)
+        coordinator = CommandCoordinator(
+            runner: runner,
+            history: .shared,
+            emojiVM: EmojiSearchVM(recents: .shared, preferences: .shared),
+            index: .shared,
+            sources: .shared,
+            searchFiles: FileIndex.shared.searcher
+        )
         panel = FloatingPanel(
             contentRect: NSRect(
                 x: 0, y: 0,

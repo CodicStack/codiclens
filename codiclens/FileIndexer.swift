@@ -1,3 +1,4 @@
+import CoreServices
 import Foundation
 
 /// The writing side of the File Index: crawls folder Sources, applies
@@ -12,6 +13,13 @@ import Foundation
 /// folder Source inside another is its own Source: the outer crawl does not
 /// walk into it, and removing the inner one hands its files back to the
 /// outer.
+///
+/// **A launch replays, it does not crawl.** The index keeps the FSEvents event
+/// ID it has caught up to and, per root, the volume it was read on. Started
+/// again, the watcher asks FSEvents for everything since that ID and `handle`
+/// applies it like any other batch. A root is crawled instead only when the
+/// replay cannot be trusted for it: nothing stored yet, its volume's event
+/// history replaced, the rules changed, or its last crawl never finished.
 nonisolated final class FileIndexer: @unchecked Sendable {
     /// What a caller is told as work happens. Called on the indexer's queue.
     enum Progress {
@@ -27,7 +35,12 @@ nonisolated final class FileIndexer: @unchecked Sendable {
 
     private let writer: FileIndexWriter
     private let home: String
+    private let volumeID: (String) -> String?
     private let onProgress: (Progress) -> Void
+
+    /// Where the watcher starts: the event the index has caught up to. Set
+    /// by the first `setSources`, moved on by every batch `handle` applies.
+    private(set) var eventID: FSEventStreamEventId = 0
 
     /// What is left out. Changed with `setRules`.
     private(set) var rules: FileIndexRules
@@ -40,32 +53,39 @@ nonisolated final class FileIndexer: @unchecked Sendable {
 
     private var pendingWrites = 0
 
+    /// - Parameter volumeID: the FSEvents history a path's events are kept
+    ///   in, `volumeID(of:)`. Tests pass their own to stand for a disk whose
+    ///   history was replaced.
     init(
         writer: FileIndexWriter,
         rules: FileIndexRules = .defaults,
         home: String = NSHomeDirectory(),
+        volumeID: @escaping (String) -> String? = FileIndexer.volumeID(of:),
         onProgress: @escaping (Progress) -> Void = { _ in }
     ) {
         self.writer = writer
         self.rules = rules
         self.home = home
+        self.volumeID = volumeID
         self.onProgress = onProgress
     }
 
     // MARK: - Sources
 
     /// Brings the index in line with the folder Sources and returns the
-    /// roots to `crawl`: every enabled one the first time, and after that the
-    /// ones that are new or switched back on. The caller crawls them once its
-    /// watcher covers them, so nothing that changes during a crawl is missed.
+    /// roots to `crawl`: the first time, every enabled one a replay from
+    /// `eventID` cannot catch up (`caughtUpRoots`), and after that the ones
+    /// that are new or switched back on. The caller starts its watcher at
+    /// `eventID` and crawls them after, so nothing that changes during a
+    /// crawl is missed.
     ///
     /// A crawl of a folder already indexed is a reconcile — new files added,
     /// changed ones updated, moved ones re-pathed, vanished ones removed — so
-    /// the first one is also what catches up on whatever changed while the
-    /// app was not running.
+    /// a root that has to be crawled at launch keeps its rows meanwhile.
     ///
     /// The rows of a folder no longer listed go. A disabled Source keeps its
-    /// rows but is neither crawled nor watched; search leaves it out.
+    /// rows but is neither crawled nor watched; search leaves it out, and it
+    /// is crawled again when it comes back, since nothing watched it.
     func setSources(_ folders: [(path: String, isEnabled: Bool)]) throws -> [String] {
         let isFirst = !hasSources
         hasSources = true
@@ -87,9 +107,37 @@ nonisolated final class FileIndexer: @unchecked Sendable {
             }
         }
 
+        let caughtUp = isFirst ? try caughtUpRoots() : []
+        try writer.forgetCaughtUpRoots(keeping: enabledRoots)
         return allRoots.reversed().filter { root in
-            enabledRoots.contains(root) && (isFirst || !previouslyEnabled.contains(root))
+            enabledRoots.contains(root) && (isFirst ? !caughtUp.contains(root) : !previouslyEnabled.contains(root))
         }
+    }
+
+    /// At launch: the enabled roots a replay from the stored event ID brings
+    /// up to date. None when there is no ID — the index was never watched —
+    /// or the rows were read under other rules. Otherwise each root whose
+    /// last crawl finished on the volume it is on now: a different volume
+    /// UUID is FSEvents saying its history for that disk was replaced, and
+    /// the IDs mean nothing there.
+    ///
+    /// Stores where the watcher is to start from: the old ID, or with none,
+    /// the current one — every change after it is delivered, and every root
+    /// is crawled after it.
+    private func caughtUpRoots() throws -> Set<String> {
+        let stored = try writer.eventID()
+        let rulesMatch = try writer.rulesFingerprint() == rules.fingerprint
+        let known = try writer.caughtUpRoots()
+        eventID = stored ?? FSEventsGetCurrentEventId()
+        try writer.db.transaction {
+            if stored == nil { try writer.setEventID(eventID) }
+            if !rulesMatch {
+                try writer.forgetCaughtUpRoots()
+                try writer.setRulesFingerprint(rules.fingerprint)
+            }
+        }
+        guard stored != nil, rulesMatch else { return [] }
+        return enabledRoots.filter { root in known[root].map { $0 == volumeID(root) } ?? false }
     }
 
     /// The enabled roots, for the watcher.
@@ -107,13 +155,22 @@ nonisolated final class FileIndexer: @unchecked Sendable {
     /// can find what was never read — and since a crawl is a reconcile, it
     /// deletes whatever the new rules leave out on the same pass. Rows nothing
     /// changed for are not written either way.
+    ///
+    /// The new rules are stored with the index. A root to be crawled stops
+    /// counting as caught up until its crawl finishes, so quitting halfway
+    /// leaves it to be crawled at the next launch.
     func setRules(_ rules: FileIndexRules) throws -> [String] {
         let old = self.rules
         self.rules = rules
         guard hasSources, rules != old else { return [] }
         if rules.skipsAtLeast(old) {
             try prune()
+            try writer.setRulesFingerprint(rules.fingerprint)
             return []
+        }
+        try writer.db.transaction {
+            try writer.forgetCaughtUpRoots()
+            try writer.setRulesFingerprint(rules.fingerprint)
         }
         return allRoots.reversed().filter(enabledRoots.contains)
     }
@@ -156,16 +213,19 @@ nonisolated final class FileIndexer: @unchecked Sendable {
         return false
     }
 
-    /// Reads a whole folder Source again.
+    /// Reads a whole folder Source again. Once it has, the root is caught
+    /// up, on the volume it is on.
     func crawl(_ root: String) throws {
         onProgress(.reading(source: root, isReading: true))
         defer { onProgress(.reading(source: root, isReading: false)) }
         try reconcile(root, root: root)
+        try writer.setCaughtUp(root, volume: volumeID(root))
     }
 
     // MARK: - FSEvents
 
-    /// Applies one batch from `FileIndexWatcher`.
+    /// Applies one batch from `FileIndexWatcher`, live or replayed, and
+    /// stores its last event ID as how far the index has caught up.
     ///
     /// Each path is looked at on disk; the flags are only trusted to say that
     /// FSEvents lost track. A path that exists is added or updated — or, if a
@@ -174,8 +234,16 @@ nonisolated final class FileIndexer: @unchecked Sendable {
     /// Present paths go first, so a rename's new name claims the row before
     /// its old name is deleted.
     func handle(_ events: [FileIndexWatcher.Event]) throws {
-        let events = events.filter { !$0.isBookkeeping }
-        if events.contains(where: \.droppedEvents) {
+        let latest = events.last { !$0.historyDone && $0.id != nil }?.id
+        try apply(events.filter { !$0.historyDone })
+        if let latest {
+            eventID = latest
+            try writer.setEventID(latest)
+        }
+    }
+
+    private func apply(_ events: [FileIndexWatcher.Event]) throws {
+        if events.contains(where: \.lostTrack) {
             for root in watchedPaths { try crawl(root) }
             return
         }
@@ -190,7 +258,9 @@ nonisolated final class FileIndexer: @unchecked Sendable {
             paths.formUnion(relevantPaths(event.path))
         }
 
-        for (path, root) in rescans { try reconcile(path, root: root) }
+        for (path, root) in rescans {
+            if path == root { try crawl(root) } else { try reconcile(path, root: root) }
+        }
 
         var present: [String: String] = [:]
         var absent: [String] = []
@@ -442,6 +512,15 @@ nonisolated final class FileIndexer: @unchecked Sendable {
         guard let resolved = realpath(path, nil) else { return false }
         defer { free(resolved) }
         return String(cString: resolved) == path
+    }
+
+    /// The UUID of the FSEvents history kept for the volume `path` is on, or
+    /// nil where there is none to replay — a volume FSEvents does not log.
+    static func volumeID(of path: String) -> String? {
+        var info = stat()
+        guard stat(path, &info) == 0,
+              let uuid = FSEventsCopyUUIDForDevice(info.st_dev) else { return nil }
+        return CFUUIDCreateString(nil, uuid) as String
     }
 
     /// `path` with symlinks resolved, as FSEvents and the enumerator report it

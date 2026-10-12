@@ -11,7 +11,9 @@ import UniformTypeIdentifiers
 /// also reads files' contents, and the database is the only thing the two
 /// sides share.
 nonisolated enum FileIndexSchema {
-    static let version: Int64 = 1
+    /// An index from any other version is dropped and read again, never
+    /// migrated: everything in it comes from the disk.
+    static let version: Int64 = 2
 
     /// Porter stemming over Unicode words, with diacritics folded where
     /// Unicode decomposes them: `å` matches `a`, `é` matches `e`. `æ` and `ø`
@@ -54,7 +56,20 @@ nonisolated enum FileIndexSchema {
             );
             CREATE INDEX segments_file ON segments(file);
             CREATE VIRTUAL TABLE passages USING fts5(body, tokenize = "\(tokenizer)");
+            -- What a launch needs to catch up by replaying FSEvents instead of crawling:
+            -- 'event_id', 'rules' (FileIndexRules.fingerprint), and 'root:<path>' = volume UUID.
+            CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
             PRAGMA user_version = \(version);
+            """)
+    }
+
+    static func drop(in db: SQLiteConnection) throws {
+        try db.execute("""
+            DROP TABLE IF EXISTS meta;
+            DROP TABLE IF EXISTS passages;
+            DROP TABLE IF EXISTS segments;
+            DROP TABLE IF EXISTS names;
+            DROP TABLE IF EXISTS files;
             """)
     }
 
@@ -121,12 +136,16 @@ nonisolated final class FileIndexWriter {
     }
 
     private func migrate() throws {
-        try db.transaction {
+        let dropped = try db.transaction {
             var version: Int64 = 0
             try db.query("PRAGMA user_version") { version = $0.int(0) }
-            guard version < FileIndexSchema.version else { return }
+            guard version != FileIndexSchema.version else { return false }
+            if version != 0 { try FileIndexSchema.drop(in: db) }
             try FileIndexSchema.create(in: db)
+            return version != 0
         }
+        // Hands back the pages the old rows held. Cheap: the tables are empty.
+        if dropped { try? db.execute("VACUUM") }
     }
 
     private static let columns = "id, path, source, kind, size, mtime, inode, device"
@@ -244,6 +263,65 @@ nonisolated final class FileIndexWriter {
         var sources = Set<String>()
         try db.query("SELECT DISTINCT source FROM files") { sources.insert($0.text(0) ?? "") }
         return sources
+    }
+
+    // MARK: Catch-up
+
+    /// The FSEvents event the index has caught up to: every change before it
+    /// is in the rows of every caught-up root. Nil until the index was first
+    /// watched.
+    func eventID() throws -> UInt64? {
+        try meta("event_id").flatMap(UInt64.init)
+    }
+
+    func setEventID(_ id: UInt64) throws {
+        try setMeta("event_id", String(id))
+    }
+
+    /// `FileIndexRules.fingerprint` of the rules the rows were read under.
+    func rulesFingerprint() throws -> String? {
+        try meta("rules")
+    }
+
+    func setRulesFingerprint(_ fingerprint: String) throws {
+        try setMeta("rules", fingerprint)
+    }
+
+    /// The roots whose rows are whole up to `eventID`, each with the FSEvents
+    /// volume UUID it was read on.
+    func caughtUpRoots() throws -> [String: String] {
+        var roots: [String: String] = [:]
+        try db.query("SELECT key, value FROM meta WHERE key >= 'root:' AND key < 'root;'") { row in
+            roots[String((row.text(0) ?? "").dropFirst("root:".count))] = row.text(1) ?? ""
+        }
+        return roots
+    }
+
+    /// Notes `root` as whole on `volume`, or with nil, as needing a crawl.
+    func setCaughtUp(_ root: String, volume: String?) throws {
+        if let volume {
+            try setMeta("root:" + root, volume)
+        } else {
+            try db.run("DELETE FROM meta WHERE key = ?", [.text("root:" + root)])
+        }
+    }
+
+    /// Every root needs a crawl again, except those in `keeping`.
+    func forgetCaughtUpRoots(keeping: Set<String> = []) throws {
+        for root in try caughtUpRoots().keys where !keeping.contains(root) {
+            try setCaughtUp(root, volume: nil)
+        }
+    }
+
+    private func meta(_ key: String) throws -> String? {
+        var value: String?
+        try db.query("SELECT value FROM meta WHERE key = ?", [.text(key)]) { value = $0.text(0) }
+        return value
+    }
+
+    private func setMeta(_ key: String, _ value: String) throws {
+        try db.run("INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                   [.text(key), .text(value)])
     }
 
     /// Everything strictly inside `path`, as a range on the UNIQUE path index.

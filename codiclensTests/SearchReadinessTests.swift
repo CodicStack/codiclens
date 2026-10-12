@@ -14,7 +14,7 @@ import Testing
 struct SearchReadinessTests {
 
     private func makeCoordinator(index: AppIndex) -> CommandCoordinator {
-        CommandCoordinator(
+        CommandCoordinator.isolated(
             runner: RecordingEffectRunner(),
             history: ClipboardHistory(store: InMemoryClipboardStore()),
             index: index,
@@ -160,7 +160,7 @@ struct SearchReadinessTests {
     @Test func clipboardReportsNoResultsAtOnce() {
         let history = ClipboardHistory(store: InMemoryClipboardStore())
         _ = history.recordText("something copied earlier")
-        let coordinator = CommandCoordinator(
+        let coordinator = CommandCoordinator.isolated(
             runner: RecordingEffectRunner(),
             history: history,
             index: inertAppIndex

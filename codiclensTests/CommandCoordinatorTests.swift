@@ -15,7 +15,7 @@ struct CommandCoordinatorTests {
     private func makeCoordinator() -> (CommandCoordinator, RecordingEffectRunner) {
         let runner = RecordingEffectRunner()
         let history = ClipboardHistory(store: InMemoryClipboardStore())
-        return (CommandCoordinator(runner: runner, history: history, index: inertAppIndex), runner)
+        return (CommandCoordinator.isolated(runner: runner, history: history, index: inertAppIndex), runner)
     }
 
     /// Seeds the subject list directly, so tests don't depend on which apps

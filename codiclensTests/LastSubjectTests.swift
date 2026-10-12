@@ -18,9 +18,9 @@ struct LastSubjectTests {
         let emojiVM = EmojiSearchVM(
             index: try EmojiIndex.bundled(),
             recents: EmojiRecents(store: InMemoryEmojiRecentsStore()),
-            preferences: EmojiPreferences(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+            preferences: EmojiPreferences(defaults: ThrowawayDefaults())
         )
-        let coordinator = CommandCoordinator(
+        let coordinator = CommandCoordinator.isolated(
             runner: RecordingEffectRunner(),
             history: history,
             emojiVM: emojiVM,

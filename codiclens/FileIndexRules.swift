@@ -20,7 +20,8 @@ nonisolated struct FileIndexRules: Equatable, Sendable {
     enum SkipGroup: String, CaseIterable, Sendable {
         /// `~/Library`, caches, and Finder's `.DS_Store` litter.
         case caches
-        /// Installed dependencies, and build output beside a project marker.
+        /// Installed dependencies, generated code and reports, and build
+        /// output beside a project marker.
         case dependencies
         /// Code bundles whole; the insides of packages and of `.git`.
         case bundles
@@ -28,6 +29,10 @@ nonisolated struct FileIndexRules: Equatable, Sendable {
         case hidden
         /// A folder with a `.git`, or a bare repo.
         case repos
+        /// A linked worktree: a folder whose `.git` is a file pointing into
+        /// another checkout's `.git/worktrees`. The same repo again, file for
+        /// file, so it is out by default even while Repos is in.
+        case worktrees
         /// `.env` and its variants.
         case envFiles
         /// Private keys, certificates and keychains.
@@ -55,6 +60,10 @@ nonisolated struct FileIndexRules: Equatable, Sendable {
         var isNotDownloaded = false
         /// A folder with a `.git` entry — folder or file — directly in it.
         var containsGit = false
+        /// A folder whose `.git` is a file naming a `worktrees` folder: a
+        /// linked worktree, made by `git worktree add`. A submodule's `.git`
+        /// is a file too, but it names `modules`, and is not one.
+        var isLinkedWorktree = false
         /// A repo with no working tree: `HEAD`, `objects` and `refs` and no
         /// `.git`. What is in it is git's, as a `.git` folder's is.
         var isBareRepo = false
@@ -75,7 +84,7 @@ nonisolated struct FileIndexRules: Equatable, Sendable {
 
     /// A new install's: tool output and internals out, everything the user
     /// might go looking for in.
-    static let defaultSkipped: Set<SkipGroup> = [.caches, .dependencies, .bundles]
+    static let defaultSkipped: Set<SkipGroup> = [.caches, .dependencies, .bundles, .worktrees]
 
     static let defaults = FileIndexRules(skipped: defaultSkipped, patterns: [])
 
@@ -101,6 +110,7 @@ nonisolated struct FileIndexRules: Equatable, Sendable {
             if skipsFolder(named: name) { return .skip }
             if skips(.caches), entry.path == home + "/Library" { return .skip }
             if skips(.repos), entry.containsGit || entry.isBareRepo { return .skip }
+            if skips(.worktrees), entry.isLinkedWorktree { return .skip }
             if skips(.dependencies), entry.isInsideProject, Self.buildOutputFolderNames.contains(name) {
                 return .skip
             }
@@ -126,7 +136,9 @@ nonisolated struct FileIndexRules: Equatable, Sendable {
     func skipsFolder(named name: String) -> Bool {
         if skips(.hidden), name.hasPrefix(".") { return true }
         if skips(.caches), Self.cacheFolderNames.contains(name) || name.hasSuffix(".noindex") { return true }
-        if skips(.dependencies), Self.dependencyFolderNames.contains(name) { return true }
+        if skips(.dependencies), Self.dependencyFolderNames.contains(name) || Self.generatedFolderNames.contains(name) {
+            return true
+        }
         // By extension, not by `isPackage`: a `.framework` is a bundle Finder
         // lets you walk into, and is no less code for it.
         if skips(.bundles), name == ".git" || Self.codeBundleExtensions.contains(Self.pathExtension(of: name)) {
@@ -154,15 +166,25 @@ nonisolated struct FileIndexRules: Equatable, Sendable {
         "node_modules", "bower_components", "Pods", "Carthage", "venv", ".venv", "site-packages", ".next"
     ]
 
+    /// What a tool writes and rewrites: generated code, coverage reports,
+    /// framework and deploy output, tool state. Names no one gives a folder
+    /// of their own, so they go wherever they are, project or not.
+    static let generatedFolderNames: Set<String> = [
+        "paraglide", "__generated__", ".svelte-kit", ".turbo", "coverage", ".coverage", ".nyc_output",
+        ".nuxt", ".output", ".vercel", ".expo", ".angular", ".docusaurus", ".dart_tool", ".terraform",
+        ".wrangler", ".cxx"
+    ]
+
     /// Only build output when the folder beside it is a project, because a
     /// folder of drawings called "build" is somebody's work.
-    static let buildOutputFolderNames: Set<String> = ["build", "Build", "dist", "out", "target"]
+    static let buildOutputFolderNames: Set<String> = ["build", "Build", "dist", "out", "target", "_build"]
 
     /// What makes a folder a project, for `buildOutputFolderNames`. Not a
     /// `.git`: a repo of drawings can have a "build" folder too.
     static let projectMarkers: Set<String> = [
         "Package.swift", "package.json", "Cargo.toml", "go.mod", "pyproject.toml", "setup.py",
-        "pom.xml", "build.gradle", "build.gradle.kts", "CMakeLists.txt", "Makefile", "Gemfile"
+        "pom.xml", "build.gradle", "build.gradle.kts", "CMakeLists.txt", "Makefile", "Gemfile",
+        "dune-project", "mix.exs"
     ]
     static let projectBundleExtensions: Set<String> = ["xcodeproj", "xcworkspace"]
 
@@ -197,6 +219,21 @@ nonisolated struct FileIndexRules: Equatable, Sendable {
         return lower == ".env" || lower == ".envrc" || lower.hasPrefix(".env.")
     }
 
+    /// The rules as one string, kept beside the index so a launch can tell
+    /// whether the rows were read under these. The switches and patterns, and
+    /// the lists the groups are made of: a list that grows in an update
+    /// changes what is skipped as surely as a switch does.
+    var fingerprint: String {
+        let lists: [Set<String>] = [
+            Self.cacheFolderNames, Self.finderFileNames, Self.dependencyFolderNames, Self.generatedFolderNames,
+            Self.buildOutputFolderNames, Self.projectMarkers, Self.projectBundleExtensions,
+            Self.codeBundleExtensions, Self.keyExtensions, Set(Self.keyNamePrefixes)
+        ]
+        let switches = skipped.map(\.rawValue).sorted().joined(separator: ",")
+        let patterns = patterns.map { $0.text.lowercased() }.sorted().joined(separator: "\n")
+        return ([switches, patterns] + lists.map { $0.sorted().joined(separator: ",") }).joined(separator: "\n--\n")
+    }
+
     fileprivate static func pathExtension(of name: String) -> String {
         (name as NSString).pathExtension.lowercased()
     }
@@ -213,8 +250,9 @@ nonisolated struct FileIndexRules: Equatable, Sendable {
 
 nonisolated extension FileIndexRules.Entry {
     /// Reads what the rules need about `url`. Only folders cost more than the
-    /// listing's own resource values: a `.git` probe, and a listing of the
-    /// parent for the few named like build output.
+    /// listing's own resource values: a `.git` probe — and a read of it, where
+    /// it is a file — and a listing of the parent for the few named like build
+    /// output.
     init(url: URL, values: URLResourceValues? = nil) {
         let values = values ?? (try? url.resourceValues(forKeys: Set(FileIndexRules.resourceKeys)))
         self.init(path: url.path, isDirectory: values?.isDirectory ?? false)
@@ -236,7 +274,9 @@ nonisolated extension FileIndexRules.Entry {
     private mutating func probe() {
         if isDirectory, !isPackage {
             let fileManager = FileManager.default
-            containsGit = fileManager.fileExists(atPath: path + "/.git")
+            var git = stat()
+            containsGit = lstat(path + "/.git", &git) == 0
+            isLinkedWorktree = containsGit && git.st_mode & S_IFMT == S_IFREG && Self.isWorktreePointer(path + "/.git")
             isBareRepo = !containsGit
                 && fileManager.fileExists(atPath: path + "/HEAD")
                 && fileManager.fileExists(atPath: path + "/objects")
@@ -255,6 +295,17 @@ nonisolated extension FileIndexRules.Entry {
             FileIndexRules.projectMarkers.contains(name)
                 || FileIndexRules.projectBundleExtensions.contains((name as NSString).pathExtension)
         }
+    }
+
+    /// Whether the `.git` file at `path` is a worktree's: `gitdir:` naming
+    /// `<repo>/.git/worktrees/<name>`. A submodule's names `.git/modules/…`.
+    private static func isWorktreePointer(_ path: String) -> Bool {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return false }
+        defer { try? handle.close() }
+        let text = String(decoding: (try? handle.read(upToCount: 4096)) ?? Data(), as: UTF8.self)
+        guard let line = text.split(whereSeparator: \.isNewline).first, line.hasPrefix("gitdir:") else { return false }
+        let gitdir = line.dropFirst("gitdir:".count).trimmingCharacters(in: .whitespaces)
+        return ((gitdir as NSString).deletingLastPathComponent as NSString).lastPathComponent == "worktrees"
     }
 
     private static func startsWithZipMagic(_ path: String) -> Bool {

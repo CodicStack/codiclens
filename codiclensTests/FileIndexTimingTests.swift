@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import codiclens
 
@@ -6,10 +7,12 @@ private let timingRuns = ProcessInfo.processInfo.environment["CODICLENS_TIME_FIL
 
 /// The File Index over this Mac's real Downloads, Documents and Desktop under
 /// the default skip rules: how long the first crawl takes, how big the
-/// database comes out and what fills it, what switching Repos on and off
-/// again costs, and how long a search takes. Not a pass/fail test — the numbers depend on what is on disk
-/// — so it is off unless asked for. The crawl only reads the three folders;
-/// the database goes to a temporary folder, never Application Support.
+/// database comes out and what fills it, how long a launch takes to catch up
+/// by FSEvents replay, what switching Repos on and off again costs, and how
+/// long a search takes. Not a pass/fail test — the numbers depend on what is
+/// on disk — so it is off unless asked for. The crawl only reads the three
+/// folders; the database goes to a temporary folder, never Application
+/// Support.
 ///
 /// ```
 /// TEST_RUNNER_CODICLENS_TIME_FILE_INDEX=20 xcodebuild test \
@@ -18,19 +21,19 @@ private let timingRuns = ProcessInfo.processInfo.environment["CODICLENS_TIME_FIL
 /// ```
 ///
 /// The variable's value is the number of runs per Query; each is their median.
-@Suite(.serialized, .enabled(if: timingRuns != nil))
+@Suite(.serialized, .enabled(if: timingRuns != nil), .timeLimit(.minutes(15)))
 struct FileIndexTimingTests {
     static let queries = ["invoice", "skat", "png", "a", "screenshot"]
 
-    @Test func crawlAndQueryTimings() throws {
+    @Test func crawlAndQueryTimings() async throws {
         let folder = try TemporaryFolder()
         defer { folder.remove() }
         // In a function of its own, so every connection is closed by the time
         // the folder is deleted.
-        try Self.measure(url: folder.url.appendingPathComponent("FileIndex.sqlite"), runs: timingRuns ?? 1)
+        try await Self.measure(url: folder.url.appendingPathComponent("FileIndex.sqlite"), runs: timingRuns ?? 1)
     }
 
-    private static func measure(url: URL, runs: Int) throws {
+    private static func measure(url: URL, runs: Int) async throws {
         let writer = try FileIndexWriter(url: url)
         let indexer = FileIndexer(writer: writer)
         let roots = SourceStore.defaultFolders.map { FileIndexer.realPath($0) }
@@ -47,7 +50,15 @@ struct FileIndexTimingTests {
         print("crawl \(Self.ms([crawl])), \(counts.values.reduce(0, +)) rows, \(size / 1024) KB")
         for root in roots { print("  \(root): \(counts[root] ?? 0)") }
 
-        // A second crawl over an unchanged disk: the reconcile cost paid at launch.
+        // A launch: replaying what changed since the crawl began, then again
+        // straight after, when nothing has.
+        for label in ["launch catch-up after the crawl", "launch catch-up, nothing changed"] {
+            let (time, events, crawled) = try await Self.catchUp(writer: writer, roots: roots)
+            print("\(label): \(Self.ms([time])), \(events) events replayed, \(crawled) roots crawled")
+        }
+
+        // A second crawl over an unchanged disk: what every launch paid before
+        // the replay, and still what a launch pays for a root it cannot replay.
         let recrawl = ContinuousClock().measure {
             for root in roots { try? indexer.crawl(root) }
         }
@@ -82,6 +93,44 @@ struct FileIndexTimingTests {
             ].joined())
             for hit in hits.prefix(3) { print("    \(hit.score)  \(hit.name)  (\(hit.folder))") }
         }
+    }
+
+    /// A launch over the index as it stands: a fresh indexer, a stream from
+    /// the stored event ID, and the time until FSEvents says the replay is
+    /// over and every batch before that has been applied.
+    private static func catchUp(writer: FileIndexWriter, roots: [String]) async throws -> (Duration, Int, Int) {
+        let start = ContinuousClock.now
+        let queue = DispatchQueue(label: "timing.file-index-catch-up")
+        let crawled = Mutex(0)
+        let replayed = Mutex(0)
+        let finished = Mutex(false)
+        let indexer = FileIndexer(writer: writer, onProgress: { progress in
+            if case .reading(_, true) = progress { crawled.withLock { $0 += 1 } }
+        })
+        var watcher: FileIndexWatcher?
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            queue.sync {
+                do {
+                    let toCrawl = try indexer.setSources(roots.map { (path: $0, isEnabled: true) })
+                    watcher = FileIndexWatcher(paths: indexer.watchedPaths, since: indexer.eventID, queue: queue) { events in
+                        try? indexer.handle(events)
+                        replayed.withLock { $0 += events.filter { !$0.historyDone }.count }
+                        guard events.contains(where: \.historyDone) else { return }
+                        let first = finished.withLock { done in
+                            defer { done = true }
+                            return !done
+                        }
+                        if first { continuation.resume() }
+                    }
+                    for root in toCrawl { try indexer.crawl(root) }
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+        let elapsed = ContinuousClock.now - start
+        queue.sync { watcher?.stop() }
+        return (elapsed, replayed.withLock { $0 }, crawled.withLock { $0 })
     }
 
     /// The folders holding the most rows: the top level of each Source, the

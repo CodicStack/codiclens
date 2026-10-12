@@ -16,7 +16,7 @@ struct ClipboardCommandTests {
         for text in texts {
             history.recordText(text)
         }
-        let coordinator = CommandCoordinator(runner: runner, history: history, index: inertAppIndex)
+        let coordinator = CommandCoordinator.isolated(runner: runner, history: history, index: inertAppIndex)
         return (coordinator, runner, history)
     }
 
@@ -261,7 +261,7 @@ struct ClipboardCommandTests {
         let store = InMemoryClipboardStore()
         let history = ClipboardHistory(store: store)
         history.recordImage(Data([0x89, 0x50, 0x4E, 0x47]))
-        let coordinator = CommandCoordinator(
+        let coordinator = CommandCoordinator.isolated(
             runner: RecordingEffectRunner(), history: history, index: inertAppIndex
         )
         browse(coordinator)

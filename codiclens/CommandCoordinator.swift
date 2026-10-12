@@ -52,6 +52,10 @@ class CommandCoordinator {
     private let runner: EffectRunner
     private let history: ClipboardHistory
 
+    /// Everything that reaches the user's own data is a parameter without a
+    /// default: `PanelController` hands in the shared ones, and a test that
+    /// forgot one does not compile rather than read the real thing.
+    ///
     /// - Parameters:
     ///   - emojiVM: injected so tests get their own Recents and preferences
     ///     instead of the ones in Application Support.
@@ -64,10 +68,10 @@ class CommandCoordinator {
     init(
         runner: EffectRunner,
         history: ClipboardHistory,
-        emojiVM: EmojiSearchVM = EmojiSearchVM(),
-        index: AppIndex = .shared,
-        sources: SourceStore = .shared,
-        searchFiles: @escaping FileIndex.Search = FileIndex.shared.searcher
+        emojiVM: EmojiSearchVM,
+        index: AppIndex,
+        sources: SourceStore,
+        searchFiles: @escaping FileIndex.Search
     ) {
         self.runner = runner
         self.history = history

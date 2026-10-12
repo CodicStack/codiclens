@@ -1,4 +1,3 @@
-import CoreServices
 import Foundation
 import Synchronization
 
@@ -47,7 +46,8 @@ final class FileIndex {
     @ObservationIgnored nonisolated private let searchableFolders = Mutex<[String]>([])
     @ObservationIgnored nonisolated private let countsRefreshPending = Mutex(false)
     @ObservationIgnored private let worker: Worker
-    @ObservationIgnored private var isStarted = false
+    /// Whether `start()` has run. The unit-test host never calls it.
+    @ObservationIgnored private(set) var isStarted = false
 
     init(databaseURL: URL, sources: SourceStore) {
         self.sources = sources
@@ -55,8 +55,10 @@ final class FileIndex {
         self.worker = Worker(databaseURL: databaseURL)
     }
 
-    /// Opens the index, starts watching and crawls the enabled folder
-    /// Sources, all off the main thread. Only the first call does anything.
+    /// Opens the index and starts watching, off the main thread. What changed
+    /// while the app was not running arrives as an FSEvents replay; only a
+    /// folder Source the replay cannot vouch for is crawled
+    /// (`FileIndexer.setSources`). Only the first call does anything.
     func start() {
         guard !isStarted else { return }
         isStarted = true
@@ -196,19 +198,23 @@ extension FileIndex {
 
         private func openIndexer(rules: FileIndexRules) throws -> FileIndexer {
             if let indexer { return indexer }
-            let indexer = FileIndexer(writer: try FileIndexWriter(url: databaseURL), rules: rules) { [weak self] progress in
-                self?.onProgress?(progress)
-            }
+            let indexer = FileIndexer(
+                writer: try FileIndexWriter(url: databaseURL),
+                rules: rules,
+                onProgress: { [weak self] progress in self?.onProgress?(progress) }
+            )
             self.indexer = indexer
             return indexer
         }
 
-        /// (Re)starts the stream when the watched folders change. The new one
-        /// picks up from the old one's last event, so a folder watched by both
-        /// loses nothing in between.
+        /// (Re)starts the stream when the watched folders change. The first
+        /// one starts where the index was left, so FSEvents replays what
+        /// changed while the app was not running; a new one picks up from the
+        /// old one's last event, so a folder watched by both loses nothing in
+        /// between.
         private func watch(_ paths: [String], indexer: FileIndexer) {
             guard paths != watchedPaths else { return }
-            let since = watcher?.latestEventID ?? FSEventStreamEventId(kFSEventStreamEventIdSinceNow)
+            let since = watcher?.latestEventID ?? indexer.eventID
             watcher?.stop()
             watchedPaths = paths
             watcher = FileIndexWatcher(paths: paths, since: since, queue: queue) { events in

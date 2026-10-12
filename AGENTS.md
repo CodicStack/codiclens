@@ -36,6 +36,27 @@ There are two targets, app and unit tests. There is no UI test target.
 `codiclens/` is a `PBXFileSystemSynchronizedRootGroup`, so a new `.swift` file
 needs no `project.pbxproj` edit.
 
+## Tests
+
+**The unit-test host is the app itself, and it starts nothing.**
+`AppDelegate.isTestHost` (XCTest's `XCTestConfigurationFilePath` in the
+environment, Swift Testing runs included) makes `applicationDidFinishLaunching`
+return before the Panel, the hotkeys, the pasteboard recorder or the File Index
+exist. Before that, every test run crawled the user's Downloads, Documents and
+Desktop into their own `FileIndex.sqlite` and took Cmd+Space from the running
+app. `TestHostTests` pins it.
+
+**No test reaches a `.shared` that holds user data.** `CommandCoordinator.init`
+and `EmojiSearchVM.init` take the Sources, the File Index search, the app Index,
+Emoji Recents and preferences with no default, so a test that forgets one does
+not compile; `PanelController` is the one place that hands in the shared ones.
+Tests build theirs from `codiclensTests/TestIsolation.swift`:
+`CommandCoordinator.isolated(...)`, `throwawayEmojiVM()`, `inertAppIndex`, and
+`ThrowawayDefaults` for any `SourceStore` or `EmojiPreferences`. That last one
+keeps its values in memory: a real `UserDefaults(suiteName:)` per test leaves a
+plist in `~/Library/Preferences` even after `removePersistentDomain`, and over a
+thousand had piled up there.
+
 ## Rules
 
 - No backwards compatibility hacks. Always migrate to the new solution.
@@ -229,7 +250,8 @@ codiclensApp (@main)
        ├─ Registers Cmd+Space hotkey (Carbon EventHotKey)
        ├─ Creates PanelController
        ├─ Starts the File Index (FileIndex.shared.start(); stop() on terminate)
-       └─ Handles QLPreviewPanel responder chain
+       ├─ Handles QLPreviewPanel responder chain
+       └─ In the unit-test host, none of the above (AppDelegate.isTestHost)
 ```
 
 ## Core Components
@@ -482,9 +504,19 @@ runs it on its own `UserDefaults` suite. A row being read shows the Loading Ring
 Under Folders, **Skip** is what the File Index leaves out inside the folder Sources, all
 user-set and kept by `SourceStore` beside the Sources: a checkbox per
 `FileIndexRules.SkipGroup` (on = skipped; Caches, node_modules and build output, App bundles
-and packages on by default; Hidden, Repos, .env files, Keys and certificates off, because the
-user wants to find those) and a list of `SkipPattern`s. `.git` and bare-repo internals belong
-to the bundles group, so a repo is indexed and its `.git` is not; `.DS_Store` is a cache.
+and packages, Git worktrees on by default; Hidden, Repos, .env files, Keys and certificates
+off, because the user wants to find those) and a list of `SkipPattern`s. `.git` and bare-repo
+internals belong to the bundles group, so a repo is indexed and its `.git` is not; `.DS_Store`
+is a cache. "node_modules and build output" is installed dependencies
+(`dependencyFolderNames`), generated code and reports by name wherever they are
+(`generatedFolderNames`: `paraglide`, `__generated__`, `.svelte-kit`, `.turbo`, `coverage`,
+`.coverage`, `.nyc_output`, `.nuxt`, `.output`, `.vercel`, `.expo`, `.angular`,
+`.docusaurus`, `.dart_tool`, `.terraform`, `.wrangler`, `.cxx`) and `build`/`dist`/`out`/
+`target`/`_build` beside a project marker. **Git worktrees** skips a folder whose `.git` is a
+*file* whose `gitdir:` names `…/worktrees/<name>` (`Entry.isLinkedWorktree`): the same repo
+again, file for file — on this Mac `repodo-project` held eighteen of them, ~224k rows. The
+main checkout (`.git` a folder) is left to the Repos switch, a submodule (`gitdir:` naming
+`modules`) is not a worktree, and a worktree that is itself a Source is read.
 Symlinks and iCloud files not downloaded are always out, not a switch. Patterns: no `/` is a
 name glob anywhere (`*`, `?`), a trailing `/` is folders only, any other `/` matches the path
 from the Source folder down (`**` = any folders). Nothing skips a Source itself. The writer is
@@ -492,8 +524,24 @@ handed `SourceStore.fileIndexRules`, a plain `Sendable` value, never the store. 
 re-applies through `FileIndexer.setRules`: rules that only skip *more* delete rows from the
 index alone (no walk); anything that lets more in re-crawls the enabled roots, and the crawl
 being a reconcile, that one pass also deletes what is newly skipped and leaves unchanged rows
-alone. With Repos included the dev machine's three default Sources are ~290k rows, almost
-all of it `~/Documents/Projects`: see `FileIndexTimingTests`.
+alone. Measured by `FileIndexTimingTests` on the dev machine: see its doc comment for the
+command.
+
+**A launch replays, it does not crawl** (`FileIndexer`). The database's `meta` table keeps
+the FSEvents event ID the index has caught up to (stored after every batch `handle` applies),
+the `FileIndexRules.fingerprint` the rows were read under, and per root the
+`FSEventsCopyUUIDForDevice` volume UUID of a crawl that *finished*. At launch the first
+`setSources` returns only the roots a replay cannot vouch for, and the watcher starts at the
+stored ID, so FSEvents delivers what changed while the app was not running and then
+`historyDone`. A root is crawled instead when there is no stored ID (first launch: the
+current ID is stored before anything is read), the fingerprint differs (a switch, a pattern,
+or a skip list changed in an update), its volume UUID changed or is missing (history
+replaced, or a volume FSEvents does not log), or its last crawl never finished — a rules
+change that lets more in, or a Source switched off, forgets the root until it is read again.
+In-session, `UserDropped`/`KernelDropped`/`EventIdsWrapped` crawl every root and
+`MustScanSubDirs` re-reads that subtree (a whole root is a crawl). "Reading" on the Sources
+page is a crawl and nothing else; a replay never shows it. `FileIndexSchema.version` is
+2: an index from any other version is dropped and read again, never migrated.
 
 ## Data Flow: Paste
 
@@ -527,7 +575,7 @@ User types query → Enter
 | File | Role |
 |------|------|
 | `codiclensApp.swift` | @main entry, AppDelegate adaptor |
-| `AppDelegate.swift` | Hotkey registration, QLPreviewPanel responder |
+| `AppDelegate.swift` | Hotkey registration, QLPreviewPanel responder, and `isTestHost`: the test host starts nothing |
 | `PanelController.swift` | The one window: show/hide, focus lifecycle, observers, hit test |
 | `PanelView.swift` | The SwiftUI content of the Panel: Card row, gap, Results Slab |
 | `PanelLayout.swift` | The Panel's fixed geometry, the margin, and `PanelHitRegions` |
@@ -565,8 +613,8 @@ User types query → Enter
 | `AppDirectoryWatcher.swift` | FSEvents watch over the application directories |
 | `Source.swift` | `Source` and `SourceStore`: the Sources, their switches and the folder list, in `UserDefaults` |
 | `FileIndex.swift` | The File Index: started at launch, `search` from any thread, counts and reading state for Settings |
-| `FileIndexStore.swift` | The File Index's SQLite schema, writer and thread-safe reader (`FileHit`) |
-| `FileIndexer.swift` | Crawling a folder Source and applying FSEvents changes to the index |
+| `FileIndexStore.swift` | The File Index's SQLite schema, writer (incl. the `meta` catch-up bookkeeping) and thread-safe reader (`FileHit`) |
+| `FileIndexer.swift` | Crawling a folder Source, applying FSEvents changes, and deciding at launch which roots a replay covers |
 | `FileIndexWatcher.swift` | FSEvents watch over the folder Sources |
 | `FileIndexRules.swift` | What the File Index leaves out, in one place for the crawl and FSEvents: the skip groups and patterns |
 | `SQLite.swift` | A thin SQLite connection and statement wrapper |

@@ -61,14 +61,14 @@ struct SubjectSourceListTests {
         let emojiVM = EmojiSearchVM(
             index: try EmojiIndex.bundled(),
             recents: recents,
-            preferences: EmojiPreferences(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+            preferences: EmojiPreferences(defaults: ThrowawayDefaults())
         )
-        let sources = SourceStore(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let sources = SourceStore(defaults: ThrowawayDefaults())
         for kind in disabled {
             sources.setEnabled(false, for: Source(kind: kind, isEnabled: true).id)
         }
         let fileIndex = FakeFileIndex(files)
-        let coordinator = CommandCoordinator(
+        let coordinator = CommandCoordinator.isolated(
             runner: RecordingEffectRunner(),
             history: history,
             emojiVM: emojiVM,

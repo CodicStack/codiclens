@@ -141,6 +141,7 @@ struct SkipRow: Identifiable, Equatable {
         case .bundles: "App bundles and packages"
         case .hidden: "Hidden files and folders"
         case .repos: "Repos"
+        case .worktrees: "Git worktrees"
         case .envFiles: ".env files"
         case .keys: "Keys and certificates"
         }
@@ -150,10 +151,11 @@ struct SkipRow: Identifiable, Equatable {
     var detail: String {
         switch group {
         case .caches: "~/Library, Caches, DerivedData, .build and Finder's .DS_Store files"
-        case .dependencies: "Installed packages, and build, dist and target folders inside a project"
+        case .dependencies: "Installed packages, generated code like paraglide and coverage, and build output inside a project"
         case .bundles: "Apps and frameworks, what is inside packages, and .git folders"
         case .hidden: "Names that start with a dot"
         case .repos: "Folders with a .git inside, unless you added the folder above"
+        case .worktrees: "Extra checkouts made with git worktree, unless you added the folder above"
         case .envFiles: ".env, .env.local and other environment files"
         case .keys: "Private keys, certificates and keychains, like id_rsa and .pem"
         }
