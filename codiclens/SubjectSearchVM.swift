@@ -287,7 +287,7 @@ class SubjectSearchVM {
         index.start()
 
         commitCancellable = commitSubject
-            .debounce(for: .milliseconds(600), scheduler: RunLoop.main)
+            .debounce(for: .seconds(1), scheduler: RunLoop.main)
             .sink { [weak self] in
                 self?.isSearchCommitted = true
             }
