@@ -156,6 +156,9 @@ struct SubjectCardView: View {
             if let note = coordinator.fileOperationNote ?? coordinator.transcriptionNote ?? coordinator.momentOpenNote {
                 Text(note)
                     .font(.system(size: 10, weight: .medium))
+                    // A Transcribe's clock ticks once a second; the chip must
+                    // not jitter with it.
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .chipSurface()
             }

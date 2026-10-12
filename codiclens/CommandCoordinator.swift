@@ -1073,10 +1073,16 @@ class CommandCoordinator {
     // MARK: - Transcribing
 
     /// Whether Codictate is transcribing the Subject. Gates a second Enter the
-    /// way `isOCRInFlight` does, and says "Transcribing…" in the Subject
-    /// Card's corner: a long recording takes a while (11.5 minutes of audio
-    /// took ~27 s), and the command reports no progress to show.
+    /// way `isOCRInFlight` does, and puts where it is in the Subject Card's
+    /// corner: Codictate runs one File Transcription at a time, so this one
+    /// may wait behind others, and a long recording takes a while (11.5
+    /// minutes of audio took ~27 s).
     private(set) var isTranscriptionInFlight = false
+
+    /// The last `queued` or `progress` Codictate reported for the run under
+    /// way. `nil` until the first, while the client may still be starting
+    /// Codictate.
+    private(set) var transcriptionProgress: Transcription.Progress?
 
     /// Why the last Transcribe gave no text Subject, for the Subject Card's
     /// corner, and what the Panel shakes about. Cleared as the next one starts
@@ -1086,10 +1092,11 @@ class CommandCoordinator {
     private var transcriptionGeneration = 0
     private var pendingTranscriptionSubjectID: UUID?
 
-    /// What the Subject Card's corner says about Transcribe: under way, or why
-    /// it came to nothing.
+    /// What the Subject Card's corner says about Transcribe: where it is, in
+    /// Codictate's own words ("Waiting, 2 ahead", "Transcribing · 0:42 · 52:01
+    /// of audio"), or why it came to nothing.
     var transcriptionNote: String? {
-        if isTranscriptionInFlight { return "Transcribing…" }
+        if isTranscriptionInFlight { return transcriptionProgress?.note ?? "Transcribing…" }
         return transcriptionFailure?.note
     }
 
@@ -1103,6 +1110,7 @@ class CommandCoordinator {
         }
         transcriptionGeneration += 1
         isTranscriptionInFlight = true
+        transcriptionProgress = nil
         transcriptionFailure = nil
         pendingTranscriptionSubjectID = subject.id
         // **No `.hide`.** The transcript lands *in* the Panel, as OCR Text does.
@@ -1118,11 +1126,16 @@ class CommandCoordinator {
     func receiveTranscription(_ result: Result<String, Transcription.Failure>, generation: Int) {
         guard isTranscriptionInFlight, generation == transcriptionGeneration else { return }
         isTranscriptionInFlight = false
+        transcriptionProgress = nil
         let expectedSubjectID = pendingTranscriptionSubjectID
         pendingTranscriptionSubjectID = nil
         guard phase == .pickingAction, selectedSubject?.id == expectedSubjectID else { return }
 
         switch result {
+        case .failure(.cancelled):
+            // Stopped from outside Codiclens, from Codictate's window say.
+            // Nothing to shake about.
+            break
         case .failure(let failure):
             transcriptionFailure = failure
         case .success(let transcript):
@@ -1136,6 +1149,13 @@ class CommandCoordinator {
         }
     }
 
+    /// Where the run under way is, handed over by the runner as Codictate
+    /// reports it. Dropped, like its answer, once the run is not this one.
+    func receiveTranscriptionProgress(_ progress: Transcription.Progress, generation: Int) {
+        guard isTranscriptionInFlight, generation == transcriptionGeneration else { return }
+        transcriptionProgress = progress
+    }
+
     /// Stops the Transcribe under way, if there is one. Its answer is dropped
     /// by the generation. Called on Escape, on leaving the file's Actions, and
     /// by `PanelController` as the Panel goes away: a hidden Panel has nowhere
@@ -1144,6 +1164,7 @@ class CommandCoordinator {
         guard isTranscriptionInFlight else { return }
         transcriptionGeneration += 1
         isTranscriptionInFlight = false
+        transcriptionProgress = nil
         pendingTranscriptionSubjectID = nil
         runner.run([.cancelTranscription])
     }

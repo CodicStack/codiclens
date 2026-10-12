@@ -33,9 +33,11 @@ final class SystemEffectRunner: EffectRunner {
     /// clipboard.
     private let pasteboard: NSPasteboard
 
-    /// Where Codictate's transcribe command is, asked each time Transcribe
-    /// runs, so a Codictate installed or updated while the app runs is found.
-    /// `Transcription.locate` in the app; a test hands in a script of its own.
+    /// Where Codictate's client is, asked each time Transcribe runs, so a
+    /// Codictate installed or updated while the app runs is found.
+    /// `Transcription.locate` in the app, which also asks the client's
+    /// `status` once whether it speaks this contract; a test hands in a
+    /// script of its own.
     private let codictate: @Sendable () -> Transcription.Location
 
     /// The transcription under way, so the next Panel session can stop it.
@@ -72,6 +74,9 @@ final class SystemEffectRunner: EffectRunner {
     var onFileOperation: ((Int, Result<URL, FileOperation.Failure>) -> Void)?
     /// The transcript of an audio or video file, or why there is none.
     var onTranscription: ((Int, Result<String, Transcription.Failure>) -> Void)?
+    /// Where the transcription under way is: queued behind others, reading
+    /// the file, transcribing. Always before its `onTranscription`.
+    var onTranscriptionProgress: ((Int, Transcription.Progress) -> Void)?
     /// Whether QuickTime opened a file at its moment.
     var onMomentOpen: ((Int, Bool) -> Void)?
 
@@ -192,16 +197,24 @@ final class SystemEffectRunner: EffectRunner {
             guard let onTranscription else { return }
             transcription?.cancel()
             let codictate = codictate
+            let onTranscriptionProgress = onTranscriptionProgress
             let run = TranscriptionRun(file: file)
             transcription = run
             // Not a serial queue: a cancelled run still winding down must not
-            // hold up the next one. Looked up off the main thread too, since
-            // Launch Services may have to think about it.
+            // hold up the next one. Looked up off the main thread too: Launch
+            // Services may have to think about it, and the first look asks the
+            // client's `status`, which can start Codictate.
             DispatchQueue.global(qos: .userInitiated).async {
                 let result: Result<String, Transcription.Failure> = switch codictate() {
-                case .found(let command): run.perform(with: command)
+                case .found(let command):
+                    // Posted in order on the main queue, so every progress
+                    // lands before the answer posted after it.
+                    run.perform(with: command) { progress in
+                        DispatchQueue.main.async { onTranscriptionProgress?(generation, progress) }
+                    }
                 case .missing: .failure(.codictateMissing)
                 case .tooOld: .failure(.codictateTooOld)
+                case .unavailable: .failure(.codictateUnavailable)
                 }
                 DispatchQueue.main.async { [weak self] in
                     if self?.transcription === run { self?.transcription = nil }

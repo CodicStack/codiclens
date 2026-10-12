@@ -109,10 +109,13 @@ cache from a schema-4 index and prints what came over and the disk before and af
 (`VectorCacheMeasurementTests`; its doc comment has the read-only `.backup` command).
 
 **Transcribe never needs Codictate under test.** `TranscriptionTests` hands
-`SystemEffectRunner` a `/bin/sh` script in a temp folder as the `codictate` command
-(JSON, each exit code, a cancel through a FIFO). `TEST_RUNNER_CODICLENS_TRANSCRIBE=1`
-runs the installed command, the dev build included, on a `say` m4a
-(`RealCodictateTranscriptionTests`); a path instead of `1` runs that command.
+`SystemEffectRunner` a `/bin/sh` script in a temp folder as the `codictate` client
+(NDJSON events, some held back on a FIFO to prove they are read as they arrive, each
+error code and exit code, a cancel through a FIFO, `status --json` answers).
+`TEST_RUNNER_CODICLENS_TRANSCRIBE=1` finds a real client as the app does, the dev
+build included, and transcribes a `say` m4a (`RealCodictateTranscriptionTests`); a
+path to a client (`<App>.app/Contents/Resources/app/bin/codictate`) instead of `1`
+runs that one, after its `status` check. Either may start that Codictate hidden.
 
 ## Rules
 
@@ -178,23 +181,41 @@ runs the installed command, the dev build included, on a `say` m4a
   It is not Editing (`GLOSSARY.md`), which is a text Subject's text.
 - **Transcribe is Codictate's, never ours.** A file whose `UTType` conforms to
   `.audiovisualContent` (not an MPEG-2 transport stream: `.ts` is declared one) offers
-  it. `Transcription` runs `<Codictate.app>/Contents/Resources/app/bin/codictate
-  transcribe <file> --json`, looked up by bundle id (`app.codictate`, then
-  `app.codictate.canary`) as Codictate's `docs/TRANSCRIBE_CLI.md` says; that page is the
-  contract and only `contractVersion` 1 is read. It is a `.transcribe` Effect with no
-  `.hide`, run off the main thread by `EffectRunner` and answered through
-  `onTranscription`; the transcript, trimmed, becomes a text Subject in place of the
-  file, as OCR Text replaces an image. The Subject Card's corner says "Transcribing…"
-  (`transcriptionNote`) while it runs, and a failure shakes and says why: "No speech
-  found" (empty), "No audio in this file" (exit 3), "Pick a speech model in Codictate"
-  (4), "Couldn't transcribe" (anything else). The Action is listed without Codictate
-  too: then the first Enter says "Get Codictate to transcribe" (no app) or "Update
-  Codictate to transcribe" (an app without `bin/codictate`) with a ⏎ chip, and the
-  next Enter opens `Transcription.downloadURL` (codictate.app, whose front page has the
-  download). Escape while it runs, leaving the Action Phase, `reset()` and the Panel
-  hiding all stop it (`.cancelTranscription`, SIGTERM; the command exits 143 and the
-  generation drops the answer). The command inherits only `HOME`, `PATH`, `TMPDIR` and
-  a few more, like the embedding helper.
+  it. Codictate's command line is a Rust thin client of the running app (Codictate's
+  `docs/CLI.md`, contract version 1, and its ADR-0009): `Transcription` runs
+  `<Codictate.app>/Contents/Resources/app/bin/codictate transcribe <file> --json`,
+  looked up by bundle id (`app.codictate`, then `app.codictate.canary`; GUI apps do not
+  inherit the shell's `PATH`). The client starts Codictate hidden when it is not
+  running, and Codictate runs File Transcriptions one at a time, so a call may wait.
+  **Compatibility is asked, not guessed:** the first time a client binary is used,
+  `Transcription.compatibility(of:)` checks it is a Mach-O (the client before this
+  contract was a script, never run) and runs `status --json` once, wanting
+  `contractVersion` 1; the answer is kept per path and modification date. A missing
+  client, a script, another version, exit 2 or 11 is `.tooOld`; exit 6 is
+  `.unavailable`, asked again next time. It is a `.transcribe` Effect with no `.hide`,
+  run off the main thread by `EffectRunner`, which reads stdout **line by line as it
+  arrives** (never to EOF), ignores event types and fields it does not know, and
+  answers through `onTranscriptionProgress` for each `queued`/`progress` and
+  `onTranscription` at the end. The transcript (`result.text`), trimmed, becomes a
+  text Subject in place of the file, as OCR Text replaces an image. While it runs the
+  Subject Card's corner chip (`transcriptionNote`) says where it is, in Codictate's
+  own window copy: "Transcribing…" until the first event, then "Waiting, 2 ahead",
+  "Next up", "Reading the file · 0:01", "Transcribing · 0:42 · 52:01 of audio". A
+  failure shakes and says why, from `error.code` first and the exit code after: "No
+  speech found" (empty), "No audio in this file" (`no_audio`, 3), "Can't read this
+  file" (`input_unreadable`), "Pick a speech model in Codictate"
+  (`model_not_installed`, 4), "Couldn't start Codictate" (`app_unavailable`, 6),
+  "Couldn't transcribe" (anything else); `cancelled` (130/143) says nothing. The
+  client's stderr line goes to the log (`NSLog`), never to the user. The Action is
+  listed without Codictate too: then the first Enter says "Get Codictate to
+  transcribe" (no app) or "Update Codictate to transcribe" (no contract-1 client, or
+  `contract_mismatch`, 11) with a ⏎ chip, and the next Enter opens
+  `Transcription.downloadURL` (codictate.app, whose front page has the download).
+  Escape while it runs, leaving the Action Phase, `reset()` and the Panel hiding all
+  stop it (`.cancelTranscription`, SIGTERM; the client forwards the cancel to Codictate
+  and exits 143, and the generation drops the answer and any late progress). The
+  client inherits only `HOME`, `PATH`, `TMPDIR` and a few more, like the embedding
+  helper.
 
 ### Visual layer
 
@@ -444,9 +465,10 @@ Wires runner callbacks:
 - `onImageRotation` → `coordinator.receiveImageRotation(...)`
 - `onFileOperation` → `coordinator.receiveFileOperation(_:generation:)`
 - `onTranscription` → `coordinator.receiveTranscription(_:generation:)`
+- `onTranscriptionProgress` → `coordinator.receiveTranscriptionProgress(_:generation:)`
 - `onMomentOpen` → `coordinator.receiveMomentOpen(succeeded:generation:)`
 
-These six callbacks answer the coordinator across the Effect seam. The runner owns
+These callbacks answer the coordinator across the Effect seam. The runner owns
 Vision, image processing, file operations and the `codictate` process, so
 `CommandCoordinator` does none of them. Image, file and transcription callback
 generation IDs discard answers from a reset Panel session; `hidePanel()` and
@@ -573,8 +595,8 @@ also run behind the Effect seam and return no `.hide`; their work uses one seria
 so consecutive rotations reach disk in command order. Move To…, Copy To…, Rename and
 Compress return `[.fileOperation(...)]`, likewise without `.hide`, on a second serial
 queue. Transcribe returns `[.transcribe(url, generation:)]`, also without `.hide`; the
-runner runs `codictate` on a global queue and keeps the run so `.cancelTranscription`
-can stop it. `isOCRInFlight`, `isImageActionInFlight`, `isFileOperationInFlight` and
+runner runs `codictate` on a global queue, posts each progress to the main queue
+before the answer, and keeps the run so `.cancelTranscription` can stop it. `isOCRInFlight`, `isImageActionInFlight`, `isFileOperationInFlight` and
 `isTranscriptionInFlight` gate a second Enter while their respective answer is pending.
 
 Text mode is **⌘E, and nothing else** (`docs/adr/0012-files-in-subject-search-text-mode-is-cmd-e.md`).
@@ -1253,7 +1275,7 @@ User types query → Enter
 | `ImageActions.swift` | QR PNG generation and atomic, orientation-normalizing image rotation |
 | `EffectRunner.swift` | Executes system Effects; serializes image and file jobs and returns their answers |
 | `FileOperation.swift` | Move, copy, rename and compress on disk: Finder's `name 2.ext` numbering, never overwriting |
-| `Transcription.swift` | Finding Codictate's `codictate` command, running one cancellable `transcribe --json`, reading its contract |
+| `Transcription.swift` | Finding Codictate's `codictate` client and checking its contract (`status --json`), running one cancellable `transcribe --json`, reading its NDJSON events |
 | `SubjectAction.swift` | Action model, text transforms, action handlers |
 | `FuzzyMatch.swift` | Fuzzy scoring (exact/prefix/substring/subsequence/levenshtein) |
 | `Emoji.swift` | Emoji model, SkinTone, default-tone preference, glyph→NSImage rendering |

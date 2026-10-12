@@ -157,6 +157,8 @@ struct TranscribeCommandTests {
         let lines: [(Transcription.Failure, String)] = [
             (.noSpeechModel, "Pick a speech model in Codictate"),
             (.noAudio, "No audio in this file"),
+            (.unreadable, "Can't read this file"),
+            (.codictateUnavailable, "Couldn't start Codictate"),
             (.failed, "Couldn't transcribe"),
             (.codictateMissing, "Get Codictate to transcribe"),
             (.codictateTooOld, "Update Codictate to transcribe"),
@@ -174,13 +176,93 @@ struct TranscribeCommandTests {
         }
     }
 
+    @Test func aCancelledRunSaysNothing() throws {
+        let (coordinator, _, subject) = try readyToTranscribe()
+        let generation = try generation(of: coordinator.submit())
+
+        coordinator.receiveTranscription(.failure(.cancelled), generation: generation)
+
+        #expect(!coordinator.isTranscriptionInFlight)
+        #expect(coordinator.transcriptionFailure == nil)
+        #expect(coordinator.transcriptionNote == nil)
+        #expect(coordinator.selectedSubject?.id == subject.id)
+    }
+
     @Test func theExitCodesMapToTheirFailures() {
         #expect(Transcription.failure(forExitStatus: 1) == .failed)
         #expect(Transcription.failure(forExitStatus: 2) == .failed)
         #expect(Transcription.failure(forExitStatus: 3) == .noAudio)
         #expect(Transcription.failure(forExitStatus: 4) == .noSpeechModel)
         #expect(Transcription.failure(forExitStatus: 5) == .failed)
-        #expect(Transcription.failure(forExitStatus: 143) == .failed)
+        #expect(Transcription.failure(forExitStatus: 6) == .codictateUnavailable)
+        #expect(Transcription.failure(forExitStatus: 11) == .codictateTooOld)
+        #expect(Transcription.failure(forExitStatus: 130) == .cancelled)
+        #expect(Transcription.failure(forExitStatus: 143) == .cancelled)
+    }
+
+    /// The `error` event's code is asked first: exit 3 is two things.
+    @Test func theErrorCodeSaysMoreThanTheExitCode() {
+        #expect(Transcription.result(exitStatus: 3, transcript: nil, errorCode: "input_unreadable") == .failure(.unreadable))
+        #expect(Transcription.result(exitStatus: 3, transcript: nil, errorCode: "no_audio") == .failure(.noAudio))
+        #expect(Transcription.result(exitStatus: 5, transcript: nil, errorCode: "engine_failed") == .failure(.failed))
+        #expect(Transcription.result(exitStatus: 4, transcript: nil, errorCode: "something_new") == .failure(.noSpeechModel))
+        #expect(Transcription.result(exitStatus: 0, transcript: "hi", errorCode: nil) == .success("hi"))
+        #expect(Transcription.result(exitStatus: 0, transcript: nil, errorCode: nil) == .failure(.failed))
+    }
+
+    // MARK: - Progress
+
+    @Test func progressSaysWhereTheRunIs() throws {
+        let lines: [(Transcription.Progress, String)] = [
+            (.queued(position: 3), "Waiting, 2 ahead"),
+            (.queued(position: 2), "Waiting, 1 ahead"),
+            (.queued(position: 1), "Next up"),
+            (.running(.decoding, elapsedSeconds: 0.4, audioSeconds: nil), "Reading the file · 0:00"),
+            (.running(.transcribing, elapsedSeconds: 42.9, audioSeconds: nil), "Transcribing · 0:42"),
+            (.running(.transcribing, elapsedSeconds: 42, audioSeconds: 3121.5), "Transcribing · 0:42 · 52:01 of audio"),
+            (.running(.transcribing, elapsedSeconds: 3723, audioSeconds: 7322), "Transcribing · 1:02:03 · 2:02:02 of audio"),
+        ]
+        let (coordinator, _, _) = try readyToTranscribe()
+        let generation = try generation(of: coordinator.submit())
+        #expect(coordinator.transcriptionNote == "Transcribing…")
+
+        for (progress, line) in lines {
+            coordinator.receiveTranscriptionProgress(progress, generation: generation)
+            #expect(coordinator.transcriptionNote == line)
+        }
+    }
+
+    @Test func progressGoesAwayWithTheAnswer() throws {
+        let (coordinator, _, _) = try readyToTranscribe()
+        let first = try generation(of: coordinator.submit())
+        coordinator.receiveTranscriptionProgress(.queued(position: 1), generation: first)
+
+        coordinator.receiveTranscription(.failure(.noAudio), generation: first)
+        #expect(coordinator.transcriptionNote == "No audio in this file")
+
+        // The next run starts without the last one's progress.
+        let next = try generation(of: coordinator.submit())
+        #expect(coordinator.transcriptionProgress == nil)
+        #expect(coordinator.transcriptionNote == "Transcribing…")
+        coordinator.receiveTranscription(.success("done"), generation: next)
+        coordinator.receiveTranscriptionProgress(.queued(position: 1), generation: next)
+        #expect(coordinator.transcriptionProgress == nil)
+        #expect(coordinator.transcriptionNote == nil)
+    }
+
+    @Test func progressFromAnEarlierOrCancelledRunIsDropped() throws {
+        let (coordinator, _, _) = try readyToTranscribe()
+        let first = try generation(of: coordinator.submit())
+        coordinator.handleEscape()
+
+        coordinator.receiveTranscriptionProgress(.queued(position: 4), generation: first)
+        #expect(coordinator.transcriptionNote == nil)
+
+        let second = try generation(of: coordinator.submit())
+        coordinator.receiveTranscriptionProgress(.queued(position: 4), generation: first)
+        #expect(coordinator.transcriptionNote == "Transcribing…")
+        coordinator.receiveTranscriptionProgress(.queued(position: 1), generation: second)
+        #expect(coordinator.transcriptionNote == "Next up")
     }
 
     @Test func aFailureClearsAsTheNextRunStarts() throws {
@@ -228,7 +310,7 @@ struct TranscribeCommandTests {
         #expect(coordinator.transcriptionNote == nil)
         #expect(coordinator.phase == .pickingAction)
         // The cancelled run's answer, exit 143, changes nothing.
-        coordinator.receiveTranscription(.failure(.failed), generation: generation)
+        coordinator.receiveTranscription(.failure(.cancelled), generation: generation)
         #expect(coordinator.transcriptionFailure == nil)
         #expect(coordinator.selectedSubject?.id == subject.id)
         // With nothing running, Escape dismisses as it always does.
