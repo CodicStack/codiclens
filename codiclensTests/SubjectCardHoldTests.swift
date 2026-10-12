@@ -197,6 +197,60 @@ struct SubjectCardHoldTests {
         expectCard(fixture, shows: "Type...", "cleared")
     }
 
+    // MARK: - From the empty Panel
+
+    /// The Panel opened with nothing typed and no Last Subject: the one Card,
+    /// asking.
+    @Test func theEmptyPanelShowsTheCard() async throws {
+        let fixture = try await makeFixture(apps: ["FindMy"], files: FakeFiles())
+        defer { fixture.tearDown() }
+
+        fixture.coordinator.reset()
+        #expect(fixture.coordinator.standingSubject == nil)
+        expectCard(fixture, shows: "Type...", "opened empty")
+    }
+
+    /// Typing into the empty Panel: the apps answer on the keystroke, so the
+    /// highlighted app is on the Card from the first key, while the list
+    /// below them is still out and before the settled pass. The row stays
+    /// one Card throughout, so nothing on typing is an Arrival.
+    @Test func typingIntoTheEmptyPanelPutsTheHighlightedAppOnTheCard() async throws {
+        let fixture = try await makeFixture(
+            apps: ["FindMy", "Finder", "USB File Manager", "Microsoft PowerPoint"],
+            files: FakeFiles(settled: ["fin": [doc("final-final.mp4")]])
+        )
+        defer { fixture.tearDown() }
+        fixture.coordinator.reset()
+        expectCard(fixture, shows: "Type...", "opened empty")
+
+        for query in ["f", "fi", "fin"] {
+            fixture.type(query)
+            #expect(fixture.vm.searchText == query)
+            #expect(fixture.vm.results.first?.displayName == "FindMy", "\(query): the top row")
+            expectCard(fixture, shows: "FindMy", "typed \(query)")
+        }
+        try renderPanel(fixture.coordinator, to: "/tmp/codiclens-card-fresh.png")
+
+        await fixture.schedule.typingPaused()
+        expectCard(fixture, shows: "FindMy", "fin settled")
+        #expect(fixture.vm.results.map(\.displayName).contains("final-final.mp4"))
+    }
+
+    /// Each Card's glass is on one view that stays, never on a `Group`: a
+    /// `Group` gives the glass to each branch inside it, so a content change
+    /// inside an animation took the whole Card away for its length
+    /// (`SubjectCardView.body`). Only the window server shows that, so this
+    /// pins the shape that caused it.
+    @Test func noCardsGlassIsOnAGroup() {
+        for body in [
+            String(reflecting: SubjectCardView.Body.self),
+            String(reflecting: ActionCardView.Body.self),
+            String(reflecting: TargetCardView.Body.self)
+        ] {
+            #expect(!body.contains("SwiftUI.Group<"), "\(body.prefix(120))")
+        }
+    }
+
     // MARK: - Selection
 
     /// The Card is on the highlighted row: into the list by hand, through the

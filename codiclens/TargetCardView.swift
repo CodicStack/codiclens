@@ -18,14 +18,17 @@ struct TargetCardView: View {
         return vm.filteredTargets[vm.selectedIndex]
     }
 
+    /// A `ZStack`, not a `Group`, so the glass is the Card's and not each
+    /// branch's: see `SubjectCardView.body`.
     var body: some View {
-        Group {
+        ZStack {
             if let target {
                 targetContent(target)
             } else {
                 placeholder
             }
         }
+        .hardCut()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottomTrailing) {
             if isFocused, target != nil {

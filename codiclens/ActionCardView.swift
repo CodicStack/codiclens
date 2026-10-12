@@ -20,14 +20,17 @@ struct ActionCardView: View {
         return vm.filteredActions[vm.selectedIndex]
     }
 
+    /// A `ZStack`, not a `Group`, so the glass is the Card's and not each
+    /// branch's: see `SubjectCardView.body`.
     var body: some View {
-        Group {
+        ZStack {
             if let action {
                 actionContent(action)
             } else {
                 placeholder
             }
         }
+        .hardCut()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottomTrailing) {
             if let keyHint {
