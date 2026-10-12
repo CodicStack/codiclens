@@ -11,7 +11,7 @@ struct ImageCommandTests {
         let runner = RecordingEffectRunner()
         let history = ClipboardHistory(store: store ?? InMemoryClipboardStore())
         return (
-            CommandCoordinator(runner: runner, history: history, index: inertAppIndex),
+            CommandCoordinator.isolated(runner: runner, history: history, index: inertAppIndex),
             runner,
             history
         )

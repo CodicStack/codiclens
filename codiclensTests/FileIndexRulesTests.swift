@@ -29,8 +29,8 @@ struct FileIndexRulesTests {
 
     // MARK: - Defaults
 
-    @Test func aNewInstallSkipsCachesDependenciesAndBundlesOnly() {
-        #expect(FileIndexRules.defaults.skipped == [.caches, .dependencies, .bundles])
+    @Test func aNewInstallSkipsCachesDependenciesBundlesAndWorktreesOnly() {
+        #expect(FileIndexRules.defaults.skipped == [.caches, .dependencies, .bundles, .worktrees])
         #expect(FileIndexRules.defaults.patterns.isEmpty)
     }
 
@@ -88,11 +88,27 @@ struct FileIndexRulesTests {
         } == .index)
     }
 
+    /// What tools write and rewrite goes wherever it is, project or not: no
+    /// one names a folder of their own `paraglide` or `.svelte-kit`.
+    @Test func dependenciesTakeGeneratedCodeAndReports() {
+        let rules = Self.rules(skipping: .dependencies)
+        for name in ["paraglide", ".svelte-kit", ".turbo", "coverage", "__generated__", ".nyc_output", ".nuxt",
+                     ".output", ".vercel", ".expo", ".terraform", ".dart_tool"] {
+            #expect(verdict("/Users/someone/Documents/app/src/" + name, directory: true, rules: rules) == .skip, "\(name)")
+            #expect(rules.skipsFolder(named: name), "\(name) is dropped from FSEvents by name alone")
+            #expect(verdict("/Users/someone/Documents/app/src/" + name, directory: true, rules: Self.nothing) == .index,
+                    "\(name)")
+        }
+        #expect(verdict("/Users/someone/Documents/coverage.pdf", rules: rules) == .index, "a file is not the folder")
+    }
+
     /// `build` is build output only beside a project. A folder of drawings
     /// called "build" is somebody's work.
     @Test func aBuildFolderIsSkippedOnlyInsideAProject() {
         #expect(verdict("/Users/someone/Documents/tool/build", directory: true) { $0.isInsideProject = true } == .skip)
         #expect(verdict("/Users/someone/Documents/tool/dist", directory: true) { $0.isInsideProject = true } == .skip)
+        #expect(verdict("/Users/someone/Documents/compiler/_build", directory: true) { $0.isInsideProject = true }
+            == .skip, "dune's and mix's")
         #expect(verdict("/Users/someone/Documents/house/build", directory: true) == .index)
         #expect(verdict("/Users/someone/Documents/tool/docs", directory: true) { $0.isInsideProject = true } == .index)
     }
@@ -131,6 +147,19 @@ struct FileIndexRulesTests {
             == .skip)
         #expect(verdict("/Users/someone/Documents/codiclens", directory: true,
                         root: "/Users/someone/Documents/codiclens", rules: rules) { $0.containsGit = true } == .index)
+    }
+
+    /// A linked worktree is the same repo again, file for file. The main
+    /// checkout stays, under the Repos switch; a worktree the user added as a
+    /// Source is theirs.
+    @Test func worktreesTakeALinkedWorktreeButNotTheMainCheckout() {
+        let worktree: (inout FileIndexRules.Entry) -> Void = { $0.containsGit = true; $0.isLinkedWorktree = true }
+        #expect(verdict("/Users/someone/Documents/app-wt-1", directory: true, configure: worktree) == .skip)
+        #expect(verdict("/Users/someone/Documents/app", directory: true) { $0.containsGit = true } == .index)
+        #expect(verdict("/Users/someone/Documents/app-wt-1", directory: true,
+                        root: "/Users/someone/Documents/app-wt-1", configure: worktree) == .index)
+        #expect(verdict("/Users/someone/Documents/app-wt-1", directory: true, rules: Self.rules(skipping: .bundles),
+                        configure: worktree) == .index, "switched off")
     }
 
     @Test func envFilesTakeDotEnvAndItsVariants() {
@@ -253,7 +282,9 @@ struct FileIndexRulesTests {
         let root = try TemporaryFolder()
         defer { root.remove() }
         try root.makeFolder("repo/.git")
-        try root.makeFile("worktree/.git", contents: "gitdir: elsewhere")
+        try root.makeFile("worktree/.git", contents: "gitdir: /Users/someone/app/.git/worktrees/worktree\n")
+        try root.makeFile("relative/.git", contents: "gitdir: ../app/.git/worktrees/relative")
+        try root.makeFile("submodule/.git", contents: "gitdir: ../.git/modules/submodule")
         try root.makeFile("backup.git/HEAD", contents: "ref: refs/heads/main")
         try root.makeFolder("backup.git/objects/9c")
         try root.makeFolder("backup.git/refs/heads")
@@ -272,6 +303,10 @@ struct FileIndexRulesTests {
 
         #expect(entry("repo").containsGit)
         #expect(entry("worktree").containsGit, "a .git file — a worktree or submodule — is a repo too")
+        #expect(entry("worktree").isLinkedWorktree)
+        #expect(entry("relative").isLinkedWorktree)
+        #expect(entry("submodule").containsGit && !entry("submodule").isLinkedWorktree, "a submodule is not a worktree")
+        #expect(!entry("repo").isLinkedWorktree, "the main checkout's .git is a folder")
         #expect(entry("backup.git").isBareRepo, "a bare repo has no .git, and is one")
         #expect(!entry("backup.git").containsGit)
         #expect(!entry("repo").isBareRepo)

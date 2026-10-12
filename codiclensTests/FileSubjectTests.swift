@@ -14,7 +14,7 @@ struct FileSubjectTests {
     private func makeCoordinator() -> (CommandCoordinator, RecordingEffectRunner) {
         let runner = RecordingEffectRunner()
         let history = ClipboardHistory(store: InMemoryClipboardStore())
-        return (CommandCoordinator(runner: runner, history: history, index: inertAppIndex), runner)
+        return (CommandCoordinator.isolated(runner: runner, history: history, index: inertAppIndex), runner)
     }
 
     private func selectAction(_ name: String, in coordinator: CommandCoordinator) throws {

@@ -6,7 +6,7 @@ import Testing
 /// `UserDefaults` suite and counts handed in by the test.
 @MainActor
 struct SourcesPageTests {
-    private let store = SourceStore(defaults: UserDefaults(suiteName: "codiclens-tests-\(UUID().uuidString)")!)
+    private let store = SourceStore(defaults: ThrowawayDefaults())
     private let downloads = NSHomeDirectory() + "/Downloads"
 
     private func page(
@@ -100,9 +100,9 @@ struct SourcesPageTests {
 
         #expect(page.skipRows.map(\.title) == [
             "Caches", "node_modules and build output", "App bundles and packages", "Hidden files and folders",
-            "Repos", ".env files", "Keys and certificates"
+            "Repos", "Git worktrees", ".env files", "Keys and certificates"
         ])
-        #expect(page.skipRows.map(\.isSkipped) == [true, true, true, false, false, false, false])
+        #expect(page.skipRows.map(\.isSkipped) == [true, true, true, false, false, true, false, false])
         #expect(page.skipRows.allSatisfy { !$0.detail.isEmpty && !$0.detail.contains("\u{2014}") })
     }
 

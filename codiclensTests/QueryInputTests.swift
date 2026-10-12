@@ -9,7 +9,7 @@ import Testing
 struct QueryInputTests {
 
     private func makeCoordinator() -> CommandCoordinator {
-        return CommandCoordinator(
+        return CommandCoordinator.isolated(
             runner: RecordingEffectRunner(),
             history: ClipboardHistory(store: InMemoryClipboardStore()),
             index: inertAppIndex

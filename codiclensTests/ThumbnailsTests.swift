@@ -290,7 +290,7 @@ struct ThumbnailSourceTests {
             timestamp: Date(timeIntervalSince1970: 1)
         )
         history.recordText("words", timestamp: Date(timeIntervalSince1970: 2))
-        let coordinator = CommandCoordinator(
+        let coordinator = CommandCoordinator.isolated(
             runner: RecordingEffectRunner(),
             history: history,
             index: inertAppIndex
@@ -321,7 +321,7 @@ struct ThumbnailSourceTests {
     /// Rotate answers with a fresh Subject, which is what makes the Card look
     /// at the file again — and the fresh one has to still point at it.
     @Test func aRotatedFileSubjectKeepsItsThumbnailFile() throws {
-        let coordinator = CommandCoordinator(
+        let coordinator = CommandCoordinator.isolated(
             runner: RecordingEffectRunner(),
             history: ClipboardHistory(store: InMemoryClipboardStore()),
             index: inertAppIndex

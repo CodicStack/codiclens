@@ -39,7 +39,7 @@ struct FileIndexWatcherTests {
         let folder = try TemporaryFolder()
         defer { folder.remove() }
         try folder.makeFile("Source/existing.txt")
-        let defaults = try #require(UserDefaults(suiteName: "codiclens-tests-\(UUID().uuidString)"))
+        let defaults = ThrowawayDefaults()
         defaults.set([folder.path("Source")], forKey: "codiclens.sources.folders")
         let index = FileIndex(
             databaseURL: folder.url.appendingPathComponent("FileIndex.sqlite"),

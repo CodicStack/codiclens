@@ -11,14 +11,22 @@ import Foundation
 /// not a timer run on the side. Batches are delivered on the queue the
 /// watcher is given, which is the indexer's: a batch can never interleave
 /// with a crawl.
+///
+/// A stream always starts from an event ID, never "now": at launch the one
+/// the index was left at, so FSEvents first replays what changed while the
+/// app was not running, then says `historyDone`, then carries on live.
 nonisolated final class FileIndexWatcher {
     struct Event: Equatable, Sendable {
         let path: String
         let flags: FSEventStreamEventFlags
+        /// FSEvents' own number for the change, which the index stores as
+        /// how far it has caught up. Nil only in a test's hand-made batch.
+        let id: FSEventStreamEventId?
 
-        init(path: String, flags: FSEventStreamEventFlags = 0) {
+        init(path: String, flags: FSEventStreamEventFlags = 0, id: FSEventStreamEventId? = nil) {
             self.path = path
             self.flags = flags
+            self.id = id
         }
 
         /// FSEvents lost track below `path` — it dropped events, or merged
@@ -29,10 +37,12 @@ nonisolated final class FileIndexWatcher {
                 | kFSEventStreamEventFlagKernelDropped) != 0
         }
 
-        /// Events were dropped wholesale: nothing below any root can be trusted.
-        var droppedEvents: Bool {
+        /// Events were dropped wholesale, or event IDs started again from
+        /// zero: nothing below any root can be trusted.
+        var lostTrack: Bool {
             flags & FSEventStreamEventFlags(kFSEventStreamEventFlagUserDropped
-                | kFSEventStreamEventFlagKernelDropped) != 0
+                | kFSEventStreamEventFlagKernelDropped
+                | kFSEventStreamEventFlagEventIdsWrapped) != 0
         }
 
         /// A watched root itself was moved, deleted or created.
@@ -40,10 +50,11 @@ nonisolated final class FileIndexWatcher {
             flags & FSEventStreamEventFlags(kFSEventStreamEventFlagRootChanged) != 0
         }
 
-        /// Bookkeeping, not a change to anything on disk.
-        var isBookkeeping: Bool {
-            flags & FSEventStreamEventFlags(kFSEventStreamEventFlagHistoryDone
-                | kFSEventStreamEventFlagEventIdsWrapped) != 0
+        /// The end of the replay a stream started from an old event ID: what
+        /// follows is live. Not a change to anything on disk, and its ID is
+        /// not one.
+        var historyDone: Bool {
+            flags & FSEventStreamEventFlags(kFSEventStreamEventFlagHistoryDone) != 0
         }
     }
 
@@ -57,12 +68,14 @@ nonisolated final class FileIndexWatcher {
 
     /// Starts watching `paths` straight away, delivering on `queue`.
     ///
-    /// `since` is where a replacement stream picks up from: restarting with a
-    /// changed set of folders passes the old stream's `latestEventID`, so no
-    /// change in a folder watched by both is lost in between.
+    /// `since` is the last event already accounted for; everything after it
+    /// is delivered, history first. At launch it is the index's stored event
+    /// ID. Restarting with a changed set of folders passes the old stream's
+    /// `latestEventID`, so no change in a folder watched by both is lost in
+    /// between.
     init?(
         paths: [String],
-        since: FSEventStreamEventId = FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
+        since: FSEventStreamEventId = FSEventsGetCurrentEventId(),
         queue: DispatchQueue,
         handler: @escaping ([Event]) -> Void
     ) {
@@ -77,11 +90,11 @@ nonisolated final class FileIndexWatcher {
             copyDescription: nil
         )
 
-        let callback: FSEventStreamCallback = { _, info, count, paths, flags, _ in
+        let callback: FSEventStreamCallback = { _, info, count, paths, flags, ids in
             guard let info else { return }
             let watcher = Unmanaged<FileIndexWatcher>.fromOpaque(info).takeUnretainedValue()
             let list = Unmanaged<CFArray>.fromOpaque(paths).takeUnretainedValue() as? [String] ?? []
-            let events = (0..<min(count, list.count)).map { Event(path: list[$0], flags: flags[$0]) }
+            let events = (0..<min(count, list.count)).map { Event(path: list[$0], flags: flags[$0], id: ids[$0]) }
             watcher.handler(events)
         }
 
@@ -114,9 +127,10 @@ nonisolated final class FileIndexWatcher {
         stop()
     }
 
-    /// The last event this stream has seen, for a replacement to start after.
+    /// The last event this stream has seen — or, before any, the one it
+    /// started from — for a replacement to start after.
     var latestEventID: FSEventStreamEventId {
-        stream.map(FSEventStreamGetLatestEventId) ?? FSEventStreamEventId(kFSEventStreamEventIdSinceNow)
+        stream.map(FSEventStreamGetLatestEventId) ?? FSEventsGetCurrentEventId()
     }
 
     /// Stops watching and releases the stream. A second call does nothing.

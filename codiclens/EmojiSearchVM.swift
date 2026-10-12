@@ -85,8 +85,8 @@ final class EmojiSearchVM {
     /// The dataset, resolved the first time anything actually needs it.
     ///
     /// Deliberately not `EmojiIndex.shared` as a default argument. This view
-    /// model is constructed as `CommandCoordinator`'s own default, which happens
-    /// while the app is launching — and reading `shared` there parsed a 226 KB
+    /// model is constructed with the `PanelController`, which happens while
+    /// the app is launching — and reading `shared` there parsed a 226 KB
     /// JSON on the main thread before the first Panel could appear.
     /// `EmojiIndex.prewarm()` gets it decoded off-thread instead, and this only
     /// ever asks for it once Emoji Mode is being built.
@@ -102,12 +102,15 @@ final class EmojiSearchVM {
     let recents: EmojiRecents
     let preferences: EmojiPreferences
 
-    /// - Parameter index: the dataset to search. Nil means the bundled one,
-    ///   fetched lazily; tests pass their own.
+    /// - Parameters:
+    ///   - index: the dataset to search. Nil means the bundled one, fetched
+    ///     lazily; tests pass their own.
+    ///   - recents, preferences: the app passes the shared ones, which live
+    ///     in Application Support and `UserDefaults`; tests pass their own.
     init(
         index: EmojiIndex? = nil,
-        recents: EmojiRecents = .shared,
-        preferences: EmojiPreferences = .shared
+        recents: EmojiRecents,
+        preferences: EmojiPreferences
     ) {
         self.resolvedIndex = index
         self.recents = recents

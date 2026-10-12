@@ -156,7 +156,7 @@ struct EmojiSearchTests {
         let vm = EmojiSearchVM(
             index: try EmojiIndex.bundled(),
             recents: makeRecents(),
-            preferences: EmojiPreferences(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+            preferences: EmojiPreferences(defaults: ThrowawayDefaults())
         )
         vm.load()
         return vm
@@ -197,7 +197,7 @@ struct EmojiSearchTests {
         let vm = EmojiSearchVM(
             index: index,
             recents: makeRecents([fire]),
-            preferences: EmojiPreferences(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+            preferences: EmojiPreferences(defaults: ThrowawayDefaults())
         )
         vm.load()
 
@@ -251,7 +251,7 @@ struct EmojiSearchTests {
 
     @Test
     func theDefaultToneAppliesWithoutAnOverride() throws {
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let defaults = ThrowawayDefaults()
         let preferences = EmojiPreferences(defaults: defaults)
         preferences.defaultSkinTone = .medium
 
@@ -275,7 +275,7 @@ struct EmojiSearchTests {
         let vm = EmojiSearchVM(
             index: index,
             recents: recents,
-            preferences: EmojiPreferences(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+            preferences: EmojiPreferences(defaults: ThrowawayDefaults())
         )
         vm.load()
         vm.selectedIndex = try #require(vm.flattened.firstIndex { $0.string == "💪" })
@@ -288,7 +288,7 @@ struct EmojiSearchTests {
     func aTonedPickIsRecordedAgainstItsBase() throws {
         let index = try EmojiIndex.bundled()
         let recents = makeRecents()
-        let preferences = EmojiPreferences(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let preferences = EmojiPreferences(defaults: ThrowawayDefaults())
         preferences.defaultSkinTone = .dark
 
         let vm = EmojiSearchVM(index: index, recents: recents, preferences: preferences)
@@ -338,7 +338,7 @@ struct EmojiSearchTests {
     // MARK: - The grid, the selection and the Card are one thing
 
     private func makeVM(tone: SkinTone = .none) throws -> EmojiSearchVM {
-        let preferences = EmojiPreferences(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let preferences = EmojiPreferences(defaults: ThrowawayDefaults())
         preferences.defaultSkinTone = tone
         let vm = EmojiSearchVM(
             index: try EmojiIndex.bundled(),
@@ -493,19 +493,19 @@ struct EmojiSearchTests {
     func anInjectedIndexIsTheOneSearched() throws {
         let index = try EmojiIndex.decode(try #require(payload()))
 
-        let vm = EmojiSearchVM(index: index, recents: makeRecents())
+        let vm = EmojiSearchVM(index: index, recents: makeRecents(), preferences: EmojiPreferences(defaults: ThrowawayDefaults()))
 
         #expect(vm.index === index)
         vm.load()
         #expect(vm.flattened.map(\.string) == ["🔥"])
     }
 
-    /// Constructing the view model must not read `EmojiIndex.shared`: it is
-    /// `CommandCoordinator`'s own default argument, so that read happened while
-    /// the app was launching and parsed 226 KB of JSON on the main thread.
+    /// Constructing the view model must not read `EmojiIndex.shared`: the
+    /// `PanelController` builds one while the app is launching, and that read
+    /// parsed 226 KB of JSON on the main thread.
     @Test
     func theDatasetIsOnlyResolvedWhenSomethingSearchesIt() throws {
-        let vm = EmojiSearchVM(recents: makeRecents())
+        let vm = EmojiSearchVM(recents: makeRecents(), preferences: EmojiPreferences(defaults: ThrowawayDefaults()))
 
         // Nothing has asked for an Emoji yet, so nothing has been decoded.
         #expect(vm.sections.isEmpty)

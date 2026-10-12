@@ -154,6 +154,40 @@ struct FileIndexerTests {
         #expect(try f.source(of: "repo/README.md") == f.path("repo"))
     }
 
+    /// A repo checked out three times is indexed once: the main checkout,
+    /// not the worktrees beside it, unless a worktree is a Source itself or
+    /// the switch is off. Generated code goes with node_modules.
+    @Test func worktreesAndGeneratedCodeStayOutByDefault() throws {
+        let f = try Fixture()
+        try f.make("app/.git/HEAD")
+        try f.make("app/src/main.ts")
+        try f.make("app/src/paraglide/messages/hello.js")
+        try f.make("app/.svelte-kit/output/x.js")
+        try f.make("app-wt-1/.git", contents: "gitdir: \(f.path("app/.git/worktrees/app-wt-1"))")
+        try f.make("app-wt-1/src/main.ts")
+        try f.make("app-wt-2/.git", contents: "gitdir: \(f.path("app/.git/worktrees/app-wt-2"))")
+        try f.make("app-wt-2/src/main.ts")
+
+        try f.sources(["", "app-wt-2"])
+        #expect(try f.indexed == ["", "app", "app/src", "app/src/main.ts", "app-wt-2", "app-wt-2/src", "app-wt-2/src/main.ts"])
+
+        var keepWorktrees = FileIndexRules.defaults
+        keepWorktrees.skipped.remove(.worktrees)
+        #expect(try f.rules(keepWorktrees) == ["", "app-wt-2"])
+        #expect(try f.indexed.isSuperset(of: ["app-wt-1", "app-wt-1/src/main.ts"]))
+    }
+
+    @Test func aFolderThatBecomesAWorktreeLeaves() throws {
+        let f = try Fixture()
+        try f.make("checkout/notes.txt")
+        try f.sources([""])
+
+        try f.make("checkout/.git", contents: "gitdir: /elsewhere/.git/worktrees/checkout")
+        try f.events(["checkout/.git"])
+
+        #expect(try f.indexed == [""])
+    }
+
     @Test func aSecondCrawlKeepsRowsAndFindsAMoveByInode() throws {
         let f = try Fixture()
         try f.make("a/report.pdf")
@@ -533,12 +567,12 @@ struct FileIndexerTests {
         for index in 0..<(FileIndexer.batchSize + 20) { try f.make("bulk/\(index).txt") }
         var wrote = 0
         var reading: [Bool] = []
-        let indexer = FileIndexer(writer: f.writer) { progress in
+        let indexer = FileIndexer(writer: f.writer, onProgress: { progress in
             switch progress {
             case .wrote: wrote += 1
             case .reading(_, let isReading): reading.append(isReading)
             }
-        }
+        })
 
         for root in try indexer.setSources([(path: f.root, isEnabled: true)]) { try indexer.crawl(root) }
 

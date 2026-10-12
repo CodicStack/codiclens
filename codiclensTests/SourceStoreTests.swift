@@ -6,7 +6,7 @@ import Testing
 /// `UserDefaults` suite, so nothing reads or writes the app's own.
 @MainActor
 struct SourceStoreTests {
-    private let defaults = UserDefaults(suiteName: "codiclens-tests-\(UUID().uuidString)")!
+    private let defaults = ThrowawayDefaults()
 
     @Test func aNewInstallHasTheBuiltInSourcesAndThreeFoldersAllOn() {
         let store = SourceStore(defaults: defaults)
@@ -62,7 +62,7 @@ struct SourceStoreTests {
 
     // MARK: - Skipping
 
-    @Test func aNewInstallSkipsCachesDependenciesAndBundles() {
+    @Test func aNewInstallSkipsCachesDependenciesBundlesAndWorktrees() {
         let store = SourceStore(defaults: defaults)
 
         #expect(store.fileIndexRules == .defaults)
@@ -79,7 +79,7 @@ struct SourceStoreTests {
         store.removeSkipPattern(SkipPattern("Archive/")!)
 
         let reopened = SourceStore(defaults: defaults)
-        #expect(reopened.fileIndexRules.skipped == [.dependencies, .bundles, .repos])
+        #expect(reopened.fileIndexRules.skipped == [.dependencies, .bundles, .repos, .worktrees])
         #expect(reopened.fileIndexRules.patterns.map(\.text) == ["*.log", "**/fixtures/**"])
     }
 

@@ -24,16 +24,28 @@ private enum HotKey {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Whether this process is the unit-test host. XCTest names its
+    /// configuration file in the environment of the app it injects the test
+    /// bundle into, Swift Testing's runs included.
+    ///
+    /// The test host is the app itself, so a launch that started anything
+    /// would crawl the user's folders into their own File Index, record their
+    /// clipboard, scan `/Applications` and take Cmd+Space from the copy of
+    /// the app they are running. It starts nothing: tests build what they
+    /// need, over their own folders and stores.
+    static let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
     var panelController: PanelController?
 
     /// Clipboard History's recorder. Owned here rather than by the `App` value
     /// so that starting it and stopping it sit on the same object.
-    private let pasteboardWatcher = PasteboardWatcher(history: .shared)
+    private var pasteboardWatcher: PasteboardWatcher?
 
     private var hotKeyRefs: [EventHotKeyRef] = []
     private var hotKeyHandlerRef: EventHandlerRef?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !Self.isTestHost else { return }
         panelController = PanelController()
         // Off-thread, so neither launch nor the first Emoji Mode waits on the
         // 226 KB dataset being decoded.
@@ -41,7 +53,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Opens the File Index and crawls the folder Sources, off the main
         // thread; File Results are whatever has been read so far.
         FileIndex.shared.start()
-        pasteboardWatcher.start()
+        pasteboardWatcher = PasteboardWatcher(history: .shared)
+        pasteboardWatcher?.start()
         installHotKeyHandler()
         register(HotKey.panel, as: HotKeyID.panel)
         register(HotKey.emoji, as: HotKeyID.emoji)
@@ -54,8 +67,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// handler, the hotkeys, both FSEvents streams and the pasteboard timer all
     /// outlive the decision to quit.
     func applicationWillTerminate(_ notification: Notification) {
+        guard !Self.isTestHost else { return }
         unregisterHotKeys()
-        pasteboardWatcher.stop()
+        pasteboardWatcher?.stop()
         panelController?.tearDown()
         panelController = nil
         AppIndex.shared.stop()

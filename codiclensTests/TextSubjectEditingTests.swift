@@ -15,7 +15,7 @@ struct TextSubjectEditingTests {
     ) -> (CommandCoordinator, ClipboardHistory) {
         let history = ClipboardHistory(store: InMemoryClipboardStore())
         for text in texts { history.recordText(text) }
-        let coordinator = CommandCoordinator(
+        let coordinator = CommandCoordinator.isolated(
             runner: RecordingEffectRunner(),
             history: history,
             index: inertAppIndex

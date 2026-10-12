@@ -12,9 +12,9 @@ struct EmojiCommandTests {
         let emojiVM = EmojiSearchVM(
             index: try EmojiIndex.bundled(),
             recents: EmojiRecents(store: InMemoryEmojiRecentsStore()),
-            preferences: EmojiPreferences(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+            preferences: EmojiPreferences(defaults: ThrowawayDefaults())
         )
-        let coordinator = CommandCoordinator(
+        let coordinator = CommandCoordinator.isolated(
             runner: runner,
             history: ClipboardHistory(store: InMemoryClipboardStore()),
             emojiVM: emojiVM,
@@ -337,10 +337,10 @@ struct EmojiCommandTests {
         let emojiVM = EmojiSearchVM(
             index: try EmojiIndex.bundled(),
             recents: EmojiRecents(store: InMemoryEmojiRecentsStore()),
-            preferences: EmojiPreferences(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+            preferences: EmojiPreferences(defaults: ThrowawayDefaults())
         )
         emojiVM.preferences.defaultSkinTone = .dark
-        let coordinator = CommandCoordinator(
+        let coordinator = CommandCoordinator.isolated(
             runner: runner,
             history: ClipboardHistory(store: InMemoryClipboardStore()),
             emojiVM: emojiVM,

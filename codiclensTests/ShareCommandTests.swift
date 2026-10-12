@@ -17,7 +17,7 @@ struct ShareCommandTests {
     private func makeCoordinator() -> (CommandCoordinator, RecordingEffectRunner, ClipboardHistory) {
         let runner = RecordingEffectRunner()
         let history = ClipboardHistory(store: InMemoryClipboardStore())
-        let coordinator = CommandCoordinator(runner: runner, history: history, index: inertAppIndex)
+        let coordinator = CommandCoordinator.isolated(runner: runner, history: history, index: inertAppIndex)
         return (coordinator, runner, history)
     }
 
