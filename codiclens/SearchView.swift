@@ -225,6 +225,15 @@ struct ResultsListView: View {
             // this value, so the highlight still lands on the frame the key was
             // pressed.
             .animation(Motion.resize, value: height)
+            // The Panel's own preview takes the Slab's place, so closing it
+            // builds this list again, scrolled to the top. Back to the
+            // selected row, where moving the selection keeps it: a jump, not
+            // a scroll, since the list is only now arriving.
+            .onAppear {
+                let index = coordinator.currentSelectedIndex
+                guard index > 0, index < coordinator.currentResults.count else { return }
+                proxy.scrollTo(coordinator.currentResults[index].id, anchor: .center)
+            }
             .onChange(of: coordinator.currentSelectedIndex) { _, newIndex in
                 if newIndex < coordinator.currentResults.count {
                     withAnimation(Motion.snappy) {
