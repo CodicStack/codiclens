@@ -3,18 +3,19 @@ import Vision
 
 /// Reading the text out of an image.
 ///
-/// The whole of the app's Vision use, deliberately. `CommandCoordinator`
+/// The whole of the app's Vision use, deliberately. Two callers, one
+/// configuration: `SystemEffectRunner` for the OCR Action, and the File Index
+/// reading a screenshot's words (`FileContentReader`). `CommandCoordinator`
 /// returns `.ocr(URL)` and knows nothing about this file — see
-/// `docs/adr/0007-async-action-behind-the-effect-seam.md`. `SystemEffectRunner`
-/// is the only caller, and no test reaches here: a test hands the coordinator a
-/// canned string through the same callback the runner uses, so Vision never
-/// runs under `xcodebuild test`.
+/// `docs/adr/0007-async-action-behind-the-effect-seam.md`; a coordinator test
+/// hands it a canned string through the runner's callback instead. Off the
+/// main actor, whoever calls.
 ///
 /// The configuration is fixed in code and has no Settings knob. `.accurate`
 /// with language detection and correction on is what makes the OCR Text
 /// readable prose rather than a bag of characters; the faster level is the
 /// wrong trade for an Action the user is waiting on the result of.
-enum OCR {
+nonisolated enum OCR {
 
     /// The OCR Text of the image at `url`, or `nil` when there is none.
     ///
@@ -22,6 +23,7 @@ enum OCR {
     /// than an empty string — see `CONTEXT.md`. A Vision failure is reported
     /// the same way, because to the user the two are the same answer: nothing
     /// to show.
+    @concurrent
     static func text(in url: URL) async -> String? {
         var request = RecognizeTextRequest()
         request.recognitionLevel = .accurate

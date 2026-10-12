@@ -10,6 +10,9 @@ nonisolated struct ActionTarget: Identifiable {
     /// a file found through Finder. `nil` for an app or a sharing service.
     let thumbnailURL: URL?
     let subtitle: String
+    /// Where `subtitle` is a Passage, its matched words
+    /// (`ResultDisplayItem.subtitleMarks`).
+    let subtitleMarks: [Range<Int>]?
     let url: URL?
     let sharingService: NSSharingService?
 
@@ -18,6 +21,7 @@ nonisolated struct ActionTarget: Identifiable {
         icon: NSImage,
         thumbnailURL: URL? = nil,
         subtitle: String = "",
+        subtitleMarks: [Range<Int>]? = nil,
         url: URL?,
         sharingService: NSSharingService?
     ) {
@@ -25,8 +29,29 @@ nonisolated struct ActionTarget: Identifiable {
         self.icon = icon
         self.thumbnailURL = thumbnailURL
         self.subtitle = subtitle
+        self.subtitleMarks = subtitleMarks
         self.url = url
         self.sharingService = sharingService
+    }
+
+    /// A folder as a Move To… or Copy To… destination: Finder's name for it
+    /// ("Desktop", not "Desktop" spelled from the path, in any language) and
+    /// where it is. From any thread; the File Index's folders are made off the
+    /// main one.
+    static func folder(at url: URL) -> ActionTarget {
+        let path = url.standardizedFileURL.path
+        let icon = NSWorkspace.shared.icon(forFile: path)
+        icon.size = NSSize(width: 32, height: 32)
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let isInHome = path == home || path.hasPrefix(home + "/")
+        let subtitle = isInHome ? "~" + path.dropFirst(home.count) : path
+        return ActionTarget(
+            name: FileManager.default.displayName(atPath: path),
+            icon: icon,
+            subtitle: subtitle,
+            url: url.standardizedFileURL,
+            sharingService: nil
+        )
     }
 
     @MainActor

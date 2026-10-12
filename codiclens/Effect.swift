@@ -63,6 +63,32 @@ enum Effect {
     /// snapshot URL; file Subjects pass the original file URL.
     case rotateImage(URL, direction: ImageActions.RotationDirection, generation: Int)
 
+    /// Move, copy, rename or compress a file or folder, answered with where
+    /// the result now is. Never overwrites anything; see `FileOperation`. No
+    /// `.hide` beside it, for the reason Rotate has none: the Subject retargets
+    /// to the answer *in* the Panel. The generation drops an answer meant for a
+    /// Panel session that has since been reset.
+    case fileOperation(FileOperation, generation: Int)
+
+    /// Transcribe the audio or video file at `URL` with Codictate's command,
+    /// answered with the transcript or why there is none. No `.hide`, for the
+    /// reason OCR has none: the transcript lands *in* the Panel as a text
+    /// Subject. The generation drops an answer meant for a Panel session that
+    /// has since been reset. See `Transcription`.
+    case transcribe(URL, generation: Int)
+
+    /// Stop the transcription under way. Its answer, a cancelled run, is
+    /// dropped by its generation.
+    case cancelTranscription
+
+    /// Open a recording or a video in QuickTime Player at `seconds` and play
+    /// it, by AppleScript — the moment a File Result matched at. Answered
+    /// with whether QuickTime did, because the first time macOS asks the user
+    /// whether Codiclens may, and they can say no; then the file opens the
+    /// ordinary way. No `.hide` beside it: the Panel says "Opening at 14:02…"
+    /// until the answer, and QuickTime coming forward is what dismisses it.
+    case openAtMoment(URL, seconds: Double, generation: Int)
+
     // Everything else
     case runAppleScript(String)
     case share(Payload, via: NSSharingService)
@@ -75,7 +101,7 @@ enum Effect {
 extension Effect: Equatable {
     static func == (lhs: Effect, rhs: Effect) -> Bool {
         switch (lhs, rhs) {
-        case (.hide, .hide), (.showSettings, .showSettings):
+        case (.hide, .hide), (.showSettings, .showSettings), (.cancelTranscription, .cancelTranscription):
             true
         case let (.open(a), .open(b)):
             a == b
@@ -101,6 +127,12 @@ extension Effect: Equatable {
             ta == tb && ga == gb
         case let (.rotateImage(ua, da, ga), .rotateImage(ub, db, gb)):
             ua == ub && da == db && ga == gb
+        case let (.fileOperation(oa, ga), .fileOperation(ob, gb)):
+            oa == ob && ga == gb
+        case let (.transcribe(ua, ga), .transcribe(ub, gb)):
+            ua == ub && ga == gb
+        case let (.openAtMoment(ua, sa, ga), .openAtMoment(ub, sb, gb)):
+            ua == ub && sa == sb && ga == gb
         case let (.runAppleScript(a), .runAppleScript(b)):
             a == b
         case let (.share(pa, sa), .share(pb, sb)):

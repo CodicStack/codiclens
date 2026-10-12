@@ -79,7 +79,7 @@ struct SourceStoreTests {
         store.removeSkipPattern(SkipPattern("Archive/")!)
 
         let reopened = SourceStore(defaults: defaults)
-        #expect(reopened.fileIndexRules.skipped == [.dependencies, .bundles, .repos, .worktrees])
+        #expect(reopened.fileIndexRules.skipped == [.dependencies, .bundles, .repos, .worktrees, .gitIgnored])
         #expect(reopened.fileIndexRules.patterns.map(\.text) == ["*.log", "**/fixtures/**"])
     }
 

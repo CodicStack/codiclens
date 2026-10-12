@@ -167,6 +167,19 @@ enum ActionHandler {
     case openFile, openWith, revealInFinder, moveToTrash
     case copyPath, quickLook
 
+    /// The file itself on the pasteboard, so Finder and Mail paste the file.
+    case copyFile
+
+    /// Move To… and Copy To…: not Final, the Target is a folder. The Subject
+    /// follows the file to where it landed. See `FileOperation`.
+    case moveTo, copyTo
+
+    /// Opens the name for editing on the Subject Card; Enter there renames.
+    case rename
+
+    /// Zips beside the original, and the Subject becomes the zip.
+    case compress
+
     /// Reading the text out of an image Subject.
     ///
     /// Final in the sense that it takes no Target, and the one Final Action
@@ -175,6 +188,11 @@ enum ActionHandler {
     case ocr
     case qrCode
     case rotate(ImageActions.RotationDirection)
+
+    /// Turning an audio or video file into text with Codictate. Like OCR it
+    /// takes no Target and does not dismiss the Panel: the transcript becomes
+    /// the Subject in it. See `Transcription`.
+    case transcribe
     case openInPreview
 
     /// Promoting a Target into the Subject, so a thing found while looking for
@@ -218,6 +236,16 @@ struct SubjectAction: Identifiable {
         icon: .sfSymbol("text.viewfinder"),
         isFinal: true,
         handler: .ocr
+    )
+
+    /// Turning what an audio or video file says into text. Listed whether or
+    /// not Codictate is installed: running it without Codictate says where to
+    /// get it, which a missing row never could.
+    private static let transcribe = SubjectAction(
+        name: "Transcribe",
+        icon: .sfSymbol("waveform"),
+        isFinal: true,
+        handler: .transcribe
     )
 
     private static let rotateLeft = SubjectAction(
@@ -272,9 +300,9 @@ struct SubjectAction: Identifiable {
         if case .app(let bundleId, _) = subject.kind, bundleId == "com.apple.finder" {
             return [
                 .init(name: "Open File", icon: .sfSymbol("doc"), isFinal: false, handler: .openFile),
+                .init(name: "Quick Look", icon: .sfSymbol("eye"), isFinal: false, handler: .quickLook),
                 .init(name: "Reveal in Finder", icon: .sfSymbol("folder"), isFinal: false, handler: .revealInFinder),
                 .init(name: "Copy Path", icon: .sfSymbol("doc.on.clipboard"), isFinal: false, handler: .copyPath),
-                .init(name: "Quick Look", icon: .sfSymbol("eye"), isFinal: false, handler: .quickLook),
                 .init(name: "Move to Trash", icon: .sfSymbol("trash"), isFinal: false, handler: .moveToTrash),
                 useAsSubject,
             ]
@@ -290,16 +318,11 @@ struct SubjectAction: Identifiable {
                 .init(name: "Copy Path", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .copyPath),
             ]
 
-        // A file's content type decides whether it can be read, not its kind:
-        // an image file has OCR, a `.txt` and a folder do not. PDF
-        // deliberately does not conform to `.image` and is out of scope —
-        // that `Thumbnails` draws a PDF's first page is a different question
-        // and is not copied here.
         case .file(let contentType):
-            return fileActions(includingOCR: contentType.conforms(to: .image))
+            return fileActions(adding: contentActions(for: contentType))
 
         case .folder:
-            return fileActions(includingOCR: false)
+            return fileActions(adding: [])
 
         case .builtIn(.settings):
             return [
@@ -344,42 +367,65 @@ struct SubjectAction: Identifiable {
         }
     }
 
-    /// What a file or a folder can have done to it.
+    /// What a file or a folder can have done to it, most used first.
     ///
-    /// Reachable for the first time: `.file` and `.folder` were dead branches
-    /// until a Path Subject and "Use as Subject" started constructing them —
-    /// see `docs/adr/0008-a-file-can-be-a-subject.md`.
-    private static func fileActions(includingOCR: Bool) -> [SubjectAction] {
-        var actions: [SubjectAction] = [
+    /// Ordered by how often each is reached for, because a list of fourteen is
+    /// read from the top: Quick Look sat below Move to Trash once and could not
+    /// be found. What the file's type adds goes straight after Quick Look, and
+    /// Move to Trash is last, where nothing is pressed on the way past it.
+    ///
+    /// Reachable since a Path Subject and "Use as Subject" started
+    /// constructing `.file` and `.folder` — see
+    /// `docs/adr/0008-a-file-can-be-a-subject.md`.
+    private static func fileActions(adding contentActions: [SubjectAction]) -> [SubjectAction] {
+        [
             .init(name: "Open", icon: .sfSymbol("doc"), isFinal: true, handler: .openFile),
-        ]
-        if includingOCR {
-            actions.append(ocr)
-            actions.append(rotateLeft)
-            actions.append(rotateRight)
-        }
-        actions.append(.init(
-            name: "Open With…",
-            icon: .sfSymbol("arrow.up.forward.app.fill"),
-            isFinal: false,
-            handler: .openWith
-        ))
-        if includingOCR { actions.append(openInPreview) }
-        actions.append(contentsOf: [
-            .init(name: "Reveal in Finder", icon: .sfSymbol("folder"), isFinal: true, handler: .revealInFinder),
-            .init(name: "Copy Path", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .copyPath),
-            share,
-            .init(name: "Move to Trash", icon: .sfSymbol("trash"), isFinal: true, handler: .moveToTrash),
             .init(name: "Quick Look", icon: .sfSymbol("eye"), isFinal: true, handler: .quickLook),
+        ]
+        + contentActions
+        + [
+            .init(name: "Reveal in Finder", icon: .sfSymbol("folder"), isFinal: true, handler: .revealInFinder),
+            share,
+            .init(
+                name: "Open With…",
+                icon: .sfSymbol("arrow.up.forward.app.fill"),
+                isFinal: false,
+                handler: .openWith
+            ),
+            .init(name: "Copy File", icon: .sfSymbol("doc.on.doc"), isFinal: true, handler: .copyFile),
+            .init(name: "Copy Path", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .copyPath),
+            .init(name: "Move To…", icon: .sfSymbol("arrowshape.turn.up.right"), isFinal: false, handler: .moveTo),
+            .init(name: "Copy To…", icon: .sfSymbol("plus.square.on.square"), isFinal: false, handler: .copyTo),
+            .init(name: "Rename", icon: .sfSymbol("pencil"), isFinal: true, handler: .rename),
+            .init(name: "Compress", icon: .sfSymbol("doc.zipper"), isFinal: true, handler: .compress),
             useAsSubject,
-        ])
-        return actions
+            .init(name: "Move to Trash", icon: .sfSymbol("trash"), isFinal: true, handler: .moveToTrash),
+        ]
+    }
+
+    /// What a file's content type adds to the file Actions: the things that
+    /// kind of file is *for*. The type decides, not the kind — an image file
+    /// has these, a `.txt` and a folder do not. PDF deliberately does not
+    /// conform to `.image` and is out of scope; that `Thumbnails` draws a PDF's
+    /// first page is a different question and is not copied here.
+    ///
+    /// Audio and video get Transcribe. An MPEG-2 transport stream is left out:
+    /// `.ts` is declared one, so every TypeScript file would offer it.
+    private static func contentActions(for contentType: UTType) -> [SubjectAction] {
+        if contentType.conforms(to: .image) {
+            return [ocr, rotateLeft, rotateRight, openInPreview]
+        }
+        if contentType.conforms(to: .audiovisualContent), !contentType.conforms(to: .mpeg2TransportStream) {
+            return [transcribe]
+        }
+        return []
     }
 
     private static func clipboardActions(for item: ClipboardItem) -> [SubjectAction] {
         var actions: [SubjectAction] = [
             .init(name: "Paste", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .paste),
             .init(name: "Copy", icon: .sfSymbol("doc.on.doc"), isFinal: true, handler: .copy),
+            .init(name: "Quick Look", icon: .sfSymbol("eye"), isFinal: true, handler: .quickLook),
             .init(name: "Paste as Plain Text", icon: .sfSymbol("text.alignleft"), isFinal: true, handler: .pastePlain),
         ]
 
@@ -412,7 +458,6 @@ struct SubjectAction: Identifiable {
             }
         }
 
-        actions.append(.init(name: "Quick Look", icon: .sfSymbol("eye"), isFinal: true, handler: .quickLook))
         actions.append(.init(name: "Delete from History", icon: .sfSymbol("trash"), isFinal: true, handler: .deleteFromHistory))
 
         return actions

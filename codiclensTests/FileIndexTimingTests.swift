@@ -5,11 +5,23 @@ import Testing
 
 private let timingRuns = ProcessInfo.processInfo.environment["CODICLENS_TIME_FILE_INDEX"].flatMap { Int($0) }
 
+/// The rules a measurement runs under: the defaults, or with
+/// `TEST_RUNNER_CODICLENS_TIME_WITHOUT_GIT_IGNORED=1` the defaults with
+/// "Ignored by git" off, to see what the switch is worth. Both timing suites
+/// read it.
+let timingRules: FileIndexRules = {
+    var rules = FileIndexRules.defaults
+    if ProcessInfo.processInfo.environment["CODICLENS_TIME_WITHOUT_GIT_IGNORED"] == "1" {
+        rules.skipped.remove(.gitIgnored)
+    }
+    return rules
+}()
+
 /// The File Index over this Mac's real Downloads, Documents and Desktop under
-/// the default skip rules: how long the first crawl takes, how big the
-/// database comes out and what fills it, how long a launch takes to catch up
-/// by FSEvents replay, what switching Repos on and off again costs, and how
-/// long a search takes. Not a pass/fail test — the numbers depend on what is
+/// the default skip rules (`timingRules`): how long the first crawl takes, how
+/// big the database comes out and what fills it, how long a launch takes to
+/// catch up by FSEvents replay, what switching Repos and "Ignored by git" off
+/// and on again costs, and how long a search takes. Not a pass/fail test — the numbers depend on what is
 /// on disk — so it is off unless asked for. The crawl only reads the three
 /// folders; the database goes to a temporary folder, never Application
 /// Support.
@@ -35,8 +47,9 @@ struct FileIndexTimingTests {
 
     private static func measure(url: URL, runs: Int) async throws {
         let writer = try FileIndexWriter(url: url)
-        let indexer = FileIndexer(writer: writer)
+        let indexer = FileIndexer(writer: writer, rules: timingRules)
         let roots = SourceStore.defaultFolders.map { FileIndexer.realPath($0) }
+        print("rules: \(timingRules.skipped.map(\.rawValue).sorted().joined(separator: ", "))")
 
         let crawl = ContinuousClock().measure {
             let toCrawl = (try? indexer.setSources(roots.map { (path: $0, isEnabled: true) })) ?? []
@@ -45,7 +58,7 @@ struct FileIndexTimingTests {
         try writer.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
         let reader = FileIndexReader(url: url)
-        let counts = reader.counts()
+        let counts = reader.counts().mapValues(\.total)
         let size = (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
         print("crawl \(Self.ms([crawl])), \(counts.values.reduce(0, +)) rows, \(size / 1024) KB")
         for root in roots { print("  \(root): \(counts[root] ?? 0)") }
@@ -66,15 +79,22 @@ struct FileIndexTimingTests {
 
         try Self.printLargest(writer: writer)
 
-        // The Repos switch, the biggest one under the defaults.
-        var reposSkipped = FileIndexRules.defaults
-        reposSkipped.skipped.insert(.repos)
-        let prune = ContinuousClock().measure { _ = try? indexer.setRules(reposSkipped) }
-        print("Repos on (prune): \(Self.ms([prune])), \(reader.counts().values.reduce(0, +)) rows")
-        let restore = ContinuousClock().measure {
-            for root in (try? indexer.setRules(.defaults)) ?? [] { try? indexer.crawl(root) }
+        // The Repos switch, the biggest one under the defaults, and "Ignored
+        // by git": each one way and back.
+        for group in [FileIndexRules.SkipGroup.repos, .gitIgnored] {
+            var toggled = timingRules
+            if toggled.skips(group) { toggled.skipped.remove(group) } else { toggled.skipped.insert(group) }
+            var previous = timingRules
+            for rules in [toggled, timingRules] {
+                let how = rules.skipsAtLeast(previous) ? "prune" : "crawl"
+                let time = ContinuousClock().measure {
+                    for root in (try? indexer.setRules(rules)) ?? [] { try? indexer.crawl(root) }
+                }
+                print("\(group.rawValue) \(rules.skips(group) ? "on" : "off") (\(how)): \(Self.ms([time])), "
+                      + "\(reader.counts().values.map(\.total).reduce(0, +)) rows")
+                previous = rules
+            }
         }
-        print("Repos off (crawl): \(Self.ms([restore])), \(reader.counts().values.reduce(0, +)) rows")
 
         print("query       hits        first search  median")
         for query in Self.queries {
@@ -104,7 +124,7 @@ struct FileIndexTimingTests {
         let crawled = Mutex(0)
         let replayed = Mutex(0)
         let finished = Mutex(false)
-        let indexer = FileIndexer(writer: writer, onProgress: { progress in
+        let indexer = FileIndexer(writer: writer, rules: timingRules, onProgress: { progress in
             if case .reading(_, true) = progress { crawled.withLock { $0 += 1 } }
         })
         var watcher: FileIndexWatcher?

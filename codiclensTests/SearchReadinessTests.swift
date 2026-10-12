@@ -13,12 +13,13 @@ import Testing
 @MainActor
 struct SearchReadinessTests {
 
-    private func makeCoordinator(index: AppIndex) -> CommandCoordinator {
+    private func makeCoordinator(index: AppIndex, schedule: HeldSearchSchedule? = nil) -> CommandCoordinator {
         CommandCoordinator.isolated(
             runner: RecordingEffectRunner(),
             history: ClipboardHistory(store: InMemoryClipboardStore()),
             index: index,
-            searchFiles: { _ in [] }
+            searchFiles: { _ in [] },
+            searchSchedule: schedule
         )
     }
 
@@ -75,17 +76,18 @@ struct SearchReadinessTests {
 
     // MARK: - Once it has
 
-    /// The other half: with the Index in, and the list below the apps in once
-    /// typing pauses, zero matches is an answer. The message is allowed and
+    /// The other half: with the Index in, and the list below the apps in for
+    /// this Query, zero matches is an answer. The message is allowed and
     /// the Panel is entitled to shake — and that is all. The Query does not
     /// turn into text on its own; ⌘E does that (ADR 0012).
     @Test func aQueryPutAfterTheIndexLandsIsAnswered() async throws {
         let (index, root) = try await populatedIndex()
         defer { try? FileManager.default.removeItem(at: root) }
-        let coordinator = makeCoordinator(index: index)
+        let schedule = HeldSearchSchedule()
+        let coordinator = makeCoordinator(index: index, schedule: schedule)
 
         coordinator.subjectVM.searchText = "zzqqzz"
-        await coordinator.subjectVM.searchSources()
+        await schedule.runSearches()
 
         #expect(coordinator.subjectVM.isIndexReady)
         #expect(coordinator.canReportNoResults)

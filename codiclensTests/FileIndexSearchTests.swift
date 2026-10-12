@@ -178,6 +178,6 @@ struct FileIndexSearchTests {
             Self.documents + "/a.pdf", Self.documents + "/b.pdf", Self.downloads + "/c.pdf"
         ])
 
-        #expect(index.reader.counts() == [Self.documents: 2, Self.downloads: 1])
+        #expect(index.reader.counts().mapValues(\.total) == [Self.documents: 2, Self.downloads: 1])
     }
 }

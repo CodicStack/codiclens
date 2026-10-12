@@ -48,13 +48,16 @@ struct FileIndexWatcherTests {
         defer { index.stop() }
 
         index.start()
+        // Both rows in, and the file's contents read by the backfill.
         await waitUntil(index) { index.counts[folder.path("Source")] == SourceCounts(indexed: 2, total: 2) }
         #expect(index.search("existing").map(\.name) == ["existing.txt"])
 
-        try folder.makeFile("Source/arrived later.txt")
-        await waitUntil(index) { !index.search("arrived").isEmpty }
+        try folder.makeFile("Source/arrived later.txt", contents: "kvittering for husleje")
+        await waitUntil(index) { index.counts[folder.path("Source")] == SourceCounts(indexed: 3, total: 3) }
         #expect(index.search("arrived").map(\.name) == ["arrived later.txt"])
-        #expect(index.counts[folder.path("Source")] == SourceCounts(indexed: 3, total: 3))
+        let byWords = index.search("kvittering")
+        #expect(byWords.map(\.name) == ["arrived later.txt"], "a changed file's words are read straight away")
+        #expect(byWords.first?.passage?.excerpt == "kvittering for husleje")
     }
 
     /// Waits until `condition` holds, looking again each time the File Index

@@ -40,3 +40,6 @@ Pods/
 
 # Coverage artefacts from running the binary directly
 default.profraw
+
+# llama.cpp, built by Scripts/build-llama.sh
+Vendor/

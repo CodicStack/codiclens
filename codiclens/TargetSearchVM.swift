@@ -12,6 +12,8 @@ class TargetSearchVM {
                 // stop its `mdfind` now rather than when the debounce lands.
                 cancelFileSearch()
                 fileSearchSubject.send(searchText)
+            } else if isFolderSearchMode {
+                searchFolders()
             } else {
                 filterTargets()
             }
@@ -24,6 +26,12 @@ class TargetSearchVM {
     var filteredTargets: [ActionTarget] = []
 
     private var isFileSearchMode = false
+
+    /// Move To… and Copy To…: the destination folders, then the File Index's
+    /// folders as the Query is typed. Bumped per Query, so a late answer for
+    /// one already gone is dropped.
+    private var isFolderSearchMode = false
+    private var folderSearchGeneration = 0
     private let fileSearchSubject = PassthroughSubject<String, Never>()
     private let shareTargetProvider: @MainActor (Payload) -> [ActionTarget]
     nonisolated private let searchFiles: FileIndex.Search
@@ -33,7 +41,8 @@ class TargetSearchVM {
     /// terminated — by the next keystroke and by leaving file search.
     private(set) var fileSearch: FileTargetSearch?
 
-    /// - Parameter searchFiles: the File Index, asked before `mdfind`.
+    /// - Parameter searchFiles: the File Index, asked before `mdfind`, and for
+    ///   folders by Move To… and Copy To….
     init(
         shareTargetProvider: @escaping @MainActor (Payload) -> [ActionTarget] = {
             ActionTarget.shareTargets(for: $0)
@@ -52,7 +61,7 @@ class TargetSearchVM {
     }
 
     func loadTargets(for subject: Subject, action: SubjectAction) {
-        leaveFileSearchMode()
+        leaveSearchModes()
         searchText = ""
 
         // "Use as Subject" finds a file or an app the same way Finder's own
@@ -78,7 +87,9 @@ class TargetSearchVM {
         // Share is deliberately absent: its Targets come from the *Payload*,
         // not the Subject — a Clipboard Image shares as its stored PNG and a
         // Clipboard Item has no URL of its own — and only the coordinator can
-        // resolve one. It calls `loadShareTargets` instead.
+        // resolve one. It calls `loadShareTargets` instead. Move To… and Copy
+        // To… are absent for the same kind of reason: their folders come from
+        // the Sources, and the coordinator calls `loadFolderTargets`.
         switch action.handler {
         case .openWith:
             allTargets = ActionTarget.openWithTargets(for: subject)
@@ -94,9 +105,20 @@ class TargetSearchVM {
     /// Clipboard Item's content lives in the history rather than in the
     /// Subject.
     func loadShareTargets(for payload: Payload) {
-        leaveFileSearchMode()
+        leaveSearchModes()
         searchText = ""
         allTargets = shareTargetProvider(payload)
+        filteredTargets = allTargets
+        selectedIndex = 0
+    }
+
+    /// The destinations Move To… and Copy To… list before anything is typed.
+    /// Typing filters them and adds the File Index's folders below them.
+    func loadFolderTargets(_ folders: [URL]) {
+        leaveSearchModes()
+        searchText = ""
+        isFolderSearchMode = true
+        allTargets = folders.map(ActionTarget.folder(at:))
         filteredTargets = allTargets
         selectedIndex = 0
     }
@@ -144,6 +166,41 @@ class TargetSearchVM {
         }
     }
 
+    /// Move To… and Copy To… as the Query changes: the destination folders
+    /// that match, at once, then the File Index's folders below them.
+    ///
+    /// The File Index is read off the main thread and answers in one go, so
+    /// "Searching…" holds until it has — otherwise a Query no destination
+    /// matched would say "No results" and then grow rows.
+    private func searchFolders() {
+        filterTargets()
+        folderSearchGeneration += 1
+        guard !searchText.isEmpty else {
+            isSearching = false
+            return
+        }
+
+        let generation = folderSearchGeneration
+        let query = searchText
+        let searchFiles = searchFiles
+        isSearching = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let found = searchFiles(query)
+                .filter { $0.kind == .folder }
+                .map { ActionTarget.folder(at: $0.url) }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.isFolderSearchMode,
+                      self.folderSearchGeneration == generation else { return }
+                // Appended, so nothing already on screen moves.
+                let shown = Set(self.filteredTargets.compactMap { $0.url?.standardizedFileURL.path })
+                self.filteredTargets += found.filter {
+                    !shown.contains($0.url?.standardizedFileURL.path ?? "")
+                }
+                self.isSearching = false
+            }
+        }
+    }
+
     /// Whether `search` still answers the Query on screen: file search is
     /// still the Target source, the Query has not moved on, and nothing has
     /// cancelled it.
@@ -163,17 +220,20 @@ class TargetSearchVM {
     }
 
     func reset() {
-        leaveFileSearchMode()
+        leaveSearchModes()
         searchText = ""
         allTargets = []
         filteredTargets = []
         selectedIndex = 0
     }
 
-    /// Revokes file search before another Target source takes ownership.
-    /// Queued debounce and completion handlers check this mode before writing.
-    private func leaveFileSearchMode() {
+    /// Revokes file and folder search before another Target source takes
+    /// ownership. Queued debounce and completion handlers check these modes
+    /// before writing.
+    private func leaveSearchModes() {
         isFileSearchMode = false
+        isFolderSearchMode = false
+        folderSearchGeneration += 1
         isSearching = false
         cancelFileSearch()
     }

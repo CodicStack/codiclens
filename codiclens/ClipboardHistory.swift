@@ -150,6 +150,10 @@ final class ClipboardHistory {
         return store.textPreviewURL(for: item)
     }
 
+    /// Where Quick Look's text copy of a file goes: the same `previews/` the
+    /// text of a Clipboard Item is written to for it.
+    var fileTextPreviewsDirectory: URL? { store.fileTextPreviewsDirectory }
+
     // MARK: - Persistence
 
     private func trimAndSave() {

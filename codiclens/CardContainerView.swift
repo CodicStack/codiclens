@@ -2,6 +2,9 @@ import SwiftUI
 
 struct CardContainerView: View {
     @Bindable var coordinator: CommandCoordinator
+    /// The Panel's own preview, which answers the arrows and Space while it
+    /// is open.
+    let previewDriver: PassagePreviewDriver
     @FocusState private var isSearchFocused: Bool
 
     /// The namespace the Cards' glass is matched in, which is what makes an
@@ -37,6 +40,10 @@ struct CardContainerView: View {
         .onChange(of: coordinator.phase) { showCurrentQuery() }
     }
 
+    /// Whether the Panel's own preview is open, and so has the arrows and
+    /// Space.
+    private var isPreviewing: Bool { coordinator.passagePreview != nil }
+
     private func refocus() {
         isSearchFocused = true
     }
@@ -61,18 +68,26 @@ struct CardContainerView: View {
         }
         .onSubmit { coordinator.submit() }
         .onKeyPress(.upArrow) {
-            coordinator.moveUp()
+            if isPreviewing { previewDriver.scroll(by: -1) } else { coordinator.moveUp() }
             return .handled
         }
         .onKeyPress(.downArrow) {
-            coordinator.moveDown()
+            if isPreviewing { previewDriver.scroll(by: 1) } else { coordinator.moveDown() }
             return .handled
         }
         .onKeyPress(.leftArrow) {
-            coordinator.moveLeft() ? .handled : .ignored
+            if isPreviewing {
+                previewDriver.step(by: -1)
+                return .handled
+            }
+            return coordinator.moveLeft() ? .handled : .ignored
         }
         .onKeyPress(.rightArrow) {
-            coordinator.moveRight() ? .handled : .ignored
+            if isPreviewing {
+                previewDriver.step(by: 1)
+                return .handled
+            }
+            return coordinator.moveRight() ? .handled : .ignored
         }
         .onKeyPress(.escape) {
             coordinator.handleEscape() ? .handled : .ignored
@@ -138,6 +153,12 @@ struct CardContainerView: View {
                 coordinator.triggerQuickLook()
                 return .handled
             }
+            // Space plays or pauses the preview's video, or pages its text,
+            // rather than typing a space into the Query behind it.
+            if isPreviewing && press.key == .space && press.modifiers.isEmpty {
+                previewDriver.space()
+                return .handled
+            }
             if press.modifiers.contains(.control),
                let letter = ControlKey.letter(press.characters) {
                 switch letter {
@@ -145,10 +166,10 @@ struct CardContainerView: View {
                     coordinator.toggleTextSubjectEdit()
                     return .handled
                 case "j":
-                    coordinator.moveDown()
+                    if isPreviewing { previewDriver.scroll(by: 1) } else { coordinator.moveDown() }
                     return .handled
                 case "k":
-                    coordinator.moveUp()
+                    if isPreviewing { previewDriver.scroll(by: -1) } else { coordinator.moveUp() }
                     return .handled
                 // In the Emoji grid these two are one cell left and right — or
                 // one Skin Tone while the ⌥Enter picker is open. `moveLeft` and

@@ -118,7 +118,7 @@ struct FileIndexerTests {
             "", "a.txt", "sub", "sub/b.pdf", ".hidden", ".secrets", ".secrets/c.txt", "repo", "repo/README.md",
             "Notes.rtfd", "id_rsa", "app", "app/.env"
         ])
-        #expect(f.reader.counts() == [f.root: 13])
+        #expect(f.reader.counts().mapValues(\.total) == [f.root: 13])
     }
 
     @Test func aCrawlWithEveryGroupOnIndexesOnlyOrdinaryThings() throws {
@@ -375,7 +375,7 @@ struct FileIndexerTests {
         try f.make("a.txt")
         try f.make("b/c.txt")
         try f.sources([""])
-        #expect(f.reader.counts()[f.root] == 4)
+        #expect(f.reader.counts().mapValues(\.total)[f.root] == 4)
 
         try f.sources([])
 
@@ -405,7 +405,7 @@ struct FileIndexerTests {
 
         #expect(try f.source(of: "Taxes/2024.pdf") == f.path("Taxes"))
         #expect(try f.id("Taxes/2024.pdf") == id)
-        #expect(f.reader.counts() == [f.root: 1, f.path("Taxes"): 2])
+        #expect(f.reader.counts().mapValues(\.total) == [f.root: 1, f.path("Taxes"): 2])
     }
 
     @Test func aDisabledSourceKeepsItsRowsButIsNotRead() throws {
@@ -449,7 +449,7 @@ struct FileIndexerTests {
         rules.skipped.insert(.repos)
         #expect(try f.rules(rules).isEmpty, "skipping more needs no crawl")
         #expect(try f.indexed == ["", "notes.txt"])
-        #expect(f.reader.counts() == [f.root: 2])
+        #expect(f.reader.counts().mapValues(\.total) == [f.root: 2])
 
         #expect(try f.rules(.defaults) == [""])
         #expect(try f.indexed == ["", "notes.txt", "repo", "repo/src", "repo/src/main.swift"])
@@ -571,6 +571,7 @@ struct FileIndexerTests {
             switch progress {
             case .wrote: wrote += 1
             case .reading(_, let isReading): reading.append(isReading)
+            case .readingContents: break
             }
         })
 
@@ -578,6 +579,6 @@ struct FileIndexerTests {
 
         #expect(wrote == 2, "one batch mid-crawl, one at the end")
         #expect(reading == [true, false])
-        #expect(f.reader.counts()[f.root] == FileIndexer.batchSize + 22)
+        #expect(f.reader.counts().mapValues(\.total)[f.root] == FileIndexer.batchSize + 22)
     }
 }

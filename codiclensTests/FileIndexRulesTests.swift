@@ -29,8 +29,8 @@ struct FileIndexRulesTests {
 
     // MARK: - Defaults
 
-    @Test func aNewInstallSkipsCachesDependenciesBundlesAndWorktreesOnly() {
-        #expect(FileIndexRules.defaults.skipped == [.caches, .dependencies, .bundles, .worktrees])
+    @Test func aNewInstallSkipsCachesDependenciesBundlesWorktreesAndWhatGitIgnoresOnly() {
+        #expect(FileIndexRules.defaults.skipped == [.caches, .dependencies, .bundles, .worktrees, .gitIgnored])
         #expect(FileIndexRules.defaults.patterns.isEmpty)
     }
 
@@ -160,6 +160,36 @@ struct FileIndexRulesTests {
                         root: "/Users/someone/Documents/app-wt-1", configure: worktree) == .index)
         #expect(verdict("/Users/someone/Documents/app-wt-1", directory: true, rules: Self.rules(skipping: .bundles),
                         configure: worktree) == .index, "switched off")
+    }
+
+    /// What git ignores goes; a folder of it is walked, without a row, for
+    /// the `.env` files and keys in it, which keep to their own switches.
+    @Test func gitIgnoredTakesWhatGitIgnoresButNotEnvFilesOrKeys() {
+        let ignored: (inout FileIndexRules.Entry) -> Void = { $0.isGitIgnored = true }
+        #expect(verdict("/Users/someone/Documents/app/debug.log", configure: ignored) == .skip)
+        #expect(verdict("/Users/someone/Documents/app/debug.log") == .index, "not ignored")
+        #expect(verdict("/Users/someone/Documents/app/data", directory: true, configure: ignored)
+            == .descendWithoutIndexing)
+        for name in [".env", ".env.local", "server.pem", "id_ed25519", "private.key"] {
+            #expect(verdict("/Users/someone/Documents/app/data/" + name, configure: ignored) == .index, "\(name)")
+        }
+        #expect(verdict("/Users/someone/Documents/app/data/.env", rules: Self.rules(skipping: .gitIgnored, .envFiles),
+                        configure: ignored) == .skip, "its own switch still counts")
+        #expect(verdict("/Users/someone/Documents/app/Talk.key") {
+            $0.isGitIgnored = true
+            $0.startsWithZipMagic = true
+        } == .skip, "Keynote is not a key")
+        #expect(verdict("/Users/someone/Documents/app/data", directory: true,
+                        rules: Self.rules(skipping: .gitIgnored, .envFiles, .keys), configure: ignored) == .skip,
+                "nothing in it could be kept, so it is not walked")
+        #expect(verdict("/Users/someone/Documents/app/Notes.rtfd", directory: true) {
+            $0.isGitIgnored = true
+            $0.isPackage = true
+        } == .skip)
+        #expect(verdict("/Users/someone/Documents/app/debug.log", rules: Self.nothing, configure: ignored) == .index,
+                "switched off")
+        #expect(verdict("/Users/someone/Documents/app", directory: true, root: "/Users/someone/Documents/app",
+                        configure: ignored) == .index, "a Source is read whatever it is")
     }
 
     @Test func envFilesTakeDotEnvAndItsVariants() {

@@ -42,8 +42,10 @@ nonisolated struct Source: Identifiable, Hashable, Sendable {
 }
 
 /// How much of a Source has been read. For a folder Source both numbers come
-/// from the File Index; for the others they are the size of what the app
-/// already holds in memory, which is read whole, so `indexed == total`.
+/// from the File Index: `total` is every file and folder the crawl found,
+/// `indexed` those whose contents are read too, or that have none to read.
+/// For the others they are the size of what the app already holds in memory,
+/// which is read whole, so `indexed == total`.
 nonisolated struct SourceCounts: Equatable, Sendable {
     var indexed: Int
     var total: Int

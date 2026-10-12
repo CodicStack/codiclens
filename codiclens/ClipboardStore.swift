@@ -17,6 +17,11 @@ protocol ClipboardStore: AnyObject {
 
     /// Quick Look needs a file to preview, so text items get written out on demand.
     func textPreviewURL(for item: ClipboardItem) -> URL?
+
+    /// Where Quick Look's text copy of a file it cannot draw is written
+    /// (`QuickLookPreviewItem`), beside the Clipboard Items' text previews.
+    /// `nil` hands Quick Look every file as it is.
+    var fileTextPreviewsDirectory: URL? { get }
 }
 
 // MARK: - Application Support
@@ -30,6 +35,9 @@ final class FileClipboardStore: ClipboardStore {
         self.root = root ?? FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("codiclens")
+        // A copy is removed when its item goes; one still here was being
+        // shown when the app quit.
+        try? FileManager.default.removeItem(at: filePreviewsDirectory)
     }
 
     private var itemsURL: URL {
@@ -44,6 +52,13 @@ final class FileClipboardStore: ClipboardStore {
 
     private var previewsDirectory: URL {
         directory(root.appendingPathComponent("previews"))
+    }
+
+    var fileTextPreviewsDirectory: URL? { filePreviewsDirectory }
+
+    /// Not created on read: a copy makes its own folder inside it.
+    private var filePreviewsDirectory: URL {
+        root.appendingPathComponent("previews").appendingPathComponent("files")
     }
 
     private func directory(_ url: URL) -> URL {
@@ -125,4 +140,6 @@ final class InMemoryClipboardStore: ClipboardStore {
     func removeImage(named fileName: String) { images[fileName] = nil }
 
     func textPreviewURL(for item: ClipboardItem) -> URL? { nil }
+
+    var fileTextPreviewsDirectory: URL? { nil }
 }

@@ -88,6 +88,15 @@ enum Style {
     /// icon carries it; the label underneath names it.
     static let cardIcon: CGFloat = 76
 
+    /// A Card's drawn glass at full size: its cell less `cardInset` on each
+    /// side, 200pt. Square, because the cell is.
+    ///
+    /// What a Card's **picture** is asked for at — one size, the focused one,
+    /// whatever the Emphasis. The thumbnail cache keys on size, so asking for
+    /// the 180pt an unfocused Card is drawn at would miss it every time focus
+    /// moved and flash the icon back; the picture is scaled down instead.
+    static var cardSide: CGFloat { PanelLayout.cardWidth - 2 * cardInset }
+
     static let rowPaddingH: CGFloat = 10
     static let rowPaddingV: CGFloat = 7
     static let chipPaddingH: CGFloat = 7
@@ -135,6 +144,48 @@ enum Style {
     /// There is no "thickness" dial; lensing scales with shape size.
     static let cardGlass: Glass = .regular
 
+    // MARK: - A Card's picture
+
+    /// The ground under a picture's caption: clear at the top, darkening to the
+    /// bottom edge. A **content-layer** gradient over the picture, never a tint
+    /// on the glass, and the same in both appearances — it sits on a
+    /// photograph, not on the material, so it has nothing to adapt to.
+    static let pictureScrim = LinearGradient(
+        colors: [.black.opacity(0), .black.opacity(0.55)],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+
+    /// How far up the picture the scrim reaches: the caption's line and its
+    /// padding, and enough above it for the darkening to read as a falloff.
+    static let pictureScrimHeight: CGFloat = 76
+
+    /// The caption over a picture. Fixed, because the scrim under it is.
+    static let pictureCaption: Color = .white
+
+    // MARK: - A Passage
+
+    /// The scrim under a caption that carries a Passage's lines over the name:
+    /// three lines of excerpt more than `pictureScrimHeight`.
+    static let passageScrimHeight: CGFloat = 124
+
+    /// The icon over a name and a Passage, on a Card with no picture: smaller
+    /// than `cardIcon`, so three lines of excerpt fit under the name.
+    static let passageIcon: CGFloat = 48
+
+    /// The words a Passage matched, in the Panel's own preview of the file:
+    /// the system's find highlight, as Preview and Xcode mark found text,
+    /// under the app's underline. Content inside a document, not a surface —
+    /// no glass and no Card carries it.
+    static let passageHighlight: NSColor = .findHighlightColor
+
+    /// The preview's document, inset from the Slab's glass on three sides
+    /// under its header.
+    static let previewInset: CGFloat = 6
+
+    /// The document's corner: concentric with the Slab's, `previewInset` in.
+    static var previewDocumentRadius: CGFloat { slabRadius - previewInset }
+
     // MARK: - Loading Ring
 
     /// The Loading Ring's box. A `.small` `ProgressView` — the system spinner
@@ -166,6 +217,17 @@ enum Style {
     static var cardShape: RoundedRectangle {
         RoundedRectangle(cornerRadius: cardRadius, style: .continuous)
     }
+
+    /// A Card's picture, which fills the Card edge to edge.
+    ///
+    /// **`cardRadius`, and that is the concentric radius, not a coincidence.**
+    /// The picture is the Card's content, laid out in the same frame
+    /// `.glassEffect(in: cardShape)` draws its glass in, so it sits at an inset
+    /// of 0 from the glass and a concentric corner is `cardRadius - 0`. The
+    /// unfocused Card's `unfocusedCardShrink` is padding *outside* the glass,
+    /// so it moves both outlines together — a 180pt glass with a 180pt picture,
+    /// both at 20. Clip the **picture** with this; the glass is never clipped.
+    static var pictureShape: RoundedRectangle { cardShape }
 
     static var resultShape: RoundedRectangle {
         RoundedRectangle(cornerRadius: resultRadius, style: .continuous)

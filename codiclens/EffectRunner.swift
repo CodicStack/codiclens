@@ -21,6 +21,35 @@ final class SystemEffectRunner: EffectRunner {
         qos: .userInitiated
     )
 
+    /// Serial so two operations on one file reach disk in command order. Its
+    /// own queue, not the image one: a long Compress must not hold up a Rotate.
+    private let fileWorkQueue = DispatchQueue(
+        label: "com.codiclens.file-operations",
+        qos: .userInitiated
+    )
+
+    /// Where Copy, Paste and Copy File write. `NSPasteboard.general` in the
+    /// app; a test hands in a private one, so it never touches the user's
+    /// clipboard.
+    private let pasteboard: NSPasteboard
+
+    /// Where Codictate's transcribe command is, asked each time Transcribe
+    /// runs, so a Codictate installed or updated while the app runs is found.
+    /// `Transcription.locate` in the app; a test hands in a script of its own.
+    private let codictate: @Sendable () -> Transcription.Location
+
+    /// The transcription under way, so the next Panel session can stop it.
+    /// Main thread only.
+    private var transcription: TranscriptionRun?
+
+    init(
+        pasteboard: NSPasteboard,
+        codictate: @escaping @Sendable () -> Transcription.Location = { Transcription.locate() }
+    ) {
+        self.pasteboard = pasteboard
+        self.codictate = codictate
+    }
+
     var onHide: (() -> Void)?
     var onPasteAndHide: ((@escaping () -> Void) -> Void)?
     var onQuickLook: ((QuickLookContext) -> Void)?
@@ -39,6 +68,12 @@ final class SystemEffectRunner: EffectRunner {
     var onOCRText: ((String?) -> Void)?
     var onQRCode: ((Int, Data?) -> Void)?
     var onImageRotation: ((Int, Bool) -> Void)?
+    /// Where a Move, Copy, Rename or Compress lands, or why it did not.
+    var onFileOperation: ((Int, Result<URL, FileOperation.Failure>) -> Void)?
+    /// The transcript of an audio or video file, or why there is none.
+    var onTranscription: ((Int, Result<String, Transcription.Failure>) -> Void)?
+    /// Whether QuickTime opened a file at its moment.
+    var onMomentOpen: ((Int, Bool) -> Void)?
 
     func run(_ effects: [Effect]) {
         for effect in effects {
@@ -145,13 +180,53 @@ final class SystemEffectRunner: EffectRunner {
                     onImageRotation(generation, succeeded)
                 }
             }
+
+        case .fileOperation(let operation, let generation):
+            guard let onFileOperation else { return }
+            fileWorkQueue.async {
+                let result = operation.perform()
+                DispatchQueue.main.async { onFileOperation(generation, result) }
+            }
+
+        case .transcribe(let file, let generation):
+            guard let onTranscription else { return }
+            transcription?.cancel()
+            let codictate = codictate
+            let run = TranscriptionRun(file: file)
+            transcription = run
+            // Not a serial queue: a cancelled run still winding down must not
+            // hold up the next one. Looked up off the main thread too, since
+            // Launch Services may have to think about it.
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result: Result<String, Transcription.Failure> = switch codictate() {
+                case .found(let command): run.perform(with: command)
+                case .missing: .failure(.codictateMissing)
+                case .tooOld: .failure(.codictateTooOld)
+                }
+                DispatchQueue.main.async { [weak self] in
+                    if self?.transcription === run { self?.transcription = nil }
+                    onTranscription(generation, result)
+                }
+            }
+
+        case .cancelTranscription:
+            transcription?.cancel()
+            transcription = nil
+
+        case .openAtMoment(let file, let seconds, let generation):
+            guard let onMomentOpen else { return }
+            DispatchQueue.global(qos: .userInitiated).async {
+                let opened = QuickTime.open(file, at: seconds)
+                DispatchQueue.main.async { onMomentOpen(generation, opened) }
+            }
         }
     }
 
     // MARK: - Pasteboard
 
+    /// A `.fileURL` goes on as the file itself, not its path: Finder and Mail
+    /// paste the file. That is Copy File; Copy Path writes `.text`.
     private func write(_ payload: Payload) {
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         switch payload {
         case .text(let text):

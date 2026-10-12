@@ -68,6 +68,10 @@ _Avoid_: recent, history, sticky subject, resume
 The part of a file that a File Result matched on: a stretch of text, a page, or a span of time in a recording or video. A file that matched on its name alone has no Passage.
 _Avoid_: excerpt, moment, snippet, hit, match location
 
+**Passage Preview**:
+The file opened inside the Panel at its Passage, with the matched words highlighted: a PDF at its page, text scrolled to the Passage, a recording playing from where the Passage starts. Shift+Space opens it for a File Result that has a Passage; anything else gets Quick Look.
+_Avoid_: own preview, inline preview, viewer, Quick Look
+
 **Mode**:
 What the Results Slab is currently listing, which determines its layout — a list for apps and files, a grid for emoji. Set by the Subject in play.
 _Avoid_: view, layout, kind
@@ -184,6 +188,11 @@ _Avoid_: make subject, promote, pick, choose
 Changing a text Subject's text in its own Card. Any text Subject can be edited —
 a Clipboard Item, OCR Text, or the output of a transform. Not a Clipboard
 capability; a text Subject capability.
+
+**Renaming**:
+Changing a file or folder's name in its own Card. Separate from Editing, which
+is text only: Renaming changes what the file is called, never what it contains.
+_Avoid_: edit, inline rename
 _Avoid_: inline edit, rename, amend
 
 **Rotate**:
@@ -205,3 +214,13 @@ path and nothing else — it cannot collide with an app name, so it never compet
 with the App Index. It resolves to exactly one Subject; a path that does not exist
 resolves to none and the Panel shakes.
 _Avoid_: file subject, browse, navigate, completion
+
+### Transcribing audio and video
+
+**Transcribe**:
+The Action that turns what an audio or video file Subject says into text, with
+the Speech Model the user picked in Codictate. The text becomes a text Subject in
+place of the file, as OCR Text replaces an image; a file with no speech produces
+none. Codiclens has no Speech Model of its own, so without Codictate the Action
+is still there and says where to get it.
+_Avoid_: dictate, speech to text, STT
