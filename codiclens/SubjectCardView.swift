@@ -112,8 +112,15 @@ struct SubjectCardView: View {
         return coordinator.currentClipboardItem
     }
 
+    /// **A `ZStack`, never a `Group`.** A `Group` hands its modifiers to each
+    /// view inside it, so the glass belonged to whichever branch was showing:
+    /// "Type..." giving way to FindMy, or one Subject to the next (`.id`),
+    /// took the glass away and put a new one in. The first keystroke does that
+    /// inside the Slab's arriving animation, and the Card's glass, content and
+    /// all, was gone for the length of it. Here the glass is the stack's and
+    /// stays; only what is in it changes, and that hard-cuts.
     var body: some View {
-        Group {
+        ZStack {
             if case .showingResult(let result) = coordinator.phase {
                 resultPreview(result)
             } else if coordinator.isEditingTextSubject {
@@ -136,6 +143,7 @@ struct SubjectCardView: View {
                 placeholder
             }
         }
+        .hardCut()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottomTrailing) { corner }
         .cardSurface(focused: isFocused, writing: isWriting, phase: .subject, in: glassNamespace)

@@ -222,6 +222,13 @@ runs the installed command, the dev build included, on a `say` m4a
   **Card**).
 - **Arrival is `.glassEffectTransition(.matchedGeometry)` on `Motion.resize`**: a new Card
   grows out of the one before it; its content hard-cuts; `.identity` under Reduce Motion.
+- **A Card's glass goes on a `ZStack`, never a `Group`.** A `Group` hands its modifiers
+  to each branch inside it, so the glass was the branch's: "Type..." giving way to an app,
+  or one Subject to the next (`.id(subject.id)`), took the glass out and put a new one in.
+  The first keystroke into the empty Panel does that inside the Slab's arriving animation,
+  and the whole Subject Card, content and all, was gone for ~300 ms (2026-10-12). Only the
+  window server shows it — an offscreen render draws the Card either way;
+  `SubjectCardHoldTests.noCardsGlassIsOnAGroup` pins the shape.
 - **`Motion.swift` owns every curve, in two categories.** Three **Transition** curves —
   `entrance`, `resize`, `snappy` — carry a change the user caused; Phase advances, Card
   content swaps and selection movement are instant *on purpose*. **Decoration** is now
