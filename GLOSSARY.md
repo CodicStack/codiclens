@@ -219,8 +219,12 @@ _Avoid_: file subject, browse, navigate, completion
 
 **Transcribe**:
 The Action that turns what an audio or video file Subject says into text, with
-the Speech Model the user picked in Codictate. The text becomes a text Subject in
-place of the file, as OCR Text replaces an image; a file with no speech produces
-none. Codiclens has no Speech Model of its own, so without Codictate the Action
-is still there and says where to get it.
+the Speech Model the user picked in Codictate. Codiclens asks Codictate's command
+line, which hands the file to the running Codictate (starting it hidden if need
+be); Codictate runs one File Transcription at a time, so a Transcribe may wait its
+turn, and the Subject Card says where it is ("Waiting, 1 ahead", "Transcribing ·
+0:42"). The text becomes a text Subject in place of the file, as OCR Text replaces
+an image; a file with no speech produces none. Codiclens has no Speech Model of
+its own, so without Codictate, or with one too old to speak its command line's
+contract, the Action is still there and says where to get it.
 _Avoid_: dictate, speech to text, STT

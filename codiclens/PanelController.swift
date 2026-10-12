@@ -102,6 +102,9 @@ class PanelController {
         runner.onTranscription = { [weak self] generation, result in
             self?.coordinator.receiveTranscription(result, generation: generation)
         }
+        runner.onTranscriptionProgress = { [weak self] generation, progress in
+            self?.coordinator.receiveTranscriptionProgress(progress, generation: generation)
+        }
 
         runner.onMomentOpen = { [weak self] generation, opened in
             self?.coordinator.receiveMomentOpen(succeeded: opened, generation: generation)
