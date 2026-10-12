@@ -139,6 +139,111 @@ struct MeaningIndexTests {
         #expect(try f.count("SELECT COUNT(*) FROM segments WHERE vec_key IS NOT NULL") >= 1)
     }
 
+    // MARK: - Data and logs
+
+    @Test func dataAndLogsAreRecognisedByName() {
+        for path in ["/u/a/data.json", "/u/a/rows.JSONL", "/u/a/x.ndjson", "/u/a/map.geojson", "/u/a/adult.csv",
+                     "/u/a/t.tsv", "/u/a/app.log", "/u/a/run.err", "/u/a/run.out", "/u/a/output/logs/log_iter_20.txt",
+                     "/u/a/Logs/2024/day.txt", "/u/a/log/notes.txt", "/u/a/train.log.txt", "/u/a/log_run.txt"] {
+            #expect(FileContent.isDataOrLog(path), "\(path)")
+        }
+        for path in ["/u/a/notes.txt", "/u/a/blog/post.txt", "/u/a/catalog.txt", "/u/a/logs/readme.md",
+                     "/u/a/logs/main.swift", "/u/a/dialog.txt", "/u/a/json/notes.md", "/u/a/login.txt"] {
+            #expect(!FileContent.isDataOrLog(path), "\(path)")
+        }
+    }
+
+    /// A JSON Lines file of ~520 chunks with one word nowhere else, in
+    /// about its 500th.
+    private static func jsonLines(rare: String) -> String {
+        (0..<13_500).map { line in
+            #"{"id": \#(line), "note": "the budget entry for line \#(line) \#(line == 13_000 ? rare : "went fine")"}"#
+        }.joined(separator: "\n")
+    }
+
+    @Test func dataGetsVectorsForItsFirstFortyChunksAndIsFoundByAnyWord() async throws {
+        #expect(FileContentReader.firstStep >= MeaningPass.firstChunks, "the first step holds the first 40 chunks")
+        let f = try MeaningFixture()
+        try f.make("events.jsonl", contents: Self.jsonLines(rare: "zanzibar"))
+        try f.crawl()
+        // The first steps of both passes, then the rest of the contents: a
+        // later contents step does not hand the file back to the meaning pass.
+        try await f.contents.readBatch()
+        try await f.embedAll()
+        try await f.readContents()
+        #expect(try f.meaning.nextBatch().isEmpty)
+
+        let id = try f.id("events.jsonl")
+        var chunks: [(id: Int64, hasVector: Bool)] = []
+        try f.writer.db.query("SELECT id, vec_key IS NOT NULL FROM segments WHERE file = ? AND kind = 'chunk' ORDER BY id",
+                              [.int(id)]) { chunks.append(($0.int(0), $0.int(1) != 0)) }
+        #expect(chunks.count > 500)
+        #expect(chunks.prefix(MeaningPass.firstChunks).allSatisfy { $0.hasVector })
+        #expect(!chunks.dropFirst(MeaningPass.firstChunks).contains { $0.hasVector })
+
+        var rare: Int64 = 0
+        try f.writer.db.query("SELECT rowid FROM passages WHERE passages MATCH 'zanzibar'") { rare = $0.int(0) }
+        let index = try #require(chunks.firstIndex { $0.id == rare })
+        #expect(index > 450, "chunk \(index)")
+        let hit = try #require(f.reader.search("zanzibar", limit: 10, sources: [f.root]).first)
+        #expect(hit.name == "events.jsonl")
+        #expect(hit.passage != nil, "found by the word, in its Passage")
+        #expect(f.search("zanzibar").first?.name == "events.jsonl", "and by the settled search")
+
+        #expect(try f.count("SELECT COUNT(*) FROM files WHERE vec_state != 'done' OR state != 'done'") == 0)
+        #expect(try f.writer.isCaughtUp(sources: [f.root]))
+        let counts = f.reader.meaningCounts(sources: [f.root])
+        #expect(counts.files == 1 && counts.embedded == 1)
+        #expect(f.reader.counts()[f.root].map { $0.indexed == $0.total } == true)
+    }
+
+    @Test func aTextFileInALogsFolderIsALogAndANoteBesideItIsNot() async throws {
+        let f = try MeaningFixture()
+        let long = (0..<9_000).map { "the budget meeting went fine \($0)" }.joined(separator: "\n")
+        try f.make("output/logs/log_iter_20.txt", contents: long)
+        try f.make("notes/minutes.txt", contents: long)
+        try await f.index()
+
+        func vectors(_ relative: String) throws -> Int {
+            var count = 0
+            try f.writer.db.query("SELECT COUNT(*) FROM segments WHERE file = ? AND vec_key IS NOT NULL",
+                                  [.int(try f.id(relative))]) { count = Int($0.int(0)) }
+            return count
+        }
+        #expect(try vectors("output/logs/log_iter_20.txt") == MeaningPass.firstChunks)
+        #expect(try vectors("notes/minutes.txt") > MeaningPass.firstChunks)
+        #expect(try f.count("SELECT COUNT(*) FROM files WHERE vec_state != 'done'") == 0)
+    }
+
+    @Test func dataEmbeddedPastItsFirstStepBeforeTheCapKeepsItsVectorsAndIsDoneWithoutTheHelper() async throws {
+        let f = try MeaningFixture()
+        try f.make("events.jsonl", contents: Self.jsonLines(rare: "zanzibar"))
+        try await f.index()
+        // As an index from before the cap left it: further along, waiting
+        // for its next step.
+        let id = try f.id("events.jsonl")
+        try f.writer.db.run("""
+            UPDATE segments SET vec_key = randomblob(16), later = 1 WHERE file = ? AND kind = 'chunk' AND vec_key IS NULL
+                AND id IN (SELECT id FROM segments WHERE file = ? AND kind = 'chunk' ORDER BY id LIMIT 60 OFFSET 40)
+            """, [.int(id), .int(id)])
+        try f.writer.db.run("UPDATE files SET vec_state = 'partial' WHERE id = ?", [.int(id)])
+        f.embedder.requests.withLock { $0 = [] }
+
+        #expect(try await f.embedAll() == [["events.jsonl"]])
+        #expect(f.embedder.requests.withLock { $0 }.isEmpty)
+        #expect(try f.count("SELECT COUNT(*) FROM files WHERE vec_state != 'done'") == 0)
+        #expect(try f.count("SELECT COUNT(*) FROM segments WHERE later = 1") == 60, "kept")
+    }
+
+    @Test func aBatchsTextsGoToTheHelperTogether() async throws {
+        let f = try MeaningFixture()
+        for name in ["a", "b", "c"] { try f.make("\(name).md", contents: "the \(name) budget") }
+        try await f.index()
+
+        #expect(f.embedder.textCalls.withLock { $0 } == [3])
+        #expect(try f.count("SELECT COUNT(*) FROM segments WHERE vec_key IS NOT NULL") == 3)
+    }
+
     @Test func aFileThatCrashesTheHelperIsGivenUpNotRetried() async throws {
         let f = try MeaningFixture()
         try f.make("bad.md", contents: "this one says \(KeywordEmbedder.crash) and takes the helper down")

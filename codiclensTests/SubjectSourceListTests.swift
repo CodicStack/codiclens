@@ -463,15 +463,10 @@ struct SubjectSourceListTests {
     }
 
     /// A row the user moved onto by hand is followed by its id as the list
-    /// re-ranks around it, and when it leaves the list the selection goes
-    /// back to the first row and stays there.
-    @Test func aHandMovedSelectionFollowsItsItemAndFallsBackWhenItGoes() async throws {
-        let files = FakeFileIndex(answers: [
-            "cl": docs("clay.txt", "clip.txt", "clipping.pdf"),
-            "cli": docs("clipping.pdf", "client.txt", "clip.txt"),
-            "clip": docs("clipping.pdf"),
-            "clip ": docs("clipping.pdf", "clip.txt")
-        ])
+    /// re-ranks around it under the same Query: the settled pass moves it,
+    /// and the selection goes with it.
+    @Test func aHandMovedSelectionFollowsItsItemUnderTheSameQuery() async throws {
+        let files = FakeFileIndex(answers: ["cl": docs("clay.txt", "clip.txt", "clipping.pdf")])
         let fixture = try makeFixture(fileIndex: files, disabling: [.emoji, .clipboardHistory])
         let coordinator = fixture.coordinator
 
@@ -482,26 +477,225 @@ struct SubjectSourceListTests {
         coordinator.moveDown()
         #expect(selectedName(coordinator) == "clip.txt")
 
-        // Re-ranked under the same Query, as the settled pass will.
         files.answers["cl"] = docs("clip.txt", "clay.txt")
         await fixture.schedule.typingPaused()
+        #expect(names(coordinator) == ["Clipboard", "clip.txt", "clay.txt"], "the apps stay on top")
         #expect(selectedName(coordinator) == "clip.txt")
         #expect(coordinator.subjectVM.selectedIndex == 1)
+        #expect(coordinator.subjectVM.pinCount == 0, "nothing pinned while the Query stands")
+    }
 
-        coordinator.subjectVM.searchText = "cli"
-        #expect(selectedName(coordinator) == "clip.txt", "still listed while cli is out")
+    // MARK: - Pinning
+
+    /// Picked by hand, then the Query changes: while the new Query still
+    /// matches it, the row is the first of the whole list — above the apps —
+    /// and stays selected, with everything else after it in its usual order
+    /// and no second copy of it. Each time it is put first, the list is told
+    /// to scroll to the top.
+    @Test func aPickedRowIsPinnedAboveTheAppsWhileItStillMatches() async throws {
+        let files = FakeFileIndex(answers: [
+            "cl": docs("clay.txt", "clip.txt"),
+            "cli": docs("clipping.pdf", "client.txt", "clip.txt")
+        ])
+        let fixture = try makeFixture(fileIndex: files, disabling: [.emoji, .clipboardHistory])
+        let coordinator = fixture.coordinator
+        let vm = coordinator.subjectVM
+
+        vm.searchText = "cl"
         await fixture.schedule.runSearches()
-        #expect(names(coordinator) == ["Clipboard", "clipping.pdf", "client.txt", "clip.txt"])
+        coordinator.moveDown()
+        coordinator.moveDown()
         #expect(selectedName(coordinator) == "clip.txt")
 
+        vm.searchText = "cli"
+        #expect(names(coordinator) == ["clip.txt", "Clipboard", "clay.txt"], "pinned while cli is out")
+        #expect(vm.selectedIndex == 0)
+        #expect(vm.pinCount == 1, "scroll to the top")
+
+        await fixture.schedule.runSearches()
+        #expect(names(coordinator) == ["clip.txt", "Clipboard", "clipping.pdf", "client.txt"], "once, at the top")
+        #expect(selectedName(coordinator) == "clip.txt")
+        #expect(vm.pinCount == 2)
+        #expect(coordinator.currentResults.first?.id == "file:/docs/clip.txt")
+    }
+
+    /// A pinned row the new Query no longer matches is dropped, and the
+    /// selection goes back to the first row: the top app. A word answer
+    /// alone does not drop it — the settled pass can still find it — but the
+    /// settled answer does, and the row coming back later is not chosen
+    /// again.
+    @Test func aPinnedRowTheQueryNoLongerMatchesIsDropped() async throws {
+        let files = FakeFileIndex(answers: [
+            "cl": docs("clay.txt", "clip.txt"),
+            "clip": docs("clipping.pdf"),
+            "clip ": docs("clipping.pdf", "clip.txt")
+        ])
+        let fixture = try makeFixture(fileIndex: files, disabling: [.emoji, .clipboardHistory])
+        let coordinator = fixture.coordinator
+        let vm = coordinator.subjectVM
+
+        vm.searchText = "cl"
+        await fixture.schedule.runSearches()
+        coordinator.moveDown()
+        coordinator.moveDown()
+        #expect(selectedName(coordinator) == "clip.txt")
+
+        vm.searchText = "clip"
+        await fixture.schedule.runSearches()
+        #expect(names(coordinator) == ["clip.txt", "Clipboard", "clipping.pdf"], "still pinned: the settled pass is out")
+
+        await fixture.schedule.typingPaused()
+        #expect(names(coordinator) == ["Clipboard", "clipping.pdf"])
+        #expect(selectedName(coordinator) == "Clipboard", "back to the first row")
+        #expect(vm.selectedIndex == 0)
+
+        vm.searchText = "clip "
+        await fixture.schedule.runSearches()
+        #expect(names(coordinator) == ["clipping.pdf", "clip.txt"], "a row coming back is not pinned again")
+        #expect(vm.selectedIndex == 0)
+    }
+
+    /// An app can be picked and pinned too: above the app it ranked under,
+    /// and listed once.
+    @Test func aPickedAppIsPinnedLikeAnyRow() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codiclens-index-\(UUID().uuidString)")
+        for app in ["Notes", "Keynote"] {
+            try FileManager.default.createDirectory(
+                at: root.appendingPathComponent("\(app).app"),
+                withIntermediateDirectories: true
+            )
+        }
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = AppIndex(directories: [root.path])
+        index.refresh()
+        await withCheckedContinuation { continuation in
+            index.onFirstPopulation { continuation.resume() }
+        }
+        defer { index.stop() }
+        let fixture = try makeFixture(index: index, disabling: [.emoji, .clipboardHistory, .builtIns])
+        let coordinator = fixture.coordinator
+        let vm = coordinator.subjectVM
+
+        vm.searchText = "note"
+        #expect(names(coordinator) == ["Notes", "Keynote"])
+        coordinator.moveDown()
+
+        vm.searchText = "not"
+        #expect(names(coordinator) == ["Keynote", "Notes"])
+        #expect(selectedName(coordinator) == "Keynote")
+    }
+
+    /// Moving the selection again picks again: the newly chosen row is the one
+    /// pinned on the next Query, and the one pinned before takes its usual
+    /// place.
+    @Test func movingAgainPinsTheNewlyChosenRow() async throws {
+        let files = FakeFileIndex(answers: [
+            "cl": docs("clay.txt", "clip.txt"),
+            "cli": docs("clipping.pdf", "client.txt", "clip.txt"),
+            "clie": docs("clip.txt", "client.txt")
+        ])
+        let fixture = try makeFixture(fileIndex: files, disabling: [.emoji, .clipboardHistory])
+        let coordinator = fixture.coordinator
+        let vm = coordinator.subjectVM
+
+        vm.searchText = "cl"
+        await fixture.schedule.runSearches()
+        coordinator.moveDown()
+        coordinator.moveDown()
+        vm.searchText = "cli"
+        await fixture.schedule.runSearches()
+        #expect(names(coordinator) == ["clip.txt", "Clipboard", "clipping.pdf", "client.txt"])
+
+        coordinator.moveDown()
+        coordinator.moveDown()
+        coordinator.moveDown()
+        #expect(selectedName(coordinator) == "client.txt")
+
+        vm.searchText = "clie"
+        await fixture.schedule.runSearches()
+        #expect(names(coordinator) == ["client.txt", "clip.txt"], "the new pick first, the old one in its place")
+        #expect(selectedName(coordinator) == "client.txt")
+    }
+
+    /// Back on the first row by hand is no pick at all: the next Query lists
+    /// in its usual order.
+    @Test func movingBackToTheFirstRowPinsNothing() async throws {
+        let files = FakeFileIndex(answers: [
+            "cl": docs("clay.txt", "clip.txt"),
+            "cli": docs("clipping.pdf", "clip.txt")
+        ])
+        let fixture = try makeFixture(fileIndex: files, disabling: [.emoji, .clipboardHistory])
+        let coordinator = fixture.coordinator
+        let vm = coordinator.subjectVM
+
+        vm.searchText = "cl"
+        await fixture.schedule.runSearches()
+        coordinator.moveDown()
+        coordinator.moveUp()
+
+        vm.searchText = "cli"
+        await fixture.schedule.runSearches()
+        #expect(names(coordinator) == ["Clipboard", "clipping.pdf", "clip.txt"])
+        #expect(vm.pinCount == 0)
+    }
+
+    /// Clearing the Query, ⌘E and Escape back, and the Panel opening again
+    /// each forget the pick: the next Query lists in its usual order.
+    @Test(arguments: ["cleared", "text", "reopened"])
+    func aPickIsForgotten(by way: String) async throws {
+        let files = FakeFileIndex(answers: [
+            "cl": docs("clay.txt", "clip.txt"),
+            "cli": docs("clipping.pdf", "clip.txt")
+        ])
+        let fixture = try makeFixture(fileIndex: files, disabling: [.emoji, .clipboardHistory])
+        let coordinator = fixture.coordinator
+        let vm = coordinator.subjectVM
+
+        vm.searchText = "cl"
+        await fixture.schedule.runSearches()
+        coordinator.moveDown()
+        coordinator.moveDown()
+        #expect(selectedName(coordinator) == "clip.txt")
+
+        switch way {
+        case "cleared":
+            vm.searchText = ""
+            vm.searchText = "cl"
+            await fixture.schedule.runSearches()
+        case "text":
+            coordinator.toggleTextSubjectEdit()
+            coordinator.toggleTextSubjectEdit()
+            #expect(coordinator.isTextMode)
+            _ = coordinator.handleEscape()
+        default:
+            coordinator.reset()
+        }
+
+        vm.searchText = "cli"
+        await fixture.schedule.runSearches()
+        #expect(names(coordinator) == ["Clipboard", "clipping.pdf", "clip.txt"])
+        #expect(selectedName(coordinator) == "Clipboard")
+    }
+
+    /// Enter acts on the pinned row, and the Card shows it.
+    @Test func enterActsOnThePinnedRow() async throws {
+        let fixture = try makeFixture(
+            clipboard: ["clip one", "clip two"],
+            disabling: [.emoji]
+        )
+        let coordinator = fixture.coordinator
         coordinator.subjectVM.searchText = "clip"
         await fixture.schedule.runSearches()
-        #expect(coordinator.subjectVM.selectedIndex == 0, "clip.txt is gone: back to the first row")
+        #expect(names(coordinator) == ["Clipboard", "clip one", "clip two"])
+        coordinator.moveDown()
+        coordinator.moveDown()
 
-        coordinator.subjectVM.searchText = "clip "
+        coordinator.subjectVM.searchText = "clip t"
         await fixture.schedule.runSearches()
-        #expect(names(coordinator).contains("clip.txt"))
-        #expect(coordinator.subjectVM.selectedIndex == 0, "a row coming back is not chosen again")
+        #expect(names(coordinator).first == "clip two")
+        #expect(coordinator.subjectVM.cardSubject?.displayName == "clip two")
+        #expect(coordinator.submit() == [.paste(.text("clip two"))])
     }
 
     /// Enter acts on the row highlighted at that moment, after a re-rank too.
@@ -780,7 +974,9 @@ struct SubjectSourceListTests {
     // MARK: - "No results"
 
     /// Zero app matches is not yet "No results": the list below the apps has
-    /// not answered. Once it has, and it is empty too, the claim is true.
+    /// not answered — and its word answer on the keystroke is not all of it,
+    /// because the settled pass can still find what a Passage says. Once that
+    /// has landed empty too, the claim is true.
     @Test func noResultsWaitsForTheListBelowTheApps() async throws {
         let (index, root) = try await populatedIndex()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -792,13 +988,18 @@ struct SubjectSourceListTests {
         #expect(!coordinator.hasNoSubjectMatch)
 
         await fixture.schedule.runSearches()
+        #expect(!coordinator.canReportNoResults, "the words found nothing; the settled pass is still to come")
+        #expect(!coordinator.hasNoSubjectMatch)
+
+        await fixture.schedule.typingPaused()
         #expect(coordinator.canReportNoResults)
         #expect(coordinator.hasNoSubjectMatch)
         index.stop()
     }
 
     /// While a newer Query is out, the previous list stays and nothing says
-    /// "No results"; the claim waits for this Query's own empty answer.
+    /// "No results"; the claim waits for this Query's own settled, empty
+    /// answer.
     @Test func noResultsIsNeverClaimedForAQueryStillOut() async throws {
         let (index, root) = try await populatedIndex()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -818,7 +1019,7 @@ struct SubjectSourceListTests {
         #expect(!coordinator.canReportNoResults)
         #expect(!coordinator.hasNoSubjectMatch)
 
-        await fixture.schedule.runSearches()
+        await fixture.schedule.typingPaused()
         #expect(names(coordinator).isEmpty)
         #expect(coordinator.canReportNoResults)
         #expect(coordinator.hasNoSubjectMatch)

@@ -422,7 +422,8 @@ class CommandCoordinator {
     /// then "n", and the search is "n" — not "safn". A Query standing as text
     /// is no exception: its text was written in the editor, not here.
     ///
-    /// The first keystroke also ends a standing Last Subject.
+    /// The first keystroke also ends a standing Last Subject, which stays on
+    /// the Card until the new Query has something to show.
     /// - Returns: the text the field should now show, which differs from what
     ///   was typed whenever a settled query has just been replaced.
     @discardableResult
@@ -430,6 +431,7 @@ class CommandCoordinator {
         // Typing is a new question; the preview was of the old answer.
         passagePreview = nil
         let startsNewQuery = phase == .searchingSubject && subjectVM.isSearchCommitted
+        if let standing = standingSubject { subjectVM.holdOnCard(standing) }
         if phase == .searchingSubject { isLastSubjectStanding = false }
 
         currentSearchText = queryBuffer.accept(typed, startsNewQuery: startsNewQuery)
@@ -1194,6 +1196,7 @@ class CommandCoordinator {
         pendingMoment = nil
         isSubjectFromSearch = false
         subjectVM.isSearchCommitted = true
+        subjectVM.forgetPick()
         actionVM.reset()
         targetVM.reset()
         clipboardVM.reset()

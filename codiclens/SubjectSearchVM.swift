@@ -44,29 +44,86 @@ class SubjectSearchVM {
             queryChanged()
         }
     }
-    var results: [Subject] = []
+    var results: [Subject] = [] {
+        didSet { noteShown() }
+    }
     var isSearchCommitted: Bool = false
 
     /// The highlighted row, which Enter acts on.
     ///
     /// Set from outside only by the user moving it, so setting it is what
-    /// remembers the row by its id (`heldRow`): the list below the apps
+    /// remembers the row by its id (`pickedRow`): the list below the apps
     /// re-ranks while typing goes on, and a row the user moved onto by hand
-    /// is followed there. Index 0 is the first row, which is where an
-    /// untouched selection stays.
+    /// is followed there, and pinned above everything once the Query
+    /// changes. Index 0 is the first row, which is where an untouched
+    /// selection stays, and moving back onto it picks nothing.
     var selectedIndex: Int {
         get { selection }
         set {
             selection = newValue
-            heldRow = newValue == 0 ? nil : rowID(at: newValue)
+            pickedRow = newValue == 0 ? nil : rowID(at: newValue)
+            isPinned = false
         }
     }
-    private var selection = 0
+    private var selection = 0 {
+        didSet { noteShown() }
+    }
 
     /// The `ResultDisplayItem.id` of the row the user moved the selection
     /// onto by hand, or nil while it is on the first row. Cleared when that
-    /// row leaves the list, and the selection goes back to the first row.
-    @ObservationIgnored private var heldRow: String?
+    /// row no longer answers the Query, and the selection goes back to the
+    /// first row.
+    @ObservationIgnored private var pickedRow: String?
+
+    /// Whether the Query has changed since `pickedRow` was picked. Under the
+    /// Query it was picked in, the row is followed where the list re-ranks
+    /// it; under a new one it is **pinned**: the first row of the whole list,
+    /// above the apps, for as long as the new Query still matches it. The one
+    /// thing that ever sits above the apps, and only because the user chose
+    /// it (2026-10-12).
+    @ObservationIgnored private var isPinned = false
+
+    /// Bumped each time a pinned row is put first, which is what scrolls the
+    /// list to the top: the pinned row, and the best of the new Query under
+    /// it.
+    private(set) var pinCount = 0
+
+    /// What the Subject Card shows while the Query is the question.
+    ///
+    /// The highlighted row whenever there is one. With none, the Query has
+    /// either not been answered yet — the apps found nothing on the keystroke
+    /// and the list below them is still out — or it has been answered with
+    /// nothing. Until it has been answered the Card goes on showing what it
+    /// showed last (`shownSubject`), so it is never blank between a keystroke
+    /// and its answer; once it has, nothing, and the Card says "No match". An
+    /// empty Query shows nothing either: there is no question to hold an
+    /// answer for.
+    var cardSubject: Subject? {
+        if let highlighted { return highlighted }
+        guard !searchText.isEmpty, !hasAnswered else { return nil }
+        return shownSubject
+    }
+
+    /// The row under the selection, if there is one.
+    private var highlighted: Subject? {
+        results.indices.contains(selection) ? results[selection] : nil
+    }
+
+    /// The last Subject the Card showed for a Query: every highlighted row,
+    /// as it is highlighted, and a standing Last Subject as typing ends it
+    /// (`holdOnCard`). Forgotten with the Query.
+    private var shownSubject: Subject?
+
+    private func noteShown() {
+        if let highlighted { shownSubject = highlighted }
+    }
+
+    /// The first keystroke ends a standing Last Subject, which was on the Card
+    /// without being a Result: the Card keeps it until the new Query has
+    /// something to show.
+    func holdOnCard(_ subject: Subject) {
+        shownSubject = subject
+    }
 
     /// The Index of installed apps. This view model consumes it and never
     /// builds it — rebuilds happen behind `AppIndex`.
@@ -106,13 +163,16 @@ class SubjectSearchVM {
     /// results" and the Card's "No match" wait on.
     ///
     /// Two answers: the apps on the keystroke, once the Index has landed, and
-    /// the list below them a moment later, off the main actor. Until the list
-    /// has answered *this* Query the one on screen answers an earlier one, so
-    /// it says nothing about this one, and neither may "No results". A path
-    /// has no list below it, and keeps the Index's gate alone.
+    /// the list below them once its settled pass has landed. The keystroke's
+    /// word answer is not the whole answer: a Passage's last word is a prefix
+    /// only in the settled pass, and meaning joins only there, so "budg"
+    /// finds nothing on the keystroke and the budget report once typing
+    /// pauses. Counting the word answer said "No match", blanked the Card and
+    /// shook the Panel, and then changed its mind. A path has no list below
+    /// it, and keeps the Index's gate alone.
     var hasAnswered: Bool {
         guard isIndexReady else { return false }
-        return isPathQuery || answeredQuery == searchText
+        return isPathQuery || settledQuery == searchText
     }
 
     /// Whether this Query was answered with nothing.
@@ -153,8 +213,8 @@ class SubjectSearchVM {
         }
     }
 
-    /// The list below the apps, as `answeredQuery` was answered. It stays
-    /// while the next Query is out, so the list is never blanked between
+    /// The list below the apps, as the last Query to land was answered. It
+    /// stays while the next Query is out, so the list is never blanked between
     /// keystrokes, and is replaced in place when that answer lands — rows keep
     /// their ids (`ResultDisplayItem`), so they update rather than rebuild.
     private(set) var sourceResults: [SourceResult] = [] {
@@ -165,9 +225,6 @@ class SubjectSearchVM {
         }
     }
     private var sourceResultsBySubject: [UUID: SourceResult] = [:]
-
-    /// The Query `sourceResults` answer.
-    private var answeredQuery: String?
 
     /// The Query the settled pass has answered, once it has: from then on a
     /// word search for it is dropped as it lands, so the list does not change
@@ -325,11 +382,11 @@ class SubjectSearchVM {
         settledQuery = nil
         guard !searchText.isEmpty, !isPathQuery else {
             sourceResults = []
-            answeredQuery = nil
             waitingQuery = nil
             matchQuery()
             return
         }
+        if pickedRow != nil { isPinned = true }
         matchQuery()
         ask(searchText)
         schedule.afterPause { [weak self] in self?.settle() }
@@ -348,8 +405,8 @@ class SubjectSearchVM {
         guard !searchText.isEmpty else {
             appResults = []
             results = []
-            heldRow = nil
-            selection = 0
+            unpick()
+            shownSubject = nil
             return
         }
 
@@ -360,8 +417,7 @@ class SubjectSearchVM {
         if isPathQuery {
             appResults = []
             results = PathSubject.resolve(searchText).map { [$0] } ?? []
-            heldRow = nil
-            selection = 0
+            unpick()
             commitSubject.send()
             return
         }
@@ -397,8 +453,9 @@ class SubjectSearchVM {
     }
 
     /// The apps, then the list below them, and the selection where the user
-    /// left it: on the row they moved onto by hand while it is still listed,
-    /// otherwise on the first row.
+    /// left it: on the row they moved onto by hand while it is still listed —
+    /// where it ranks under the Query it was picked in, first of all under a
+    /// newer one — otherwise on the first row.
     private func compose() {
         // An app the File Index also holds is already above, as an app.
         let appPaths = Set(appResults.compactMap(\.path))
@@ -406,18 +463,47 @@ class SubjectSearchVM {
             guard case .file(let file) = row.hit else { return true }
             return !appPaths.contains(file.url.path)
         }
-        results = appResults + below.map(\.subject)
+        var composed = appResults + below.map(\.subject)
 
-        let held = heldRow.flatMap { id in results.indices.first { rowID(at: $0) == id } }
-        if held == nil { heldRow = nil }
-        selection = held ?? 0
+        guard let picked = pickedRow.flatMap({ id in composed.indices.first { rowID(of: composed[$0]) == id } }) else {
+            results = composed
+            unpick()
+            return
+        }
+        if isPinned {
+            composed.insert(composed.remove(at: picked), at: 0)
+            results = composed
+            selection = 0
+            pinCount += 1
+        } else {
+            results = composed
+            selection = picked
+        }
+    }
+
+    /// Forgets the row picked by hand, and the selection goes to the first
+    /// row.
+    private func unpick() {
+        pickedRow = nil
+        isPinned = false
+        selection = 0
+    }
+
+    /// The Panel opened again: what was picked by hand in the last session
+    /// is not pinned by the next Query. The selection stays where it was on
+    /// the list still showing.
+    func forgetPick() {
+        pickedRow = nil
+        isPinned = false
     }
 
     /// The id `displayResults` gives the row at `index`.
     private func rowID(at index: Int) -> String? {
-        guard results.indices.contains(index) else { return nil }
-        let subject = results[index]
-        return sourceResult(for: subject)?.display.id ?? ResultDisplayItem(from: subject).id
+        results.indices.contains(index) ? rowID(of: results[index]) : nil
+    }
+
+    private func rowID(of subject: Subject) -> String {
+        sourceResult(for: subject)?.display.id ?? ResultDisplayItem(from: subject).id
     }
 
     /// Typing has paused on this Query: the settled pass.
@@ -483,11 +569,18 @@ class SubjectSearchVM {
     /// would put rows answering an older Query over the newer one's. So is a
     /// word answer for a Query the settled pass has already answered. A Query
     /// standing as text keeps standing; the answer is kept for Escape.
+    ///
+    /// A pinned row the word answer leaves out stays until the settled pass
+    /// says whether the Query still matches it, as "No match" waits for it.
     private func land(_ ranked: [SourceSearch.Ranked], for query: String, settled: Bool = false) {
         guard query == searchText, settled || settledQuery != query else { return }
         if settled { settledQuery = query }
-        answeredQuery = query
-        sourceResults = ranked.map { row(for: $0.hit) }
+        var rows = ranked.map { row(for: $0.hit) }
+        if !settled, isPinned, let pinned = sourceResults.first(where: { $0.display.id == pickedRow }),
+           !rows.contains(where: { $0.display.id == pickedRow }) {
+            rows.append(pinned)
+        }
+        sourceResults = rows
         if !standsAsText { compose() }
     }
 
@@ -534,10 +627,10 @@ class SubjectSearchVM {
         results = []
         appResults = []
         sourceResults = []
-        answeredQuery = nil
         settledQuery = nil
         waitingQuery = nil
-        selectedIndex = 0
+        unpick()
+        shownSubject = nil
         isSearchCommitted = false
     }
 }

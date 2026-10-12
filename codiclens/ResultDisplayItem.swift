@@ -39,8 +39,11 @@ struct ResultDisplayItem: Identifiable {
     /// as a subsequence almost always, and underlining those would be noise.
     private(set) var subtitleMarks: [Range<Int>]?
 
+    /// An app, or a file or folder named by its path, is the thing at that
+    /// path: the Index answers every keystroke with a fresh `Subject`, and a
+    /// row picked by hand is found again in the next Query's list by this id.
     init(from subject: Subject) {
-        self.id = subject.id.uuidString
+        self.id = subject.path.map { "path:" + $0 } ?? subject.id.uuidString
         self.name = subject.displayName
         self.icon = .nsImage(subject.icon)
         self.thumbnailURL = subject.thumbnailURL

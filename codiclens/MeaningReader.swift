@@ -15,6 +15,9 @@ nonisolated protocol MeaningEmbedder: Sendable {
     func embedImage(at url: URL, budget: ImageBudget) async throws -> [Float]
     func embedImage(data: Data, budget: ImageBudget) async throws -> [Float]
     func embedAudio(at url: URL, from start: TimeInterval, duration: TimeInterval) async throws -> [Float]
+    /// Whether what is asked from now on is the backfill at full speed
+    /// (`MeaningPace.full`).
+    func setFullSpeed(_ isFullSpeed: Bool) async
 }
 
 nonisolated extension EmbeddingClient: MeaningEmbedder {}
@@ -45,6 +48,30 @@ nonisolated extension EmbeddingClient: MeaningEmbedder {}
 /// helper on a file gives that file up rather than crash it again; a helper
 /// that cannot start at all throws, and the pass stops.
 nonisolated enum MeaningReader {
+    /// A batch's jobs, in order. Their texts go to the helper together first
+    /// and into the cache, where each job then finds them: most files have a
+    /// chunk or three (on the dev machine 5,659 of the 11,723 waiting had
+    /// one), and a request a file left each model call a third full: texts of
+    /// 700 characters went 22–26 a second asked one at a time, 38–51 four to
+    /// 64 at a time (`MeaningThroughputTests`).
+    /// If the helper crashes on them together, each file asks again alone,
+    /// so only the one at fault gives up.
+    static func read(
+        _ jobs: [MeaningJob], with embedder: some MeaningEmbedder, cache: VectorCache
+    ) async throws -> [MeaningResult] {
+        let prompts = jobs.flatMap(Self.prompts)
+        if jobs.count > 1, !prompts.isEmpty {
+            let together = JobVectors(path: "", embedder: embedder, cache: cache)
+            do {
+                _ = try await together.texts(prompts.map(\.prompt))
+            } catch EmbeddingClientError.crashed {}
+            try together.keep()
+        }
+        var results: [MeaningResult] = []
+        for job in jobs { results.append(try await read(job, with: embedder, cache: cache)) }
+        return results
+    }
+
     static func read(
         _ job: MeaningJob, with embedder: some MeaningEmbedder, cache: VectorCache
     ) async throws -> MeaningResult {
@@ -104,17 +131,22 @@ nonisolated enum MeaningReader {
     // MARK: - Text
 
     private static func texts(_ job: MeaningJob, with vectors: JobVectors) async throws -> [MeaningResult.Vector] {
-        let title = title(of: job.path)
-        let worded = job.texts.filter { hasWords($0.text) }
-        guard !worded.isEmpty else { return [] }
-        let prompts = worded.map {
-            EmbeddingPrompt.document(title: title, text: String($0.text.prefix(MeaningPass.maxTextCharacters)))
-        }
-        return zip(worded, try await vectors.texts(prompts)).compactMap { text, answer in
+        let prompts = prompts(job)
+        guard !prompts.isEmpty else { return [] }
+        return zip(prompts, try await vectors.texts(prompts.map(\.prompt))).compactMap { item, answer in
             answer.map {
-                MeaningResult.Vector(segment: text.segment, kind: text.kind, location: text.location, key: $0.key,
-                                     vector: $0.vector)
+                MeaningResult.Vector(segment: item.text.segment, kind: item.text.kind, location: item.text.location,
+                                     key: $0.key, vector: $0.vector)
             }
+        }
+    }
+
+    /// The job's texts that get a vector, each with the card's document
+    /// prompt.
+    private static func prompts(_ job: MeaningJob) -> [(text: MeaningJob.Text, prompt: String)] {
+        let title = title(of: job.path)
+        return job.texts.filter { hasWords($0.text) }.map {
+            ($0, EmbeddingPrompt.document(title: title, text: String($0.text.prefix(MeaningPass.maxTextCharacters))))
         }
     }
 

@@ -22,6 +22,10 @@ final class KeywordEmbedder: MeaningEmbedder, QueryEncoder, EmbeddingShutdown, @
 
     /// Every request, in order: "text …", "image <name>", "data", "audio <name> <start>".
     let requests = Mutex<[String]>([])
+    /// How many texts each `embed(texts:)` was asked for, in order.
+    let textCalls = Mutex<[Int]>([])
+    /// Every `setFullSpeed`, in order.
+    let fullSpeeds = Mutex<[Bool]>([])
     let holds = Mutex(0)
     let shutdowns = Mutex(0)
 
@@ -39,6 +43,7 @@ final class KeywordEmbedder: MeaningEmbedder, QueryEncoder, EmbeddingShutdown, @
 
     func embed(texts: [String]) async throws -> [[Float]] {
         requests.withLock { $0 += texts.map { "text " + $0 } }
+        textCalls.withLock { $0.append(texts.count) }
         if texts.contains(where: { $0.contains(Self.crash) }) { throw EmbeddingClientError.crashed }
         return texts.map(Self.vector(for:))
     }
@@ -58,6 +63,10 @@ final class KeywordEmbedder: MeaningEmbedder, QueryEncoder, EmbeddingShutdown, @
         return Self.vector(for: url.lastPathComponent + " sound")
     }
 
+    func setFullSpeed(_ isFullSpeed: Bool) async {
+        fullSpeeds.withLock { $0.append(isFullSpeed) }
+    }
+
     func embedQuery(_ text: String, code: Bool) async throws -> [Float] {
         Self.vector(for: text)
     }
@@ -65,6 +74,12 @@ final class KeywordEmbedder: MeaningEmbedder, QueryEncoder, EmbeddingShutdown, @
     func hold() async throws { holds.withLock { $0 += 1 } }
     func release() async {}
     func shutdown() async { shutdowns.withLock { $0 += 1 } }
+}
+
+extension MeaningPace.Machine {
+    /// On power with someone at the Mac: the gentle pace, whatever this Mac
+    /// is doing.
+    static let atDesk = MeaningPace.Machine(isOnPower: { true }, idleSeconds: { 0 })
 }
 
 /// The day as the vector cache sees it (`VectorCache.day(of:)`), moved on by
@@ -91,11 +106,12 @@ final class TestDay: Sendable {
 /// in a temporary folder, with both passes stepped by hand: a crawl, the
 /// contents pass, the meaning pass, and the settled search. The vector cache
 /// is beside the database, as in the app, and outlives `close()`. Its day is
-/// `day`.
+/// `day`, and its pace is decided from `machine`.
 final class MeaningFixture {
     let folder: TemporaryFolder
     let url: URL
     let embedder: KeywordEmbedder
+    let machine: MeaningPace.Machine
     let day = TestDay()
     var cache: VectorCache!
     var writer: FileIndexWriter!
@@ -105,8 +121,9 @@ final class MeaningFixture {
     var vectors: MeaningVectors!
     var meaning: MeaningScheduler!
 
-    init(embedder: KeywordEmbedder = KeywordEmbedder()) throws {
+    init(embedder: KeywordEmbedder = KeywordEmbedder(), machine: MeaningPace.Machine = .atDesk) throws {
         self.embedder = embedder
+        self.machine = machine
         folder = try TemporaryFolder()
         try folder.makeFolder("Source")
         url = folder.url.appendingPathComponent("FileIndex.sqlite")
@@ -125,7 +142,7 @@ final class MeaningFixture {
         contents.setSources([root])
         vectors = MeaningVectors(databaseURL: url)
         meaning = MeaningScheduler(writer: writer, vectors: vectors, cache: cache, queue: DispatchQueue(label: "test.meaning"),
-                                   embed: MeaningScheduler.embedAll(with: embedder, cache: cache))
+                                   embed: MeaningScheduler.embedAll(with: embedder, cache: cache), machine: machine)
         meaning.setSources([root])
         writer.onVectorsRemoved = { [vectors] files in vectors?.remove(files: files) }
         try meaning.enable()
@@ -177,7 +194,7 @@ final class MeaningFixture {
             let jobs = try meaning.nextBatch()
             guard !jobs.isEmpty else { return batches }
             batches.append(jobs.map { ($0.path as NSString).lastPathComponent })
-            try meaning.store(await MeaningScheduler.embedAll(with: embedder, cache: cache)(jobs))
+            try meaning.store(await MeaningScheduler.embedAll(with: embedder, cache: cache)(jobs, meaning.pace))
         }
     }
 

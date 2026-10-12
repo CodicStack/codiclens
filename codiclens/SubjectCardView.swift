@@ -48,9 +48,10 @@ struct SubjectCardView: View {
     /// What the Card is about — and it is two different things by Phase.
     ///
     /// While the Query is still the question, the Card previews the highlighted
-    /// Result, so it reads `subjectVM.results[selectedIndex]` and moves as the
-    /// selection moves. Once a Subject has been **chosen**, the Card is about
-    /// that Subject and the Query's matches are no longer what it is showing.
+    /// Result, so it reads `subjectVM.cardSubject` and moves as the selection
+    /// moves — and between a keystroke and its answer it keeps what it showed,
+    /// never blank. Once a Subject has been **chosen**, the Card is about that
+    /// Subject and the Query's matches are no longer what it is showing.
     ///
     /// Those are not the same value, and reading only the first is how "Use as
     /// Subject" left Finder sitting on the Card after promoting a file out of
@@ -65,9 +66,7 @@ struct SubjectCardView: View {
     private var subject: Subject? {
         if !isQueryPhase, let chosen = coordinator.selectedSubject { return chosen }
         if let standing = coordinator.standingSubject { return standing }
-        let vm = coordinator.subjectVM
-        guard vm.selectedIndex < vm.results.count else { return nil }
-        return vm.results[vm.selectedIndex]
+        return coordinator.subjectVM.cardSubject
     }
 
     /// The text of a text Subject: OCR Text or a transform's output once
@@ -81,14 +80,13 @@ struct SubjectCardView: View {
         return rawText
     }
 
-    /// The Subject search Result under the selection, while the Query is
-    /// the question. A Clipboard Item or an Emoji from the list below the apps
-    /// is previewed as its own Mode previews it.
+    /// The Subject search Result under the selection, or the one held while
+    /// the Query is out, while the Query is the question. A Clipboard Item or
+    /// an Emoji from the list below the apps is previewed as its own Mode
+    /// previews it.
     private var searchedResult: Subject? {
         guard coordinator.phase == .searchingSubject, coordinator.standingSubject == nil else { return nil }
-        let vm = coordinator.subjectVM
-        guard vm.selectedIndex < vm.results.count else { return nil }
-        return vm.results[vm.selectedIndex]
+        return coordinator.subjectVM.cardSubject
     }
 
     private var isClipboardMode: Bool {

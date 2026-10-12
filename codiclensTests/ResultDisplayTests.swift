@@ -24,6 +24,14 @@ struct ResultDisplayTests {
         )
     }
 
+    /// An app is the bundle at its path, whatever `Subject` the Index made
+    /// for this keystroke.
+    @Test func anAppRowIsTheSameRowOnEveryKeystroke() {
+        let app = { Subject(displayName: "Notes", path: "/Applications/Notes.app", url: nil, icon: NSImage(), kind: .app(bundleIdentifier: nil, isRunning: false)) }
+
+        #expect(ResultDisplayItem(from: app()).id == ResultDisplayItem(from: app()).id)
+    }
+
     @Test func aClipboardRowKeepsItsEntrysIdentity() {
         let item = ClipboardItem(content: "copied")
 
