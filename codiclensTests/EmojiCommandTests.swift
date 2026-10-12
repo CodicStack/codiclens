@@ -245,7 +245,7 @@ struct EmojiCommandTests {
         coordinator.advancePhase()
 
         #expect(coordinator.phase == .pickingAction)
-        // An Emoji has content, so it has Share — `CONTEXT.md`, **Share**.
+        // An Emoji has content, so it has Share — `GLOSSARY.md`, **Share**.
         #expect(coordinator.actionVM.filteredActions.map(\.name) == ["Paste", "Copy", "Share…"])
     }
 

@@ -100,7 +100,7 @@ struct Subject: Identifiable {
 
     /// A Clipboard Item as a Subject. `imageURL` is its stored PNG, which only
     /// `ClipboardHistory` can say — `url` is the file it was copied *from*, a
-    /// name and nothing else (`CONTEXT.md`, **Clipboard Item**) — and it is
+    /// name and nothing else (`GLOSSARY.md`, **Clipboard Item**) — and it is
     /// what the Subject's thumbnail is drawn from.
     init(clipboardItem item: ClipboardItem, imageURL: URL?) {
         let symbol = item.isImage ? "photo" : "text.alignleft"

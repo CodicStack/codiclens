@@ -8,7 +8,7 @@ status: partially superseded
 curves, Decoration that never carries information, and selection movement and Phase
 changes that are instant. Every section below about the Border Beam is history — the
 beam, its dials and its tests are deleted. See `docs/adr/0009-cards-are-bare-glass.md`
-and `CONTEXT.md`, **Retired words**.
+and `GLOSSARY.md`, **Retired words**.
 
 Only three things animate: the Panel appearing, the Panel dismissing, and a Slab changing size. Phase advances, Card content swaps, and selection movement are **instant, deliberately**.
 
@@ -93,7 +93,7 @@ it is recorded here because the alternative is it being rediscovered in
 sweeps around that Card when the Card **becomes about something new**. It means
 nothing. It is emphatically **not** tied to OCR, to `isOCRInFlight`, or to any
 waiting or in-flight state — that misreading is the single most likely way this
-feature gets wrong later, which is why it is written here and in `CONTEXT.md`
+feature gets wrong later, which is why it is written here and in `GLOSSARY.md`
 both. OCR Text sweeps the Subject Card because the *Subject was replaced*; that
 it happens when OCR finishes is a coincidence of the same event, and nothing in
 `BorderBeam.swift` reads an in-flight flag. It shares a drawing primitive with

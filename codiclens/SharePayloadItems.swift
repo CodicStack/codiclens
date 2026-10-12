@@ -19,7 +19,7 @@ enum SharePayloadItems {
 
     /// Text as something every sharing service will take.
     ///
-    /// Text that is a URL is shared as a link, not as text (`CONTEXT.md`,
+    /// Text that is a URL is shared as a link, not as text (`GLOSSARY.md`,
     /// **Share**). Everything else is written to a `.txt` and the *file* is
     /// shared, because **AirDrop refuses a string**: `canPerform` is false for
     /// an `NSString`, so AirDrop drops out of the list entirely and the one

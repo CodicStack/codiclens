@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 @testable import codiclens
 
 /// Share on every Subject that has content, and what each one actually hands
-/// to the service. See `CONTEXT.md`, **Share**.
+/// to the service. See `GLOSSARY.md`, **Share**.
 ///
 /// Nothing here performs a Share or asserts on the list of services the system
 /// offers: the Target is a service built for the test, which does nothing
@@ -293,7 +293,7 @@ struct ShareCommandTests {
     // MARK: - A Clipboard Item is a snapshot
 
     /// The stored PNG, never the file it was copied from — a later edit to that
-    /// file changes nothing here. See `CONTEXT.md`, **Clipboard Item**.
+    /// file changes nothing here. See `GLOSSARY.md`, **Clipboard Item**.
     @Test func previewingAnImageEntryShowsTheSnapshotAndNotTheOriginal() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("codiclens-snapshot-\(UUID().uuidString)")

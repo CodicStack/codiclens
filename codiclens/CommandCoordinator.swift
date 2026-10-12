@@ -134,7 +134,7 @@ class CommandCoordinator {
 
     // MARK: - Last Subject
 
-    /// The Clipboard Item or Emoji the user last acted on (`CONTEXT.md`,
+    /// The Clipboard Item or Emoji the user last acted on (`GLOSSARY.md`,
     /// **Last Subject**). In memory only: it outlives the Panel, not the app.
     private(set) var lastSubject: Subject?
 
@@ -829,7 +829,7 @@ class CommandCoordinator {
     // MARK: - Renaming
 
     /// Whether the Subject Card is holding a file's name for editing. Not
-    /// Editing (`CONTEXT.md`), which is a text Subject's text.
+    /// Editing (`GLOSSARY.md`), which is a text Subject's text.
     private(set) var isRenaming = false
 
     /// What the name editor holds, until `commitRename` acts on it.
@@ -1430,7 +1430,7 @@ class CommandCoordinator {
     /// clipboard entry.
     ///
     /// Never the file a Clipboard Item was copied *from*. A Clipboard Item is a
-    /// snapshot (`CONTEXT.md`, **Clipboard Item**), so Open in Preview, OCR,
+    /// snapshot (`GLOSSARY.md`, **Clipboard Item**), so Open in Preview, OCR,
     /// Copy Path and Share all see the pixels as they were at copy time; the
     /// original lends its name and nothing else.
     private func fileURL(for subject: Subject, target: ActionTarget? = nil) -> URL? {

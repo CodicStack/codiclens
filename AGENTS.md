@@ -175,7 +175,7 @@ runs the installed command, the dev build included, on a `say` m4a
 - **Rename is the name in an editor on the Subject Card**, prefilled, the name without its
   extension selected as Finder does (a folder's whole name). Enter or ⌘E renames, Escape
   cancels, and the Card takes the Emphasis while it is open because it has the keyboard.
-  It is not Editing (`CONTEXT.md`), which is a text Subject's text.
+  It is not Editing (`GLOSSARY.md`), which is a text Subject's text.
 - **Transcribe is Codictate's, never ours.** A file whose `UTType` conforms to
   `.audiovisualContent` (not an MPEG-2 transport stream: `.ts` is declared one) offers
   it. `Transcription` runs `<Codictate.app>/Contents/Resources/app/bin/codictate
@@ -218,7 +218,7 @@ runs the installed command, the dev build included, on a `say` m4a
 - **One `GlassEffectContainer` holds all glass** — three Card tiles and the Results Slab
   — with `spacing` **below** the inter-Card gap so nothing merges, and `.glassEffect` on
   the children, never on the container. Cards never fuse — no `glassEffectUnion`: the
-  Panel is meant to read as three separate tiles with a gap, not one body (`CONTEXT.md`,
+  Panel is meant to read as three separate tiles with a gap, not one body (`GLOSSARY.md`,
   **Card**).
 - **Arrival is `.glassEffectTransition(.matchedGeometry)` on `Motion.resize`**: a new Card
   grows out of the one before it; its content hard-cuts; `.identity` under Reduce Motion.
@@ -236,7 +236,7 @@ runs the installed command, the dev build included, on a `say` m4a
   is **deleted**, with the beam it existed for. ADR 0003's beam sections are
   history, not guidance.
 - **A text Subject gets a monochrome fill in the Card's *content* layer**, never a
-  tinted glass. See `docs/adr/0009-cards-are-bare-glass.md` and `CONTEXT.md`.
+  tinted glass. See `docs/adr/0009-cards-are-bare-glass.md` and `GLOSSARY.md`.
 - **The Loading Ring is not a progress indicator.** A constant-length 270° arc that
   turns, in both of the Panel's waiting states. Neither Vision nor `mdfind` reports
   progress, so a ring that *fills* would be claiming something the app cannot back.
@@ -588,7 +588,7 @@ written in the editor, not in the Query. `hasAnswered` — the Index landed and 
 settled pass of the list below the apps answered this Query — gates only "No
 results", the Card's "No match" and the shake. A list landing while text stands is kept for Escape.
 
-**Last Subject** (`CONTEXT.md`): Enter or a Final Action on a Clipboard Item or an
+**Last Subject** (`GLOSSARY.md`): Enter or a Final Action on a Clipboard Item or an
 Emoji makes it `lastSubject`; acting on anything else clears it. In memory only.
 `reset()` stands it with the Query empty (`standingSubject`) after looking the
 Clipboard Item up in history again — deleted or trimmed means none. It is not a
@@ -773,7 +773,7 @@ has no reliable page API.
 `SettingsView` is two tabs. **General** is appearance, Emoji, the App Index refresh and
 the Acknowledgements sheet, which shows every bundled licence (`emoji-data-license.txt`,
 `digup-license.txt`; both are resources through the synchronised group). **Sources**
-(`SourcesSettingsView`) lists every Source (`CONTEXT.md`) with one switch and two counts,
+(`SourcesSettingsView`) lists every Source (`GLOSSARY.md`) with one switch and two counts,
 indexed and total, and nothing else: there is no priority between Sources. For a folder,
 total is every row and indexed the rows whose contents are read (or that have none to read),
 so the green number catches up as the contents backfill runs. Folders are added

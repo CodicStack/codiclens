@@ -10,7 +10,7 @@ import Foundation
 ///
 /// Every Source scores on `fuzzyScore`'s scale, lower is better, and that is
 /// the whole of the cross-Source ranking: there is no priority between Sources
-/// (`CONTEXT.md`, **Source**). Ties go files, then Clipboard, then Emoji, so the
+/// (`GLOSSARY.md`, **Source**). Ties go files, then Clipboard, then Emoji, so the
 /// order is stable — a tie-break, not a priority.
 nonisolated struct SourceSearch: Sendable {
     /// One row of the list, before it is a Subject.

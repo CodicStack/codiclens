@@ -20,7 +20,7 @@ nonisolated enum OCR {
     /// The OCR Text of the image at `url`, or `nil` when there is none.
     ///
     /// An image with no readable text produces **no OCR Text at all** rather
-    /// than an empty string — see `CONTEXT.md`. A Vision failure is reported
+    /// than an empty string — see `GLOSSARY.md`. A Vision failure is reported
     /// the same way, because to the user the two are the same answer: nothing
     /// to show.
     @concurrent
