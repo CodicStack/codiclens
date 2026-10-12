@@ -17,6 +17,9 @@ struct ResultDisplayItem: Identifiable {
     let id: String
     let name: String
     let icon: ResultIcon
+    /// The file whose thumbnail replaces `icon` once it lands, if there is one.
+    /// Not part of `id`: a row stays the same row while its picture arrives.
+    let thumbnailURL: URL?
     let subtitle: String
 
     /// Whether the subtitle is worth marking the Query's characters up in.
@@ -34,6 +37,7 @@ struct ResultDisplayItem: Identifiable {
         self.id = subject.id.uuidString
         self.name = subject.displayName
         self.icon = .nsImage(subject.icon)
+        self.thumbnailURL = subject.thumbnailURL
         self.subtitle = subject.subtitle
         self.highlightsSubtitle = true
     }
@@ -45,6 +49,7 @@ struct ResultDisplayItem: Identifiable {
         case .sfSymbol(let name): .sfSymbol(name)
         case .appIcon(let image): .nsImage(image)
         }
+        self.thumbnailURL = nil
         self.subtitle = action.isFinal ? "" : "→"
         self.highlightsSubtitle = false
     }
@@ -53,17 +58,65 @@ struct ResultDisplayItem: Identifiable {
         self.id = target.id.uuidString
         self.name = target.name
         self.icon = .nsImage(target.icon)
+        self.thumbnailURL = target.thumbnailURL
         self.subtitle = target.subtitle
         self.highlightsSubtitle = true
     }
 
-    init(from item: ClipboardItem) {
+    /// `imageURL` is the item's stored PNG, from `ClipboardHistory`; the row
+    /// shows the generic photo symbol until its thumbnail lands.
+    init(from item: ClipboardItem, imageURL: URL?) {
         self.id = item.id.uuidString
         self.name = item.displayName
         self.icon = item.isImage ? .sfSymbol("photo") : .sfSymbol("text.alignleft")
+        self.thumbnailURL = imageURL
+        self.subtitle = Self.age(of: item)
+        self.highlightsSubtitle = false
+    }
+
+    // MARK: - The list below the apps
+
+    // Subject search's second list mixes three Sources, so each of its rows
+    // says which one it came from (ADR 0012). Ids are prefixed by Source: the
+    // list holds a file, a Clipboard Item and an Emoji side by side.
+
+    /// A File Result: its folder under its name, which is the Source as the
+    /// user added it. Marked up, because a file found by its folder is there
+    /// for the folder's name.
+    init(file hit: FileHit, icon: NSImage) {
+        self.id = "file:" + hit.url.path
+        self.name = hit.name
+        self.icon = .nsImage(icon)
+        self.thumbnailURL = hit.kind == .file ? hit.url : nil
+        self.subtitle = hit.folder
+        self.highlightsSubtitle = true
+    }
+
+    /// A Clipboard Item, named as one — "Clipboard · 5m ago".
+    init(clipboardResult item: ClipboardItem, imageURL: URL?) {
+        self.id = "clipboard:" + item.id.uuidString
+        self.name = item.displayName
+        self.icon = item.isImage ? .sfSymbol("photo") : .sfSymbol("text.alignleft")
+        self.thumbnailURL = imageURL
+        self.subtitle = "Clipboard · " + Self.age(of: item)
+        self.highlightsSubtitle = false
+    }
+
+    /// An Emoji as a list row: its glyph where an icon goes and its CLDR name.
+    /// `emoji` is what is drawn, in the tone in force; the id is the base's,
+    /// because a variant is never a Result of its own.
+    init(emoji: Emoji, base: Emoji) {
+        self.id = "emoji:" + base.string
+        self.name = emoji.name
+        self.icon = .nsImage(EmojiRenderer.image(for: emoji.string, box: PanelLayout.resultIconSize))
+        self.thumbnailURL = nil
+        self.subtitle = "Emoji"
+        self.highlightsSubtitle = false
+    }
+
+    private static func age(of item: ClipboardItem) -> String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
-        self.subtitle = formatter.localizedString(for: item.timestamp, relativeTo: Date())
-        self.highlightsSubtitle = false
+        return formatter.localizedString(for: item.timestamp, relativeTo: Date())
     }
 }

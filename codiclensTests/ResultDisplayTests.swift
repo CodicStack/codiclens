@@ -27,7 +27,7 @@ struct ResultDisplayTests {
     @Test func aClipboardRowKeepsItsEntrysIdentity() {
         let item = ClipboardItem(content: "copied")
 
-        #expect(ResultDisplayItem(from: item).id == item.id.uuidString)
+        #expect(ResultDisplayItem(from: item, imageURL: nil).id == item.id.uuidString)
     }
 
     // MARK: - Rendering emoji glyphs

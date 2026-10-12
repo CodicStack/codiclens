@@ -93,9 +93,8 @@ struct OCRCommandTests {
     /// of extensions. `public.svg-image` *does* conform, so an SVG is offered
     /// OCR; nothing here rasterises or otherwise handles one specially, and if
     /// Vision cannot read it the run comes back with no OCR Text and the Panel
-    /// shakes. Deliberately not the extension list in
-    /// `TargetSearchVM.imageExtensions`, which files `pdf` under images for
-    /// *thumbnails* — a different question, left alone.
+    /// shakes. Deliberately not whatever `Thumbnails` can draw, which includes a
+    /// PDF's first page — a different question, left alone.
     @Test(arguments: [
         (UTType.png, true),
         (.jpeg, true),

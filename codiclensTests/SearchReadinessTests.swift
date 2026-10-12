@@ -17,7 +17,8 @@ struct SearchReadinessTests {
         CommandCoordinator(
             runner: RecordingEffectRunner(),
             history: ClipboardHistory(store: InMemoryClipboardStore()),
-            index: index
+            index: index,
+            searchFiles: { _ in [] }
         )
     }
 
@@ -74,19 +75,50 @@ struct SearchReadinessTests {
 
     // MARK: - Once it has
 
-    /// The other half: with the Index in, zero matches is an answer. The message
-    /// is allowed, the Query stands as text, and the Panel is entitled to shake.
+    /// The other half: with the Index in, and the list below the apps in once
+    /// typing pauses, zero matches is an answer. The message is allowed and
+    /// the Panel is entitled to shake — and that is all. The Query does not
+    /// turn into text on its own; ⌘E does that (ADR 0012).
     @Test func aQueryPutAfterTheIndexLandsIsAnswered() async throws {
         let (index, root) = try await populatedIndex()
         defer { try? FileManager.default.removeItem(at: root) }
         let coordinator = makeCoordinator(index: index)
 
         coordinator.subjectVM.searchText = "zzqqzz"
+        await coordinator.subjectVM.searchSources()
 
         #expect(coordinator.subjectVM.isIndexReady)
         #expect(coordinator.canReportNoResults)
-        #expect(coordinator.isTextMode, "nothing matched, so the Query is text")
+        #expect(coordinator.subjectVM.results.isEmpty, "No results, not a text Subject")
+        #expect(!coordinator.isTextMode)
         #expect(coordinator.hasNoSubjectMatch)
+        index.stop()
+    }
+
+    /// A Query turned into text before the Index lands is the user's choice,
+    /// and the first scan landing must not search it away again.
+    @Test func theFirstScanDoesNotUndoACmdE() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codiclens-index-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Fixture.app"),
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = AppIndex(directories: [root.path])
+        let coordinator = makeCoordinator(index: index)
+
+        coordinator.subjectVM.searchText = "fixture notes"
+        coordinator.toggleTextSubjectEdit()
+        coordinator.toggleTextSubjectEdit()
+        #expect(coordinator.isTextMode)
+
+        index.refresh()
+        await withCheckedContinuation { continuation in
+            index.onFirstPopulation { continuation.resume() }
+        }
+
+        #expect(coordinator.isTextMode, "still the text the user asked for")
         index.stop()
     }
 

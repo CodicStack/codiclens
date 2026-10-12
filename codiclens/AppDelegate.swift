@@ -38,6 +38,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Off-thread, so neither launch nor the first Emoji Mode waits on the
         // 226 KB dataset being decoded.
         EmojiIndex.prewarm()
+        // Opens the File Index and crawls the folder Sources, off the main
+        // thread; File Results are whatever has been read so far.
+        FileIndex.shared.start()
         pasteboardWatcher.start()
         installHotKeyHandler()
         register(HotKey.panel, as: HotKeyID.panel)
@@ -48,7 +51,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     ///
     /// A background accessory app has no window to close and no document to
     /// save, so nothing else prompts this teardown: without it the Carbon
-    /// handler, the hotkeys, the FSEvents stream and the pasteboard timer all
+    /// handler, the hotkeys, both FSEvents streams and the pasteboard timer all
     /// outlive the decision to quit.
     func applicationWillTerminate(_ notification: Notification) {
         unregisterHotKeys()
@@ -56,6 +59,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panelController?.tearDown()
         panelController = nil
         AppIndex.shared.stop()
+        FileIndex.shared.stop()
     }
 
     // MARK: - QuickLook Responder Chain

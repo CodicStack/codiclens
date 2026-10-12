@@ -9,6 +9,10 @@ struct SubjectCardView: View {
 
     @FocusState private var isEditorFocused: Bool
 
+    /// The editor's caret. Put at the end as the editor opens, so ⌘E on a
+    /// Query carries on typing where the Query left off.
+    @State private var editorSelection: TextSelection?
+
     /// Whether the Query is still the question being asked.
     ///
     /// This is the distinction the Card turns on, and it decides two separate
@@ -29,7 +33,7 @@ struct SubjectCardView: View {
     /// Whether the Card is holding text rather than naming something, which is
     /// the one case that needs a near-solid ground to stay readable.
     private var isWriting: Bool {
-        isClipboardText || isTextMode || retargetedText != nil
+        isClipboardText || previewedText != nil
     }
 
     /// What the Card is about — and it is two different things by Phase.
@@ -46,36 +50,43 @@ struct SubjectCardView: View {
     /// exactly this for OCR Text and a transform's output — but only for a
     /// `.text` Subject, and a promoted file or app is not one, so it fell
     /// straight through to the stale Result.
+    ///
+    /// The Last Subject is a Query Phase's exception: it stands with the Query
+    /// empty and was never a Result, so it is read from the coordinator.
     private var subject: Subject? {
         if !isQueryPhase, let chosen = coordinator.selectedSubject { return chosen }
+        if let standing = coordinator.standingSubject { return standing }
         let vm = coordinator.subjectVM
         guard vm.selectedIndex < vm.results.count else { return nil }
         return vm.results[vm.selectedIndex]
     }
 
-    private var isTextMode: Bool {
-        if let subject, case .text = subject.kind { return true }
-        return false
+    /// The text of a text Subject: OCR Text or a transform's output once
+    /// chosen, or a Query turned into text with ⌘E.
+    ///
+    /// A text Subject is *previewed* rather than named, so the Card needs the
+    /// string and not the Subject. The editor's insets are measured against
+    /// `textPreview`, so the text does not jump as ⌘E opens or saves it.
+    private var previewedText: String? {
+        guard case .text(let rawText)? = subject?.kind else { return nil }
+        return rawText
     }
 
-    /// The text of a Subject that has *replaced* what the Query matched — OCR
-    /// Text, or a transform's output.
-    ///
-    /// A narrower case of what `subject` now does generally: it exists because a
-    /// text Subject is *previewed* rather than named, so the Card needs the
-    /// string and not the Subject. It stays separate for that reason alone, and
-    /// no longer for the reason it was written — `subject` reads
-    /// `selectedSubject` outside a Query Phase now, for every kind and not just
-    /// text.
-    private var retargetedText: String? {
-        guard !isQueryPhase else { return nil }
-        guard case .text(let rawText)? = coordinator.selectedSubject?.kind else { return nil }
-        return rawText
+    /// The Subject search Result under the selection, while the Query is
+    /// the question. A Clipboard Item or an Emoji from the list below the apps
+    /// is previewed as its own Mode previews it.
+    private var searchedResult: Subject? {
+        guard coordinator.phase == .searchingSubject, coordinator.standingSubject == nil else { return nil }
+        let vm = coordinator.subjectVM
+        guard vm.selectedIndex < vm.results.count else { return nil }
+        return vm.results[vm.selectedIndex]
     }
 
     private var isClipboardMode: Bool {
         coordinator.isClipboardBrowsing
             || (coordinator.phase == .pickingAction && coordinator.selectedClipboardItem != nil)
+            || coordinator.standingSubject?.clipboardItem != nil
+            || searchedResult?.clipboardItem != nil
     }
 
     private var isClipboardText: Bool {
@@ -85,6 +96,8 @@ struct SubjectCardView: View {
     }
 
     private var clipboardItem: ClipboardItem? {
+        if let item = coordinator.standingSubject?.clipboardItem { return item }
+        if let item = searchedResult?.clipboardItem { return item }
         if let item = coordinator.selectedClipboardItem,
            (coordinator.phase == .pickingAction || coordinator.phase == .browsingClipboard) {
             return item
@@ -98,14 +111,16 @@ struct SubjectCardView: View {
                 resultPreview(result)
             } else if coordinator.isEditingTextSubject {
                 textSubjectEditor
-            } else if let retargetedText {
-                textPreview(retargetedText)
             } else if isClipboardMode {
                 clipboardPreview
             } else if coordinator.isEmojiBrowsing {
-                emojiContent
-            } else if isTextMode {
-                textAreaContent
+                emojiContent(coordinator.currentEmoji, query: coordinator.emojiVM.searchText)
+            } else if let emoji = coordinator.standingSubject?.emoji {
+                emojiContent(emoji, query: "")
+            } else if let emoji = searchedResult?.emoji {
+                emojiContent(emoji, query: coordinator.subjectVM.searchText)
+            } else if let previewedText {
+                textPreview(previewedText)
             } else if let subject {
                 subjectContent(subject)
             } else {
@@ -139,7 +154,7 @@ struct SubjectCardView: View {
     /// Text needs that as much as a clipboard entry does.
     private var characterCount: Int? {
         guard !coordinator.isEditingTextSubject else { return nil }
-        if let retargetedText { return retargetedText.count }
+        if let previewedText { return previewedText.count }
         guard isClipboardMode, let item = clipboardItem, !item.isImage else { return nil }
         return item.content.count
     }
@@ -166,10 +181,11 @@ struct SubjectCardView: View {
     /// Apple Color Emoji is a bitmap font, so an off-strike point size resamples
     /// and reads soft. The renderer picks the nearest strike for the icon slot
     /// the other Cards use, which keeps the Card's metrics identical whether it
-    /// holds an app icon or a glyph.
+    /// holds an app icon or a glyph. The grid's selection, the Last Subject, or
+    /// an Emoji row in Subject search.
     @ViewBuilder
-    private var emojiContent: some View {
-        if let emoji = coordinator.currentEmoji {
+    private func emojiContent(_ emoji: Emoji?, query: String) -> some View {
+        if let emoji {
             VStack(spacing: 10) {
                 Image(nsImage: EmojiRenderer.image(for: emoji.string, box: Style.cardIcon))
                     .frame(width: Style.cardIcon, height: Style.cardIcon)
@@ -179,7 +195,7 @@ struct SubjectCardView: View {
                 // Emoji found by a keyword has nothing to mark up in its CLDR
                 // name, and `highlightedName` leaves that plain rather than
                 // underlining the characters that happen to line up.
-                Text(highlightedName(emoji.name, query: coordinator.emojiVM.searchText))
+                Text(highlightedName(emoji.name, query: query))
                     .font(.system(size: 15, weight: .bold))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
@@ -211,10 +227,8 @@ struct SubjectCardView: View {
     @ViewBuilder
     private var clipboardPreview: some View {
         if let item = clipboardItem {
-            if item.isImage,
-               let fileName = item.imageFileName,
-               let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
-               let nsImage = NSImage(contentsOf: appSupport.appendingPathComponent("codiclens/images/\(fileName)")) {
+            if let imageURL = coordinator.clipboardVM.imageURL(for: item),
+               let nsImage = NSImage(contentsOf: imageURL) {
                 Image(nsImage: nsImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -246,7 +260,7 @@ struct SubjectCardView: View {
     /// The editor for a text Subject, wherever it is being edited from — the
     /// Clipboard browser, OCR Text, a transform's output.
     private var textSubjectEditor: some View {
-        TextEditor(text: $coordinator.textSubjectEditText)
+        TextEditor(text: $coordinator.textSubjectEditText, selection: $editorSelection)
             .font(.system(size: 13))
             .scrollContentBackground(.hidden)
             .focused($isEditorFocused)
@@ -279,7 +293,11 @@ struct SubjectCardView: View {
             // `task` is the event that says "committed": it starts on the main
             // actor once the view is in the hierarchy. It replaces a fixed
             // 0.1-second delay that was guessing at the same moment.
-            .task { isEditorFocused = true }
+            .task {
+                let text = coordinator.textSubjectEditText
+                editorSelection = TextSelection(insertionPoint: text.endIndex)
+                isEditorFocused = true
+            }
     }
 
     /// A block of text the Card is holding, scrollable because OCR Text can be
@@ -296,24 +314,18 @@ struct SubjectCardView: View {
         .padding(20)
     }
 
-    private var textAreaContent: some View {
-        VStack {
-            Text(coordinator.subjectVM.searchText)
-                .font(.system(size: 15))
-                .foregroundStyle(.primary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .lineLimit(nil)
-        }
-        .padding(20)
-    }
-
     private func subjectContent(_ subject: Subject) -> some View {
         VStack(spacing: 10) {
-            Image(nsImage: subject.icon)
-                .resizable()
-                .interpolation(.high)
-                .aspectRatio(contentMode: .fit)
-                .frame(width: Style.cardIcon, height: Style.cardIcon)
+            ThumbnailImage(url: subject.thumbnailURL, side: Style.cardIcon) {
+                Image(nsImage: subject.icon)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+            }
+            .frame(width: Style.cardIcon, height: Style.cardIcon)
+            // Rotate rewrites the file under the same URL and answers with a
+            // fresh Subject; a fresh view is what checks the file again.
+            .id(subject.id)
 
             // Marked up only where the name is what the Query matched. A
             // promoted or chosen Subject is not, and underlining the
@@ -345,11 +357,12 @@ struct SubjectCardView: View {
 
     /// What an empty Card says, and it must not claim more than it knows.
     ///
-    /// "No match" is a finding, and the Card is only entitled to it once the app
-    /// Index has answered — before that a Query has not been looked up, so the
-    /// Card is still waiting rather than reporting.
+    /// "No match" is a finding, and the Card is only entitled to it once the
+    /// Query has been answered — by the app Index and by the list below the
+    /// apps. Before that it has not been looked up, so the Card is still
+    /// waiting rather than reporting.
     private var placeholderMessage: String {
         if coordinator.subjectVM.searchText.isEmpty { return "Type..." }
-        return coordinator.subjectVM.isIndexReady ? "No match" : "Searching…"
+        return coordinator.subjectVM.hasAnswered ? "No match" : "Searching…"
     }
 }

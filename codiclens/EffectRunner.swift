@@ -38,7 +38,7 @@ final class SystemEffectRunner: EffectRunner {
     /// ever created.
     var onOCRText: ((String?) -> Void)?
     var onQRCode: ((Int, Data?) -> Void)?
-    var onImageRotation: ((Int, Bool, NSImage?) -> Void)?
+    var onImageRotation: ((Int, Bool) -> Void)?
 
     func run(_ effects: [Effect]) {
         for effect in effects {
@@ -141,9 +141,8 @@ final class SystemEffectRunner: EffectRunner {
                 } catch {
                     succeeded = false
                 }
-                let refreshedImage = succeeded ? NSImage(contentsOf: url) : nil
                 DispatchQueue.main.async {
-                    onImageRotation(generation, succeeded, refreshedImage)
+                    onImageRotation(generation, succeeded)
                 }
             }
         }

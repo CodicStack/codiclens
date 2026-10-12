@@ -1,6 +1,6 @@
 import Foundation
 
-struct ClipboardItem: Identifiable, Codable {
+nonisolated struct ClipboardItem: Identifiable, Codable, Sendable {
     let id: UUID
     let content: String
     let imageFileName: String?

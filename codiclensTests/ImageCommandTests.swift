@@ -53,8 +53,8 @@ struct ImageCommandTests {
 
         let textItem = ClipboardItem(content: "clipboard text")
         let imageItem = ClipboardItem(imageFileName: "image.png")
-        #expect(SubjectAction.actions(for: Subject(clipboardItem: textItem)).contains { $0.name == "QR Code" })
-        #expect(!SubjectAction.actions(for: Subject(clipboardItem: imageItem)).contains { $0.name == "QR Code" })
+        #expect(SubjectAction.actions(for: Subject(clipboardItem: textItem, imageURL: nil)).contains { $0.name == "QR Code" })
+        #expect(!SubjectAction.actions(for: Subject(clipboardItem: imageItem, imageURL: nil)).contains { $0.name == "QR Code" })
 
         let names = SubjectAction.actions(for: Subject(text: "ordered")).map(\.name)
         let searchIndex = try #require(names.firstIndex(of: "Search Web"))

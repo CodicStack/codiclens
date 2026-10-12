@@ -1,7 +1,7 @@
 import AppKit
 import UniformTypeIdentifiers
 
-enum BuiltInType {
+enum BuiltInType: CaseIterable {
     case settings
     case clipboard
     case emoji
@@ -34,6 +34,11 @@ struct Subject: Identifiable {
     let url: URL?
     let icon: NSImage
     let kind: SubjectKind
+    /// The file whose contents stand in for `icon` once Quick Look has drawn
+    /// them, through `ThumbnailImage`: a file Subject's own file, or a
+    /// Clipboard Image's stored PNG. `nil` for everything that is its icon — an
+    /// app, a folder, text, a Built-in.
+    let thumbnailURL: URL?
 
     var subtitle: String {
         switch kind {
@@ -71,15 +76,27 @@ struct Subject: Identifiable {
         return nil
     }
 
-    init(displayName: String, path: String?, url: URL?, icon: NSImage, kind: SubjectKind) {
+    init(
+        displayName: String,
+        path: String?,
+        url: URL?,
+        icon: NSImage,
+        kind: SubjectKind,
+        thumbnailURL: URL? = nil
+    ) {
         self.displayName = displayName
         self.path = path
         self.url = url
         self.icon = icon
         self.kind = kind
+        self.thumbnailURL = thumbnailURL
     }
 
-    init(clipboardItem item: ClipboardItem) {
+    /// A Clipboard Item as a Subject. `imageURL` is its stored PNG, which only
+    /// `ClipboardHistory` can say — `url` is the file it was copied *from*, a
+    /// name and nothing else (`CONTEXT.md`, **Clipboard Item**) — and it is
+    /// what the Subject's thumbnail is drawn from.
+    init(clipboardItem item: ClipboardItem, imageURL: URL?) {
         let symbol = item.isImage ? "photo" : "text.alignleft"
         let icon = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage()
         icon.size = NSSize(width: 32, height: 32)
@@ -88,7 +105,8 @@ struct Subject: Identifiable {
             path: item.originalFilePath,
             url: item.originalFileURL,
             icon: icon,
-            kind: .clipboard(item)
+            kind: .clipboard(item),
+            thumbnailURL: imageURL
         )
     }
 

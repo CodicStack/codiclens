@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 /// A Query beginning `/` or `~` is a path and nothing else. Those two prefixes
 /// cannot begin an app name, which is exactly why they were chosen: a Path
 /// Subject never competes with the app Index, so none of the Index's gates —
-/// `isIndexReady`, `canReportNoResults`, Text Mode — move for it. See
+/// `isIndexReady`, `canReportNoResults` — move for it. See
 /// `docs/adr/0008-a-file-can-be-a-subject.md`.
 ///
 /// This is deliberately one function's worth of work: `String` → `URL` →
@@ -81,15 +81,20 @@ enum PathSubject {
             ? resolved.deletingPathExtension().lastPathComponent
             : resolved.lastPathComponent
 
+        // The icon is the file's generic one, drawn at once; a file's
+        // thumbnail replaces it when Quick Look has one. A folder and an app
+        // are their icons and get no thumbnail.
         let icon = NSWorkspace.shared.icon(forFile: resolved.path)
         icon.size = NSSize(width: 32, height: 32)
+        let isFile = if case .file = kind { true } else { false }
 
         return Subject(
             displayName: name,
             path: resolved.path,
             url: resolved,
             icon: icon,
-            kind: kind
+            kind: kind,
+            thumbnailURL: isFile ? resolved : nil
         )
     }
 }

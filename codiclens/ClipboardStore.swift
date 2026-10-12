@@ -36,8 +36,10 @@ final class FileClipboardStore: ClipboardStore {
         directory(root).appendingPathComponent("clipboard_history.json")
     }
 
+    /// Not created on read: `imageURL(named:)` is asked for every image row
+    /// the Results Slab draws, and only a write needs the directory to exist.
     private var imagesDirectory: URL {
-        directory(root.appendingPathComponent("images"))
+        root.appendingPathComponent("images")
     }
 
     private var previewsDirectory: URL {
@@ -70,10 +72,12 @@ final class FileClipboardStore: ClipboardStore {
     }
 
     func writeImage(_ data: Data, named fileName: String) throws {
+        _ = directory(imagesDirectory)
         try data.write(to: imageURL(named: fileName), options: .atomic)
     }
 
     func copyImage(from source: URL, named fileName: String) throws {
+        _ = directory(imagesDirectory)
         try FileManager.default.copyItem(at: source, to: imageURL(named: fileName))
     }
 

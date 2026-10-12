@@ -111,20 +111,6 @@ struct FileSubjectTests {
         #expect(coordinator.submit().isEmpty, "nothing to act on")
     }
 
-    /// A path is not prose. Text Mode fires on zero *app* matches, and a path
-    /// Query never asks the Index anything.
-    @Test func aPathQueryNeverTripsTextMode() throws {
-        let root = try fixtureDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let (coordinator, _) = makeCoordinator()
-
-        coordinator.subjectVM.searchText = root.path
-        #expect(!coordinator.isTextMode)
-
-        coordinator.subjectVM.searchText = "/no/such/place/zzqqzz"
-        #expect(!coordinator.isTextMode, "an unresolved path is not text either")
-    }
-
     /// The Index gates do not move for a path, in either direction. `/` and `~`
     /// cannot collide with an app name, so `isIndexReady` and
     /// `canReportNoResults` are exactly what they were.

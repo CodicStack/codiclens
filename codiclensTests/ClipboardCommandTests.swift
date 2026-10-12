@@ -106,6 +106,23 @@ struct ClipboardCommandTests {
         #expect(coordinator.phase == .browsingClipboard)
     }
 
+    @Test func deletingFromTheActionKeepsTheQueryAndSelectsTheNextRow() throws {
+        let (coordinator, _, history) = makeCoordinator(seededWith: ["apple tart", "banana", "apple pie"])
+        browse(coordinator)
+        coordinator.clipboardVM.searchText = "apple"
+        let dropped = try #require(coordinator.currentClipboardItem)
+        coordinator.advancePhase()
+        try selectAction("Delete from History", in: coordinator)
+
+        coordinator.submit()
+
+        #expect(history.items.contains { $0.id == dropped.id } == false)
+        #expect(coordinator.phase == .browsingClipboard)
+        #expect(coordinator.currentQuery == "apple")
+        #expect(coordinator.clipboardVM.filteredItems.count == 1)
+        #expect(coordinator.currentClipboardItem?.content.hasPrefix("apple") == true)
+    }
+
     @Test func countingShowsTheResultWithoutLeavingThePanel() throws {
         let (coordinator, runner, _) = makeCoordinator(seededWith: ["a b c"])
         browse(coordinator)
@@ -185,6 +202,105 @@ struct ClipboardCommandTests {
         }
         #expect(data == png)
         #expect(type == .png)
+    }
+
+    // MARK: - Cmd+Backspace
+
+    @Test func cmdBackspaceDeletesTheSelectedEntryAndStaysInTheBrowser() {
+        let (coordinator, runner, history) = makeCoordinator(seededWith: ["oldest", "middle", "newest"])
+        browse(coordinator)
+        coordinator.clipboardVM.selectedIndex = 1   // "middle"
+
+        #expect(coordinator.deleteSelectedClipboardItem())
+
+        #expect(history.items.map(\.content) == ["newest", "oldest"])
+        #expect(coordinator.phase == .browsingClipboard)
+        #expect(coordinator.currentClipboardItem?.content == "oldest", "the row that took its place")
+        #expect(runner.recorded.isEmpty, "nothing hides the Panel")
+    }
+
+    @Test func cmdBackspaceKeepsTheQuery() {
+        let (coordinator, _, history) = makeCoordinator(seededWith: ["apple tart", "banana", "apple pie"])
+        browse(coordinator)
+        coordinator.clipboardVM.searchText = "apple"
+        let dropped = coordinator.currentClipboardItem
+
+        #expect(coordinator.deleteSelectedClipboardItem())
+
+        #expect(history.items.count == 2)
+        #expect(history.items.contains { $0.id == dropped?.id } == false)
+        #expect(coordinator.currentQuery == "apple")
+        #expect(coordinator.clipboardVM.filteredItems.count == 1)
+        #expect(coordinator.currentClipboardItem?.content.hasPrefix("apple") == true)
+    }
+
+    @Test func cmdBackspaceOnTheLastRowSelectsTheNewLastRow() {
+        let (coordinator, _, _) = makeCoordinator(seededWith: ["oldest", "middle", "newest"])
+        browse(coordinator)
+        coordinator.clipboardVM.selectedIndex = 2   // "oldest"
+
+        coordinator.deleteSelectedClipboardItem()
+
+        #expect(coordinator.clipboardVM.selectedIndex == 1)
+        #expect(coordinator.currentClipboardItem?.content == "middle")
+    }
+
+    @Test func cmdBackspaceOnTheOnlyEntryLeavesAnEmptyBrowser() {
+        let (coordinator, _, history) = makeCoordinator(seededWith: ["only"])
+        browse(coordinator)
+
+        coordinator.deleteSelectedClipboardItem()
+
+        #expect(history.items.isEmpty)
+        #expect(coordinator.phase == .browsingClipboard)
+        #expect(coordinator.currentClipboardItem == nil)
+        #expect(coordinator.currentResults.isEmpty)
+    }
+
+    @Test func cmdBackspaceDeletesAnImageEntrysStoredPNG() {
+        let store = InMemoryClipboardStore()
+        let history = ClipboardHistory(store: store)
+        history.recordImage(Data([0x89, 0x50, 0x4E, 0x47]))
+        let coordinator = CommandCoordinator(
+            runner: RecordingEffectRunner(), history: history, index: inertAppIndex
+        )
+        browse(coordinator)
+        #expect(store.images.count == 1)
+
+        #expect(coordinator.deleteSelectedClipboardItem())
+
+        #expect(history.items.isEmpty)
+        #expect(store.images.isEmpty)
+    }
+
+    /// Outside Clipboard Mode the key retreats the Phase instead, which the view
+    /// does on `false` — and nothing is deleted on the way.
+    @Test func cmdBackspaceDeletesNothingOnceAnEntryIsTheSubject() {
+        let (coordinator, _, history) = makeCoordinator(seededWith: ["hello"])
+        browse(coordinator)
+        coordinator.advancePhase()
+        #expect(coordinator.phase == .pickingAction)
+
+        #expect(coordinator.deleteSelectedClipboardItem() == false)
+        #expect(history.items.map(\.content) == ["hello"])
+        #expect(coordinator.phase == .pickingAction)
+    }
+
+    @Test func cmdBackspaceDeletesNothingInSubjectSearch() {
+        let (coordinator, _, history) = makeCoordinator(seededWith: ["hello"])
+
+        #expect(coordinator.deleteSelectedClipboardItem() == false)
+        #expect(history.items.map(\.content) == ["hello"])
+    }
+
+    @Test func cmdBackspaceDeletesNothingWhileTheEntryIsBeingEdited() {
+        let (coordinator, _, history) = makeCoordinator(seededWith: ["hello"])
+        browse(coordinator)
+        coordinator.toggleTextSubjectEdit()
+        #expect(coordinator.isEditingTextSubject)
+
+        #expect(coordinator.deleteSelectedClipboardItem() == false)
+        #expect(history.items.map(\.content) == ["hello"])
     }
 
     // MARK: - Retreating

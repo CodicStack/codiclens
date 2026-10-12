@@ -19,7 +19,7 @@ struct TargetSearchVMTests {
             url: nil,
             sharingService: service
         )
-        let viewModel = TargetSearchVM { _ in [shareTarget] }
+        let viewModel = TargetSearchVM(shareTargetProvider: { _ in [shareTarget] }, searchFiles: { _ in [] })
         let finder = Subject(
             displayName: "Finder",
             path: "/System/Library/CoreServices/Finder.app",

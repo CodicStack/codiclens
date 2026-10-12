@@ -160,6 +160,130 @@ struct TextSubjectEditingTests {
         #expect(!coordinator.isEditingTextSubject)
     }
 
+    // MARK: - ⌘E on a Query
+
+    /// The only way a Query becomes text (ADR 0012): ⌘E opens the editor with
+    /// the Query in it, saving stands the text where the Query was, and Tab
+    /// goes on to a text Subject's Actions.
+    @Test func cmdEOnAQueryOpensTheEditorWithTheQuery() throws {
+        let (coordinator, history) = makeCoordinator()
+        coordinator.subjectVM.searchText = "hello world"
+        #expect(coordinator.subjectVM.results.isEmpty, "nothing matched, and nothing stood in")
+
+        coordinator.toggleTextSubjectEdit()
+        #expect(coordinator.isEditingTextSubject)
+        #expect(coordinator.textSubjectEditText == "hello world")
+        #expect(coordinator.phase == .searchingSubject)
+
+        coordinator.toggleTextSubjectEdit()
+        #expect(!coordinator.isEditingTextSubject)
+        #expect(coordinator.isTextMode)
+        guard case .text(let rawText)? = coordinator.selectedSubject?.kind else {
+            Issue.record("saving leaves a text Subject")
+            return
+        }
+        #expect(rawText == "hello world")
+
+        coordinator.advancePhase()
+        #expect(coordinator.phase == .pickingAction)
+        let index = try #require(
+            coordinator.actionVM.filteredActions.firstIndex { $0.name == "Search Web" }
+        )
+        coordinator.actionVM.selectedIndex = index
+        let expected = try #require(URL(string: "https://www.google.com/search?q=hello%20world"))
+        #expect(coordinator.submit() == [.hide, .open(expected)])
+        #expect(history.items.isEmpty, "a Query is not a Clipboard Item")
+    }
+
+    /// What is saved is the edit, not the Query, and Enter acts on it.
+    @Test func theSavedEditStandsInPlaceOfTheQuery() {
+        let (coordinator, _) = makeCoordinator()
+        coordinator.subjectVM.searchText = "helo"
+
+        coordinator.toggleTextSubjectEdit()
+        coordinator.textSubjectEditText = "hello"
+        coordinator.toggleTextSubjectEdit()
+
+        #expect(coordinator.subjectVM.results.map(\.displayName) == ["hello"])
+        #expect(coordinator.submit() == [.hide, .copy(.text("hello"))])
+    }
+
+    /// ⌘E does not care whether an app matched: the user asked for text.
+    @Test func cmdEWorksWhenTheQueryMatchedSomething() {
+        let (coordinator, _) = makeCoordinator()
+        coordinator.subjectVM.searchText = "clip"
+        #expect(coordinator.subjectVM.results.map(\.displayName) == ["Clipboard"])
+
+        coordinator.toggleTextSubjectEdit()
+        #expect(coordinator.textSubjectEditText == "clip")
+        coordinator.toggleTextSubjectEdit()
+
+        #expect(coordinator.isTextMode)
+        #expect(coordinator.subjectVM.results.count == 1)
+    }
+
+    /// A path Query is a path until the user asks for it as text.
+    @Test func cmdEMakesAPathQueryText() {
+        let (coordinator, _) = makeCoordinator()
+        coordinator.subjectVM.searchText = "/no/such/place"
+
+        coordinator.toggleTextSubjectEdit()
+
+        #expect(coordinator.isEditingTextSubject)
+        #expect(coordinator.textSubjectEditText == "/no/such/place")
+    }
+
+    /// A URL typed as a Query gets Open URL once it is text.
+    @Test func aURLQueryGetsOpenURL() throws {
+        let (coordinator, _) = makeCoordinator()
+        coordinator.subjectVM.searchText = "https://example.com"
+        coordinator.toggleTextSubjectEdit()
+
+        coordinator.saveTextSubjectEditAndAdvance()
+
+        #expect(coordinator.phase == .pickingAction)
+        let index = try #require(
+            coordinator.actionVM.filteredActions.firstIndex { $0.name == "Open URL" }
+        )
+        coordinator.actionVM.selectedIndex = index
+        let url = try #require(URL(string: "https://example.com"))
+        #expect(coordinator.submit() == [.hide, .open(url)])
+    }
+
+    @Test func cmdEOnAnEmptyQueryDoesNothing() {
+        let (coordinator, _) = makeCoordinator()
+
+        coordinator.toggleTextSubjectEdit()
+
+        #expect(!coordinator.isEditingTextSubject)
+    }
+
+    /// Escape in the editor discards ⌘E altogether: the Query is a search again.
+    @Test func escapeFromTheQueryEditorLeavesTheSearchAsItWas() {
+        let (coordinator, _) = makeCoordinator()
+        coordinator.subjectVM.searchText = "clip"
+        coordinator.toggleTextSubjectEdit()
+
+        #expect(coordinator.handleEscape())
+
+        #expect(!coordinator.isTextMode)
+        #expect(coordinator.subjectVM.results.map(\.displayName) == ["Clipboard"])
+    }
+
+    /// Escape on the saved text undoes ⌘E, rather than clearing the Query.
+    @Test func escapeOnTheStandingTextGoesBackToTheQuery() {
+        let (coordinator, _) = makeCoordinator()
+        coordinator.subjectVM.searchText = "clip"
+        coordinator.toggleTextSubjectEdit()
+        coordinator.toggleTextSubjectEdit()
+
+        #expect(coordinator.handleEscape(), "consumed, not a dismissal")
+
+        #expect(!coordinator.isTextMode)
+        #expect(coordinator.subjectVM.searchText == "clip")
+        #expect(coordinator.subjectVM.results.map(\.displayName) == ["Clipboard"])
+    }
+
     // MARK: - Escape
 
     @Test func escapeClosesTheEditorWithoutSaving() {

@@ -29,8 +29,13 @@ extension SubjectSearchVM: SearchScope {
     /// search said *no* for six-tenths of a second and then changed its mind.
     /// That is the whole of the reported defect, and a debounce cannot fix it
     /// because a debounce is what it is.
+    ///
+    /// The list below the apps is the one thing that does wait, for typing to
+    /// pause, and it is not withheld either: until it lands there is nothing
+    /// there, and "No results" waits for it (`hasAnswered`). Its rows carry
+    /// their own display, which names the Source each came from.
     var displayResults: [ResultDisplayItem] {
-        results.map { ResultDisplayItem(from: $0) }
+        results.map { sourceResult(for: $0)?.display ?? ResultDisplayItem(from: $0) }
     }
 }
 
@@ -48,7 +53,7 @@ extension TargetSearchVM: SearchScope {
 
 extension ClipboardSearchVM: SearchScope {
     var displayResults: [ResultDisplayItem] {
-        filteredItems.map { ResultDisplayItem(from: $0) }
+        filteredItems.map { ResultDisplayItem(from: $0, imageURL: imageURL(for: $0)) }
     }
 }
 
