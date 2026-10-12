@@ -139,7 +139,7 @@ final class ClipboardHistory {
     ///
     /// Never the file the image was copied from, even when that file is still
     /// there. A Clipboard Item is a **snapshot** — the pixels as they were at
-    /// copy time (`CONTEXT.md`, **Clipboard Item**) — so Quick Look, Paste,
+    /// copy time (`GLOSSARY.md`, **Clipboard Item**) — so Quick Look, Paste,
     /// Share and Open in Preview all show the same thing, and editing the
     /// original afterwards changes none of them. `originalFilePath` survives to
     /// lend the entry its name and nothing else.

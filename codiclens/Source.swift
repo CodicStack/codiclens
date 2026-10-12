@@ -1,6 +1,6 @@
 import Foundation
 
-/// A place Subjects come from — see `CONTEXT.md`, **Source**. Four are built
+/// A place Subjects come from — see `GLOSSARY.md`, **Source**. Four are built
 /// in and always listed; the rest are folders the user added, and only those
 /// feed the File Index.
 nonisolated struct Source: Identifiable, Hashable, Sendable {

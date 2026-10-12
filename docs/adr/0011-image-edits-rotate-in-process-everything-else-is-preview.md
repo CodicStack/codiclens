@@ -46,7 +46,7 @@ Apple's five buttons.
 - **A rotating Action that returns `.hide` is a bug, not a variation.** Same wording, same
   reason, as OCR in ADR 0007.
 - **Rotate is not Editing.** Editing is the text-Subject Action on the Card
-  (`CONTEXT.md`). An image Subject has no editor and Codiclens ships none.
+  (`GLOSSARY.md`). An image Subject has no editor and Codiclens ships none.
 - **Don't reach for `QLPreviewPanel` customisation again.** The toolbar list above is the
   whole of it; treat a request for inline Markup as a request for Open in Preview.
 - The two rotations are two Actions rather than one Action with a Target. A direction is not

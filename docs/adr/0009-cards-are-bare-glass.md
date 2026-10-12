@@ -46,7 +46,7 @@ presence of its content — no colour, nothing extra drawn — so neither has an
 - **Selection Tint — accent-coloured glass on the focused Card.** Built 2026-09-11 and
   rejected the same day on sight: the blue read as awful; the app carries no colour.
 - **One fused glass body holding all three Phases.** Rejected by the user: the Panel reads as
-  three separate tiles with a gap, not one body with three regions (CONTEXT.md, **Card**).
+  three separate tiles with a gap, not one body with three regions (GLOSSARY.md, **Card**).
 - **Keep the Border Beam and rebuild the Card under it.** Rejected: the beam was the symptom.
   With Emphasis carrying focus there is nothing left for it to say — and it cost a
   pixel-render suite and a per-frame `trimmedPath` to say it.
@@ -62,7 +62,7 @@ presence of its content — no colour, nothing extra drawn — so neither has an
   Transition and uses `resize`; under Reduce Motion the glass transition is `.identity`.
 - **ADR 0001's "each Slab draws its own SwiftUI shadow" now applies to the Results Slab only.**
   A Card's shadow is the material's.
-- `CONTEXT.md` changes: **Emphasis** and **Arrival** are new, **Card** is rewritten, and
+- `GLOSSARY.md` changes: **Emphasis** and **Arrival** are new, **Card** is rewritten, and
   **Lamp**, **Border Beam** and **Selection Tint** are retired words — not to be reintroduced
   under a new name.
 - The "no accent colour" rule (2026-08 →) **stands**. What changed is its cost: focus no

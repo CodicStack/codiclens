@@ -1,7 +1,7 @@
 import Foundation
 import Synchronization
 
-/// The File Index — see `CONTEXT.md`. What the files in the folder Sources
+/// The File Index — see `GLOSSARY.md`. What the files in the folder Sources
 /// are called, where they are, what the ones with words in them say, and —
 /// with search by meaning on — what every one of them says, shows or sounds
 /// like as vectors, on disk in `FileIndex.sqlite` (and `FileIndex.vectors`,

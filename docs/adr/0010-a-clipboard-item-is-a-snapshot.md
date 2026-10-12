@@ -28,7 +28,7 @@ next use, and there is no hook that would make it feel live. The obvious one —
 when Quick Look closes — does not exist: Quick Look closes the moment Preview activates,
 which is *before* the user has typed a character, so the save would always be missed.
 
-Snapshot also makes the rule one sentence long, which is why it is in `CONTEXT.md` under
+Snapshot also makes the rule one sentence long, which is why it is in `GLOSSARY.md` under
 **Clipboard Item** rather than only here.
 
 ## Consequences

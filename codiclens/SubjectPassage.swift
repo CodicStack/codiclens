@@ -2,7 +2,7 @@ import Foundation
 import PDFKit
 import UniformTypeIdentifiers
 
-/// A File Result's Passage (`CONTEXT.md`, **Passage**) as it travels with the
+/// A File Result's Passage (`GLOSSARY.md`, **Passage**) as it travels with the
 /// Subject chosen from it: the row, the Subject, the Subject Card, and the
 /// Action Phase after Tab. What the Card shows of the file, where Shift+Space
 /// opens it, and the moment Enter plays a recording from.

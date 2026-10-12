@@ -230,7 +230,7 @@ struct SubjectAction: Identifiable {
     /// Reading the text out of an image.
     ///
     /// Named for the acronym deliberately, against Apple's "Recognize Text" —
-    /// it is the word the user reaches for. See `CONTEXT.md`.
+    /// it is the word the user reaches for. See `GLOSSARY.md`.
     private static let ocr = SubjectAction(
         name: "OCR",
         icon: .sfSymbol("text.viewfinder"),
@@ -273,7 +273,7 @@ struct SubjectAction: Identifiable {
     ///
     /// Not Final: the service is the Target. Every Subject that *has* content
     /// carries it — text, Emoji, a Clipboard Item, a file, a folder
-    /// (`CONTEXT.md`, **Share**). The Finder Subject deliberately does not: the
+    /// (`GLOSSARY.md`, **Share**). The Finder Subject deliberately does not: the
     /// grammar gives an Action one Target, and Finder's is the file, so a file
     /// found there is shared by making it the Subject first ("Use as Subject").
     private static let share = SubjectAction(

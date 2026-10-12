@@ -494,7 +494,7 @@ nonisolated final class FileIndexWriter {
 /// A file the File Index matched, by its name or by what it says: what a
 /// File Result or a Finder Target is built from.
 nonisolated struct FileHit: Hashable, Sendable {
-    /// The part of the file that matched (`CONTEXT.md`, **Passage**), as a
+    /// The part of the file that matched (`GLOSSARY.md`, **Passage**), as a
     /// row shows it.
     struct Passage: Hashable, Sendable {
         /// A few words either side of the match, on one line. Empty for a
