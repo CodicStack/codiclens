@@ -1,21 +1,35 @@
 import AppKit
 
-struct ActionTarget: Identifiable {
+/// `nonisolated` because Finder's Target list builds its Targets off the main
+/// thread (`FileTargetSearch`).
+nonisolated struct ActionTarget: Identifiable {
     let id = UUID()
     let name: String
     let icon: NSImage
+    /// The file whose thumbnail replaces `icon` once Quick Look has drawn it —
+    /// a file found through Finder. `nil` for an app or a sharing service.
+    let thumbnailURL: URL?
     let subtitle: String
     let url: URL?
     let sharingService: NSSharingService?
 
-    init(name: String, icon: NSImage, subtitle: String = "", url: URL?, sharingService: NSSharingService?) {
+    init(
+        name: String,
+        icon: NSImage,
+        thumbnailURL: URL? = nil,
+        subtitle: String = "",
+        url: URL?,
+        sharingService: NSSharingService?
+    ) {
         self.name = name
         self.icon = icon
+        self.thumbnailURL = thumbnailURL
         self.subtitle = subtitle
         self.url = url
         self.sharingService = sharingService
     }
 
+    @MainActor
     static func openWithTargets(for subject: Subject) -> [ActionTarget] {
         guard let subjectURL = subject.url else { return [] }
         let appURLs = NSWorkspace.shared.urlsForApplications(toOpen: subjectURL)
@@ -32,6 +46,7 @@ struct ActionTarget: Identifiable {
     /// for either — so the two paths can't drift apart. The Payload is turned
     /// into an item by `SharePayloadItems`, the same conversion the Share
     /// Effect performs with, so the list can't disagree with the send.
+    @MainActor
     static func shareTargets(for payload: Payload) -> [ActionTarget] {
         let items = [SharePayloadItems.item(for: payload)]
 

@@ -47,12 +47,12 @@ final class EmojiSearchVM {
     /// that an exact keyword ("hot" → 🔥) still beats a name match buried
     /// mid-word, large enough that it never beats a name that starts with the
     /// Query ("hot" → "hot dog").
-    static let keywordDiscount = 5
+    nonisolated static let keywordDiscount = 5
 
     /// What being in Recents is worth. Enough to lift a relevant Emoji past its
     /// equally-good neighbours, not enough to drag an irrelevant one into view —
     /// Recents only ever adjust an Emoji that already matched.
-    static let recentsBoost = 4
+    nonisolated static let recentsBoost = 4
 
     /// How many cells to a row. The keyboard model needs this to jump a row, so
     /// it lives with the model rather than with the view.
@@ -177,7 +177,7 @@ final class EmojiSearchVM {
     /// whatever came out. Recents can only improve an Emoji that already
     /// matched, so a Query never surfaces something irrelevant just because it
     /// was used once.
-    static func score(_ emoji: Emoji, query: String, recentRank: Int?) -> Int? {
+    nonisolated static func score(_ emoji: Emoji, query: String, recentRank: Int?) -> Int? {
         var best = fuzzyScore(emoji.name, query)
 
         for keyword in emoji.keywords {
@@ -194,9 +194,21 @@ final class EmojiSearchVM {
     /// Emoji that match, best first. Ties break towards Recents, then towards
     /// the canonical Unicode order, so the result is stable.
     static func rank(_ emoji: [Emoji], query: String, recents: EmojiRecents) -> [Emoji] {
-        emoji.enumerated()
+        scored(emoji, query: query, recents: recents.strings).map(\.emoji)
+    }
+
+    /// `rank`, keeping each Emoji's score, from a copy of the Recents rather
+    /// than the store — so it can run off the main thread, which is where the
+    /// list below the apps in Subject search ranks Emoji.
+    nonisolated static func scored(
+        _ emoji: [Emoji],
+        query: String,
+        recents: [String]
+    ) -> [(emoji: Emoji, score: Int)] {
+        let recentRanks = Dictionary(recents.enumerated().map { ($1, $0) }, uniquingKeysWith: min)
+        return emoji.enumerated()
             .compactMap { offset, candidate -> (Emoji, Int, Int, Int)? in
-                let recentRank = recents.rank(of: candidate)
+                let recentRank = recentRanks[candidate.string]
                 guard let score = score(candidate, query: query, recentRank: recentRank) else {
                     return nil
                 }
@@ -207,7 +219,7 @@ final class EmojiSearchVM {
                 if $0.2 != $1.2 { return $0.2 < $1.2 }
                 return $0.3 < $1.3
             }
-            .map(\.0)
+            .map { (emoji: $0.0, score: $0.1) }
     }
 
     // MARK: Selection

@@ -81,6 +81,8 @@ final class PasteboardWatcher {
     /// Every pasteboard read happens here, synchronously, before anything is
     /// handed off — so the background conversion never touches `NSPasteboard`.
     func record(timestamp: Date = Date()) {
+        guard !isConcealed() else { return }
+
         let originalImageURL = imageFileURLs().first
 
         // Raw image data wins: a screenshot is on the pasteboard as PNG or TIFF.
@@ -115,6 +117,20 @@ final class PasteboardWatcher {
     static func pngData(fromTIFF data: Data) -> Data? {
         guard let bitmap = NSBitmapImageRep(data: data) else { return nil }
         return bitmap.representation(using: .png, properties: [:])
+    }
+
+    /// The nspasteboard.org markers a password manager puts beside a secret it
+    /// copies: concealed means the contents are a secret, transient means they
+    /// are not the user's to keep. Password managers such as 1Password set them,
+    /// and a clipboard manager is meant to record nothing at all for that
+    /// change — not the text, and not an image or file riding along with it.
+    static let concealedTypes: [NSPasteboard.PasteboardType] = [
+        NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"),
+        NSPasteboard.PasteboardType("org.nspasteboard.TransientType"),
+    ]
+
+    private func isConcealed() -> Bool {
+        pasteboard.availableType(from: Self.concealedTypes) != nil
     }
 
     private func imageFileURLs() -> [URL] {

@@ -51,7 +51,12 @@ func highlightedName(_ name: String, query: String) -> AttributedString {
     return attributed
 }
 
-func fuzzyScore(_ name: String, _ query: String) -> Int? {
+/// How well `name` answers `query`: lower is better, `nil` is no match.
+///
+/// `nonisolated` because the File Index's reader and Finder's Target search
+/// rank with it off the main thread, and so does the list below the apps in
+/// Subject search. It touches nothing but its arguments.
+nonisolated func fuzzyScore(_ name: String, _ query: String) -> Int? {
     let n = name.lowercased()
     let q = query.lowercased()
 
@@ -93,7 +98,7 @@ func fuzzyScore(_ name: String, _ query: String) -> Int? {
     return nil
 }
 
-private func isSubsequence(_ query: String, of target: String) -> Bool {
+nonisolated private func isSubsequence(_ query: String, of target: String) -> Bool {
     var qi = query.startIndex
     for char in target {
         if qi < query.endIndex && char == query[qi] {
@@ -103,7 +108,7 @@ private func isSubsequence(_ query: String, of target: String) -> Bool {
     return qi == query.endIndex
 }
 
-func levenshteinDistance(_ s1: String, _ s2: String) -> Int {
+nonisolated func levenshteinDistance(_ s1: String, _ s2: String) -> Int {
     let a = Array(s1.lowercased())
     let b = Array(s2.lowercased())
     let m = a.count

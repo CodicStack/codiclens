@@ -134,12 +134,20 @@ struct ResultsListView: View {
     /// No magnifying glass either, for the same reason: the Query bar
     /// immediately below carries one, and two of them a few points apart read as
     /// two search fields. The bar's is the one that means something.
+    ///
+    /// In Subject search it offers ⌘E, which is how a Query becomes text now
+    /// that nothing turns it into text on its own — see
+    /// `docs/adr/0012-files-in-subject-search-text-mode-is-cmd-e.md`. Not while
+    /// the editor is open: that is ⌘E already pressed.
     private var emptyState: some View {
         HStack(spacing: 8) {
             Text("No results")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
             Spacer()
+            if coordinator.phase == .searchingSubject && !coordinator.isEditingTextSubject {
+                KeyHintChip(keys: "⌘E use as text")
+            }
         }
         .padding(.horizontal, Style.padding)
         .frame(minHeight: PanelLayout.messageRowHeight)
@@ -235,8 +243,12 @@ private struct ResultRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            iconView
-                .frame(width: PanelLayout.resultIconSize, height: PanelLayout.resultIconSize)
+            // A file's row starts on its icon and swaps to the thumbnail when
+            // Quick Look has drawn it. Only rows the `LazyVStack` builds ask.
+            ThumbnailImage(url: item.thumbnailURL, side: PanelLayout.resultIconSize) {
+                iconView
+            }
+            .frame(width: PanelLayout.resultIconSize, height: PanelLayout.resultIconSize)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(highlightedName(item.name, query: query))

@@ -12,7 +12,25 @@ class CommandCoordinator {
         case showingResult(String)
     }
 
-    var phase: Phase = .searchingSubject
+    var phase: Phase = .searchingSubject {
+        didSet {
+            // The Last Subject stands in the Subject search the Panel opened
+            // on, and in the Actions Tab opened from there. Any other Phase is
+            // somewhere else, and Shift+Tab must not bring it back.
+            if phase != .searchingSubject && phase != .pickingAction {
+                isLastSubjectStanding = false
+            }
+            if phase == .browsingClipboard || phase == .browsingEmoji {
+                isSubjectFromSearch = false
+            }
+        }
+    }
+
+    /// Whether the Subject was chosen from Subject search's Results, so
+    /// Shift+Tab from its Actions goes back there. A Clipboard Item or an Emoji
+    /// chosen from the list below the apps would otherwise be sent to the
+    /// Clipboard browser or the Emoji grid, which it never came from.
+    private var isSubjectFromSearch = false
     var focusTrigger: Bool = false
 
     private(set) var selectedSubject: Subject?
@@ -23,7 +41,7 @@ class CommandCoordinator {
 
     let subjectVM: SubjectSearchVM
     let actionVM = ActionSearchVM()
-    let targetVM = TargetSearchVM()
+    let targetVM: TargetSearchVM
     let clipboardVM: ClipboardSearchVM
     let emojiVM: EmojiSearchVM
     let queryBuffer = QueryBuffer()
@@ -40,17 +58,29 @@ class CommandCoordinator {
     ///   - index: the app Index Subject search matches against. Tests pass an
     ///     Index over no directories, so no test scans `/Applications` or
     ///     starts an FSEvents stream.
+    ///   - sources: the Sources and their switches.
+    ///   - searchFiles: the File Index, read by Subject search and by Finder's
+    ///     Target list. Tests pass a stand-in.
     init(
         runner: EffectRunner,
         history: ClipboardHistory,
         emojiVM: EmojiSearchVM = EmojiSearchVM(),
-        index: AppIndex = .shared
+        index: AppIndex = .shared,
+        sources: SourceStore = .shared,
+        searchFiles: @escaping FileIndex.Search = FileIndex.shared.searcher
     ) {
         self.runner = runner
         self.history = history
         self.clipboardVM = ClipboardSearchVM(history: history)
         self.emojiVM = emojiVM
-        self.subjectVM = SubjectSearchVM(index: index)
+        self.subjectVM = SubjectSearchVM(
+            index: index,
+            sources: sources,
+            history: history,
+            emoji: emojiVM,
+            searchFiles: searchFiles
+        )
+        self.targetVM = TargetSearchVM(searchFiles: searchFiles)
     }
 
     var cardCount: Int {
@@ -70,11 +100,65 @@ class CommandCoordinator {
         phase == .browsingEmoji
     }
 
-    var isTextMode: Bool {
-        let results = subjectVM.results
-        guard subjectVM.selectedIndex < results.count else { return false }
-        if case .text = results[subjectVM.selectedIndex].kind { return true }
-        return false
+    /// Whether the Query stands as a text Subject, which only ⌘E does.
+    var isTextMode: Bool { subjectVM.standsAsText }
+
+    // MARK: - Last Subject
+
+    /// The Clipboard Item or Emoji the user last acted on (`CONTEXT.md`,
+    /// **Last Subject**). In memory only: it outlives the Panel, not the app.
+    private(set) var lastSubject: Subject?
+
+    /// Whether the Last Subject is standing as the Subject: the Panel opened on
+    /// it and nothing has been typed since.
+    private(set) var isLastSubjectStanding = false
+
+    /// The Subject Card's Subject, and what Enter and Tab act on, while the
+    /// Last Subject stands. Not in `subjectVM.results`: it was not matched by
+    /// a Query, so it has no Result row and the Slab stays away.
+    var standingSubject: Subject? {
+        guard isLastSubjectStanding, phase == .searchingSubject else { return nil }
+        return lastSubject
+    }
+
+    /// Notes what was just acted on. Only a Clipboard Item still in Clipboard
+    /// History, or an Emoji, becomes the Last Subject; acting on anything else
+    /// ends it, because it is the *last* thing acted on.
+    private func remember(actedOn subject: Subject) {
+        switch subject.kind {
+        case .clipboard(let item):
+            lastSubject = history.index(of: item) == nil ? nil : subject
+        case .emoji:
+            lastSubject = subject
+        default:
+            lastSubject = nil
+        }
+    }
+
+    /// Stands the Last Subject as the Panel opens, with the Query empty.
+    ///
+    /// A Clipboard Item is looked up again rather than trusted: it may have
+    /// been deleted, or fallen off the end of the history, since. Without a
+    /// Last Subject the previous Query stays, settled, as it always has.
+    private func standLastSubject() {
+        if let item = lastSubject?.clipboardItem {
+            lastSubject = history.index(of: item).map { clipboardSubject(for: history.items[$0]) }
+        }
+        isLastSubjectStanding = lastSubject != nil
+        if isLastSubjectStanding { subjectVM.reset() }
+    }
+
+    /// A Subject search Result as it is chosen, by Enter or Tab.
+    ///
+    /// A File Result is resolved again through `PathSubject`, exactly as a
+    /// typed path is: it is what the File Index read some time ago, and
+    /// choosing it is the moment to ask the disk what it is now — an app
+    /// bundle in Downloads is an app, not a file. `nil` when it is gone. A
+    /// Path Subject was resolved as it was typed, and anything else is
+    /// already what it is.
+    private func chosen(_ result: Subject) -> Subject? {
+        guard case .file? = subjectVM.sourceResult(for: result)?.hit else { return result }
+        return result.url.flatMap { PathSubject.subject(for: $0) }
     }
 
     /// The Emoji selection as it would be pasted — the base wearing the tone in
@@ -107,13 +191,28 @@ class CommandCoordinator {
     ///
     /// While the Clipboard is being browsed the Subject has not been chosen
     /// yet, so the selected entry stands in for it. An image has no text and is
-    /// refused in both branches.
+    /// refused in every branch.
+    ///
+    /// In Subject search the Query itself is the text: ⌘E is how a Query
+    /// becomes a text Subject at all, whether or not it matched an app, and a
+    /// path Query too — the user asked for text. See
+    /// `docs/adr/0012-files-in-subject-search-text-mode-is-cmd-e.md`.
     private var editableTextSubject: (subject: Subject, text: String)? {
         if phase == .browsingClipboard {
             guard let item = currentClipboardItem, !item.isImage else { return nil }
-            return (Subject(clipboardItem: item), item.content)
+            return (clipboardSubject(for: item), item.content)
+        }
+        if phase == .searchingSubject {
+            if let standing = standingSubject { return Self.editableText(of: standing) }
+            if isTextMode { return Self.editableText(of: subjectVM.results[subjectVM.selectedIndex]) }
+            let query = subjectVM.searchText
+            if !query.isEmpty { return (Subject(text: query), query) }
         }
         guard let subject = selectedSubject else { return nil }
+        return Self.editableText(of: subject)
+    }
+
+    private static func editableText(of subject: Subject) -> (subject: Subject, text: String)? {
         switch subject.kind {
         case .text(let rawText):
             return (subject, rawText)
@@ -154,11 +253,19 @@ class CommandCoordinator {
         // still its only writer, and OCR Text reaches it only if the user
         // Copies or Pastes it.
         if let item = selectedSubject?.clipboardItem ?? currentClipboardItem {
+            // Editing replaces the entry with a new one, so the Subject is
+            // read back from the history: one detached from it could not be
+            // moved to the top on Paste, nor stand as the Last Subject.
+            let index = history.index(of: item)
             history.updateText(for: item, text: edited)
             clipboardVM.load()
-            newSubject = Subject(clipboardItem: ClipboardItem(content: edited))
+            newSubject = clipboardSubject(for: index.map { history.items[$0] } ?? ClipboardItem(content: edited))
+            if lastSubject?.clipboardItem?.id == item.id { lastSubject = newSubject }
         } else {
             newSubject = Subject(text: edited)
+            // Saved from Subject search, the text stands where the Query was,
+            // so Enter and Tab find it there.
+            if phase == .searchingSubject { subjectVM.standAsText(newSubject) }
         }
 
         selectedSubject = newSubject
@@ -243,14 +350,16 @@ class CommandCoordinator {
     /// the truth the instant the key lands, and the message must not be
     /// delayed. Subject search is the exception — it matches against the app
     /// Index, and until the first scan lands there is nothing to match against
-    /// and no honest way to say "No results". Target search is answering out of
+    /// and no honest way to say "No results"; and below the apps it has a
+    /// second list, which answers once typing pauses. It says "No results" only
+    /// when both have answered (`SubjectSearchVM.hasAnswered`). Target search is answering out of
     /// process, so it reports `isSearchInFlight` instead. OCR is not a search
     /// at all, but while it runs the Slab is showing "Reading text…" and must
     /// not be able to claim anything about Results either.
     var canReportNoResults: Bool {
         if isSearchInFlight { return false }
         if isOCRInFlight { return false }
-        if phase == .searchingSubject { return subjectVM.isIndexReady }
+        if phase == .searchingSubject { return subjectVM.hasAnswered }
         return true
     }
 
@@ -275,16 +384,16 @@ class CommandCoordinator {
     ///
     /// Once a subject search has settled, the next characters start a *new*
     /// query instead of extending the old one: type "saf" to land on Safari,
-    /// then "n", and the search is "n" — not "safn". Text mode is exempt,
-    /// because there the query is the content being edited rather than a way
-    /// of finding something.
+    /// then "n", and the search is "n" — not "safn". A Query standing as text
+    /// is no exception: its text was written in the editor, not here.
+    ///
+    /// The first keystroke also ends a standing Last Subject.
     /// - Returns: the text the field should now show, which differs from what
     ///   was typed whenever a settled query has just been replaced.
     @discardableResult
     func acceptTypedText(_ typed: String) -> String {
-        let startsNewQuery = phase == .searchingSubject
-            && subjectVM.isSearchCommitted
-            && !isTextMode
+        let startsNewQuery = phase == .searchingSubject && subjectVM.isSearchCommitted
+        if phase == .searchingSubject { isLastSubjectStanding = false }
 
         currentSearchText = queryBuffer.accept(typed, startsNewQuery: startsNewQuery)
         return queryBuffer.display
@@ -316,8 +425,9 @@ class CommandCoordinator {
         case .pickingTarget:
             retreatPhase()
             return true
+        // Undoes ⌘E: back to what the Query matched.
         case .searchingSubject where isTextMode:
-            subjectVM.reset()
+            subjectVM.withdrawText()
             focusTrigger.toggle()
             return true
         // Emoji Mode dismisses outright rather than falling back to Subject
@@ -398,9 +508,16 @@ class CommandCoordinator {
     func advancePhase() {
         switch phase {
         case .searchingSubject:
+            if let standing = standingSubject {
+                selectedSubject = standing
+                actionVM.loadActions(for: standing)
+                phase = .pickingAction
+                onPhaseChange?()
+                return
+            }
             let results = subjectVM.results
-            guard subjectVM.selectedIndex < results.count else { return }
-            let subject = results[subjectVM.selectedIndex]
+            guard subjectVM.selectedIndex < results.count,
+                  let subject = chosen(results[subjectVM.selectedIndex]) else { return }
             selectedSubject = subject
 
             if case .builtIn(.clipboard) = subject.kind {
@@ -417,6 +534,7 @@ class CommandCoordinator {
 
             actionVM.loadActions(for: subject)
             phase = .pickingAction
+            isSubjectFromSearch = true
             onPhaseChange?()
 
         case .browsingEmoji:
@@ -429,7 +547,7 @@ class CommandCoordinator {
 
         case .browsingClipboard:
             guard clipboardVM.selectedIndex < clipboardVM.filteredItems.count else { return }
-            let subject = Subject(clipboardItem: clipboardVM.filteredItems[clipboardVM.selectedIndex])
+            let subject = clipboardSubject(for: clipboardVM.filteredItems[clipboardVM.selectedIndex])
             selectedSubject = subject
             actionVM.loadActions(for: subject)
             phase = .pickingAction
@@ -459,7 +577,9 @@ class CommandCoordinator {
             phase = .searchingSubject
             onPhaseChange?()
         case .pickingAction:
-            if selectedClipboardItem != nil {
+            if isLastSubjectStanding || isSubjectFromSearch {
+                phase = .searchingSubject
+            } else if selectedClipboardItem != nil {
                 phase = .browsingClipboard
             } else if selectedSubject?.emoji != nil {
                 phase = .browsingEmoji
@@ -478,6 +598,35 @@ class CommandCoordinator {
             }
             onPhaseChange?()
         }
+    }
+
+    /// Cmd+Backspace on a Clipboard Item: deletes it from Clipboard History on
+    /// the spot, without asking, the way Finder's Cmd+Delete trashes a file.
+    /// The Panel, the Mode and the Query all stay.
+    ///
+    /// Only ever a Clipboard History entry, never a file: `currentClipboardItem`
+    /// exists only in Clipboard Mode.
+    ///
+    /// - Returns: whether there was a Clipboard Item to delete. When there was
+    ///   not, the key means `retreatPhase()`, as it does everywhere else.
+    @discardableResult
+    func deleteSelectedClipboardItem() -> Bool {
+        // The item under an open editor is not the one to delete out from under it.
+        guard !isEditingTextSubject, let item = currentClipboardItem else { return false }
+        removeFromHistory(item)
+        return true
+    }
+
+    /// The one way the user removes a Clipboard Item, by key or by the Delete
+    /// from History Action. Its stored image goes with it, and the browser comes
+    /// back on the same Query with the row that took its place selected.
+    private func removeFromHistory(_ item: ClipboardItem) {
+        history.remove(item)
+        if lastSubject?.clipboardItem?.id == item.id { lastSubject = nil }
+        clipboardVM.reload()
+        selectedSubject = nil
+        phase = .browsingClipboard
+        onPhaseChange?()
     }
 
     /// Fills the Target Phase for a non-Final Action.
@@ -512,9 +661,16 @@ class CommandCoordinator {
     private func submitEffects() -> [Effect] {
         switch phase {
         case .searchingSubject:
+            // Enter on the Last Subject does what Enter did when it was chosen:
+            // paste the Clipboard Item, insert the Emoji.
+            if let standing = standingSubject {
+                selectedSubject = standing
+                remember(actedOn: standing)
+                return defaultEffects(for: standing)
+            }
             let results = subjectVM.results
-            guard subjectVM.selectedIndex < results.count else { return [] }
-            let subject = results[subjectVM.selectedIndex]
+            guard subjectVM.selectedIndex < results.count,
+                  let subject = chosen(results[subjectVM.selectedIndex]) else { return [] }
             if case .builtIn(.clipboard) = subject.kind {
                 selectedSubject = subject
                 clipboardVM.load()
@@ -527,6 +683,12 @@ class CommandCoordinator {
                 enterEmojiMode()
                 return []
             }
+            // An Emoji from the list below the apps is used as Emoji Mode uses
+            // one: Enter inserts it and it becomes recent.
+            if let base = subjectVM.sourceResult(for: results[subjectVM.selectedIndex])?.emojiBase {
+                emojiVM.recents.record(base)
+            }
+            remember(actedOn: subject)
             return defaultEffects(for: subject)
 
         case .browsingEmoji:
@@ -535,12 +697,14 @@ class CommandCoordinator {
             emojiVM.closeTonePicker()
             let subject = Subject(emoji: emoji)
             selectedSubject = subject
+            remember(actedOn: subject)
             return defaultEffects(for: subject)
 
         case .browsingClipboard:
             guard clipboardVM.selectedIndex < clipboardVM.filteredItems.count else { return [] }
-            let subject = Subject(clipboardItem: clipboardVM.filteredItems[clipboardVM.selectedIndex])
+            let subject = clipboardSubject(for: clipboardVM.filteredItems[clipboardVM.selectedIndex])
             selectedSubject = subject
+            remember(actedOn: subject)
             return defaultEffects(for: subject)
 
         case .pickingAction:
@@ -554,16 +718,26 @@ class CommandCoordinator {
                 onPhaseChange?()
                 return []
             }
-            return effects(for: action, on: subject)
+            let effects = effects(for: action, on: subject)
+            // What the Action left as the Subject: a transformed Clipboard
+            // Item is a new entry, and a deleted one is none.
+            remember(actedOn: selectedSubject ?? subject)
+            return effects
 
         case .pickingTarget:
             guard let subject = selectedSubject,
                   let action = selectedAction,
                   targetVM.selectedIndex < targetVM.filteredTargets.count else { return [] }
             let target = targetVM.filteredTargets[targetVM.selectedIndex]
-            return effects(for: action, on: subject, with: target)
+            let effects = effects(for: action, on: subject, with: target)
+            // Use as Subject chooses a Subject; it does not act on one.
+            if case .useAsSubject = action.handler { return effects }
+            remember(actedOn: subject)
+            return effects
 
         case .showingResult(let result):
+            // Copying a count acts on text.
+            lastSubject = nil
             return [.copy(.text(result)), .hide]
         }
     }
@@ -572,7 +746,8 @@ class CommandCoordinator {
     /// Actions, staying in the current Phase.
     ///
     /// - Parameter writingTheQuery: whether `result` also becomes the Subject
-    ///   Query. A transform's output is the same length as its input, so it
+    ///   Query, standing there as text so Shift+Tab finds it. A transform's
+    ///   output is the same length as its input, so it
     ///   survives a one-line bar; OCR Text is a page of prose and
     ///   `PanelLayout.queryFieldHeight` is a bar, not a row. Split into a
     ///   parameter rather than written and then cleared, because a Query that
@@ -580,7 +755,10 @@ class CommandCoordinator {
     private func retarget(at result: String, writingTheQuery: Bool) {
         let newSubject = Subject(text: result)
         selectedSubject = newSubject
-        if writingTheQuery { subjectVM.searchText = result }
+        if writingTheQuery {
+            subjectVM.searchText = result
+            subjectVM.standAsText(newSubject)
+        }
         actionVM.loadActions(for: newSubject)
         syncQueryDisplay()
         onPhaseChange?()
@@ -623,7 +801,7 @@ class CommandCoordinator {
         }
 
         clipboardVM.load()
-        let subject = Subject(clipboardItem: item)
+        let subject = clipboardSubject(for: item)
         selectedSubject = subject
         selectedAction = nil
         actionVM.loadActions(for: subject)
@@ -633,12 +811,10 @@ class CommandCoordinator {
     }
 
     /// Rotation completion changes no model identity or history position. A
-    /// fresh Subject value makes SwiftUI reload pixels from the same URL.
-    func receiveImageRotation(
-        succeeded: Bool,
-        refreshedImage: NSImage? = nil,
-        generation: Int
-    ) {
+    /// fresh Subject value is what tells the Subject Card the pixels changed:
+    /// the Card keys its thumbnail on the Subject, so a new one checks the file
+    /// again and finds it rewritten.
+    func receiveImageRotation(succeeded: Bool, generation: Int) {
         guard isImageActionInFlight, generation == imageActionGeneration else { return }
         isImageActionInFlight = false
         let expectedSubjectID = pendingImageSubjectID
@@ -649,31 +825,18 @@ class CommandCoordinator {
             return
         }
 
-        let refreshed: Subject?
         if let item = subject.clipboardItem {
-            refreshed = Subject(clipboardItem: item)
-        } else if let refreshedImage {
-            refreshed = Subject(
-                displayName: subject.displayName,
-                path: subject.path,
-                url: subject.url,
-                icon: refreshedImage,
-                kind: subject.kind
-            )
+            selectedSubject = clipboardSubject(for: item)
         } else {
-            // Rotation succeeded even if AppKit could not decode a replacement
-            // icon. Re-identifying the Subject still invalidates SwiftUI's
-            // view of the file; keep its existing icon as fallback.
-            refreshed = Subject(
+            selectedSubject = Subject(
                 displayName: subject.displayName,
                 path: subject.path,
                 url: subject.url,
                 icon: subject.icon,
-                kind: subject.kind
+                kind: subject.kind,
+                thumbnailURL: subject.thumbnailURL
             )
         }
-        guard let refreshed else { return }
-        selectedSubject = refreshed
         onPhaseChange?()
     }
 
@@ -709,11 +872,13 @@ class CommandCoordinator {
         isImageActionInFlight = false
         imageActionFailed = false
         pendingImageSubjectID = nil
+        isSubjectFromSearch = false
         subjectVM.isSearchCommitted = true
         actionVM.reset()
         targetVM.reset()
         clipboardVM.reset()
         emojiVM.reset()
+        standLastSubject()
 
         if wantsEmojiMode {
             wantsEmojiMode = false
@@ -794,6 +959,13 @@ class CommandCoordinator {
         case .emoji(let emoji): emoji.string
         default: nil
         }
+    }
+
+    /// A Clipboard Item as a Subject, carrying its stored PNG for the
+    /// thumbnail. Every Clipboard Subject is made here, because only the
+    /// history knows where that PNG is.
+    private func clipboardSubject(for item: ClipboardItem) -> Subject {
+        Subject(clipboardItem: item, imageURL: history.imageURL(for: item))
     }
 
     /// The file a subject points at: its own URL, or the stored image for a
@@ -1008,11 +1180,7 @@ class CommandCoordinator {
 
         case .deleteFromHistory:
             guard let item = subject.clipboardItem else { return [.hide] }
-            history.remove(item)
-            clipboardVM.load()
-            selectedSubject = nil
-            phase = .browsingClipboard
-            onPhaseChange?()
+            removeFromHistory(item)
             return []
 
         // MARK: Codiclens
@@ -1088,7 +1256,7 @@ class CommandCoordinator {
             clipboardVM.load()
             clipboardVM.selectedIndex = min(index, clipboardVM.filteredItems.count - 1)
             if let updated = history.items.indices.contains(index) ? history.items[index] : nil {
-                selectedSubject = Subject(clipboardItem: updated)
+                selectedSubject = clipboardSubject(for: updated)
             }
         }
         phase = .browsingClipboard

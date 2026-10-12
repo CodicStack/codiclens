@@ -1,6 +1,20 @@
 import SwiftUI
 
 struct SettingsView: View {
+    var body: some View {
+        TabView {
+            Tab("General", systemImage: "gearshape") {
+                GeneralSettingsView()
+            }
+            Tab("Sources", systemImage: "folder") {
+                SourcesSettingsView()
+            }
+        }
+        .frame(width: 460)
+    }
+}
+
+private struct GeneralSettingsView: View {
     @AppStorage("appTheme") private var selectedTheme: String = AppTheme.system.rawValue
     @AppStorage(Motion.animationsEnabledKey) private var animationsEnabled: Bool = true
     @State private var isShowingAcknowledgements = false
@@ -51,13 +65,12 @@ struct SettingsView: View {
             }
 
             Section {
-                Button("Emoji Data Acknowledgements…") { isShowingAcknowledgements = true }
+                Button("Acknowledgements…") { isShowingAcknowledgements = true }
                 Button("Quit Codiclens") { NSApp.terminate(nil) }
                     .keyboardShortcut("q")
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460)
         .sheet(isPresented: $isShowingAcknowledgements) { acknowledgementsSheet }
     }
 
@@ -96,14 +109,35 @@ struct SettingsView: View {
 
     // MARK: - Acknowledgements
 
+    /// Third-party material the app ships, each with the licence it came
+    /// under. Both files are bundled resources.
+    private var acknowledgements: [(title: String, text: String)] {
+        [
+            ("Emoji Data", EmojiIndex.licenseText() ?? "The bundled emoji data is missing its licence file."),
+            ("DigUp", Self.bundledText("digup-license") ?? "The DigUp licence file is missing from the app.")
+        ]
+    }
+
+    private static func bundledText(_ resource: String) -> String? {
+        guard let url = Bundle.main.url(forResource: resource, withExtension: "txt") else { return nil }
+        return try? String(contentsOf: url, encoding: .utf8)
+    }
+
     private var acknowledgementsSheet: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Emoji Data").font(.headline)
+            Text("Acknowledgements").font(.headline)
             ScrollView {
-                Text(EmojiIndex.licenseText() ?? "The bundled emoji data is missing its licence file.")
-                    .font(.system(.caption, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(acknowledgements, id: \.title) { acknowledgement in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(acknowledgement.title).font(.subheadline.weight(.semibold))
+                            Text(acknowledgement.text)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack {
                 Spacer()

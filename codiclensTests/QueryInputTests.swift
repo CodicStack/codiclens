@@ -260,21 +260,22 @@ struct QueryInputTests {
         #expect(coordinator.currentSearchText.isEmpty)
     }
 
-    // MARK: - Text mode is exempt
+    // MARK: - A Query standing as text
 
-    @Test func textModeKeepsExtendingEvenOnceSettled() {
+    /// ⌘E's text was written in the editor, not in the Query, so it is no
+    /// exception: the next keystroke is a new search, and the text goes.
+    @Test func typingAfterCmdEStartsANewQuery() {
         let coordinator = makeCoordinator()
         coordinator.subjectVM.searchText = "hello"
-        coordinator.subjectVM.results = [Subject(text: "hello")]
-        coordinator.subjectVM.selectedIndex = 0
-        coordinator.subjectVM.isSearchCommitted = true
+        coordinator.syncQueryDisplay()
+        coordinator.toggleTextSubjectEdit()
+        coordinator.toggleTextSubjectEdit()
+        #expect(coordinator.isTextMode)
 
-        coordinator.acceptTypedText("hello world")
+        coordinator.acceptTypedText("hellon")
 
-        #expect(
-            coordinator.currentSearchText == "hello world",
-            "in text mode the query is the content being written"
-        )
+        #expect(coordinator.currentSearchText == "n")
+        #expect(!coordinator.isTextMode)
     }
 
     // MARK: - Other phases

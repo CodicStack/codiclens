@@ -277,6 +277,62 @@ struct PasteboardWatcherTests {
         #expect(history.items.map(\.content) == ["copied"])
     }
 
+    // MARK: - Password managers
+
+    @Test(arguments: PasteboardWatcher.concealedTypes.map(\.rawValue))
+    func markedTextIsNeverRecorded(marker: String) {
+        let history = ClipboardHistory(store: InMemoryClipboardStore())
+        let pasteboard = makePasteboard()
+        pasteboard.clearContents()
+        pasteboard.setString("hunter2", forType: .string)
+        pasteboard.setData(Data(), forType: NSPasteboard.PasteboardType(marker))
+
+        let watcher = PasteboardWatcher(
+            history: history, pasteboard: pasteboard, reencoder: InlineImageReencoder()
+        )
+        watcher.record()
+
+        #expect(history.items.isEmpty)
+    }
+
+    @Test(arguments: PasteboardWatcher.concealedTypes.map(\.rawValue))
+    func markedImagesAreNeverRecordedEither(marker: String) throws {
+        let history = ClipboardHistory(store: InMemoryClipboardStore())
+        let pasteboard = makePasteboard()
+        let spy = SpyReencoder()
+        pasteboard.clearContents()
+        pasteboard.setData(Self.pngMagic, forType: .png)
+        pasteboard.setData(try tiffData(), forType: .tiff)
+        pasteboard.setData(Data(), forType: NSPasteboard.PasteboardType(marker))
+
+        let watcher = PasteboardWatcher(
+            history: history, pasteboard: pasteboard, reencoder: spy
+        )
+        watcher.record()
+
+        #expect(history.items.isEmpty)
+        #expect(spy.conversions == 0, "nothing is decoded on the way to recording nothing")
+    }
+
+    @Test func theCopyAfterAPasswordIsRecordedAsUsual() {
+        let history = ClipboardHistory(store: InMemoryClipboardStore())
+        let pasteboard = makePasteboard()
+        let watcher = PasteboardWatcher(
+            history: history, pasteboard: pasteboard, reencoder: InlineImageReencoder()
+        )
+
+        pasteboard.clearContents()
+        pasteboard.setString("hunter2", forType: .string)
+        pasteboard.setData(Data(), forType: PasteboardWatcher.concealedTypes[0])
+        watcher.pollIfChanged()
+
+        pasteboard.clearContents()
+        pasteboard.setString("ordinary", forType: .string)
+        watcher.pollIfChanged()
+
+        #expect(history.items.map(\.content) == ["ordinary"])
+    }
+
     @Test func undecodableImageDataIsKeptRatherThanDropped() throws {
         let history = ClipboardHistory(store: InMemoryClipboardStore())
         let pasteboard = makePasteboard()

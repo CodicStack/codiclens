@@ -129,7 +129,9 @@ struct CardContainerView: View {
             }
             if press.modifiers.contains(.command) &&
                 (press.key == .delete || press.characters == "\u{7F}" || press.characters == "\u{8}") {
-                coordinator.retreatPhase()
+                // On a Clipboard Item this deletes it from Clipboard History, as
+                // Cmd+Delete does in Finder; anywhere else it retreats the Phase.
+                if !coordinator.deleteSelectedClipboardItem() { coordinator.retreatPhase() }
                 return .handled
             }
             if press.key == .space && press.modifiers.contains(.shift) {

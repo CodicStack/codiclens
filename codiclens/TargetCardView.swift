@@ -39,11 +39,13 @@ struct TargetCardView: View {
 
     private func targetContent(_ target: ActionTarget) -> some View {
         VStack(spacing: 10) {
-            Image(nsImage: target.icon)
-                .resizable()
-                .interpolation(.high)
-                .aspectRatio(contentMode: .fit)
-                .frame(width: Style.cardIcon, height: Style.cardIcon)
+            ThumbnailImage(url: target.thumbnailURL, side: Style.cardIcon) {
+                Image(nsImage: target.icon)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+            }
+            .frame(width: Style.cardIcon, height: Style.cardIcon)
 
             Text(target.name)
                 .font(.system(size: 15, weight: .bold))

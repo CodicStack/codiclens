@@ -56,15 +56,35 @@ _Avoid_: morph, split, animate in, slide in
 One selectable row or grid cell in the Results Slab.
 _Avoid_: match, hit, suggestion
 
+**File Result**:
+A Result in Subject search that is a file, matched by its name or by what it contains. File Results sit below the app Results, mixed in one list with Clipboard Items and Emoji, and arrive after them; they never push an app Result out of its place.
+_Avoid_: file hit, document match, search result
+
+**Last Subject**:
+The Clipboard Item or Emoji the user last acted on, standing as the Subject when the Panel opens again, with the Query empty. Enter acts on it again; the first keystroke starts a new Query. Apps, files and text never become the Last Subject.
+_Avoid_: recent, history, sticky subject, resume
+
+**Passage**:
+The part of a file that a File Result matched on: a stretch of text, a page, or a span of time in a recording or video. A file that matched on its name alone has no Passage.
+_Avoid_: excerpt, moment, snippet, hit, match location
+
 **Mode**:
 What the Results Slab is currently listing, which determines its layout — a list for apps and files, a grid for emoji. Set by the Subject in play.
 _Avoid_: view, layout, kind
 
 ### Sources of Subjects
 
-**Index**:
+**Source**:
+A place Subjects come from: Applications, Clipboard History, Emoji, the Built-ins, or a folder the user added. Each one can be switched off in Settings, where it shows how much of it has been read.
+_Avoid_: provider, origin, location, scope
+
+**App Index**:
 The in-memory list of installed apps that Subject search matches against. Rebuilt in full whenever the filesystem says the installed apps changed.
-_Avoid_: cache, database, catalog
+_Avoid_: Index on its own, cache, database, catalog
+
+**File Index**:
+What Codiclens has read from the files in its folder Sources: their names, and what each one says, shows or sounds like. Kept on disk and updated as the files change. File Results come from it.
+_Avoid_: Index on its own, library, database, embeddings
 
 **Built-in**:
 A Subject that isn't a file on disk — Settings, Clipboard, Emoji. Appears in Subject search alongside apps.
@@ -182,6 +202,6 @@ _Avoid_: markup, annotate, edit in preview
 **Path Subject**:
 A file or folder named by typing its path. A Query beginning `/` or `~` is a
 path and nothing else — it cannot collide with an app name, so it never competes
-with the Index. It resolves to exactly one Subject; a path that does not exist
+with the App Index. It resolves to exactly one Subject; a path that does not exist
 resolves to none and the Panel shakes.
 _Avoid_: file subject, browse, navigate, completion

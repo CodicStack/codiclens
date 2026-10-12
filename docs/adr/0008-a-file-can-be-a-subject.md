@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded in part by ADR-0012 (files in Subject search)
 ---
 
 # A file can be a Subject, two ways, and neither is a file browser

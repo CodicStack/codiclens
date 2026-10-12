@@ -5,7 +5,7 @@ import AppKit
 /// The `string` is fully qualified — VS16 and all — so it can go straight onto
 /// the pasteboard. Symbols are out of scope: arrows, maths and currency have no
 /// CLDR keywords, so there would be nothing to search them by.
-struct Emoji: Identifiable, Hashable, Sendable {
+nonisolated struct Emoji: Identifiable, Hashable, Sendable {
     /// The emoji itself, fully qualified.
     let string: String
     /// The CLDR short name — "flexed biceps".

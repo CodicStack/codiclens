@@ -293,9 +293,8 @@ struct SubjectAction: Identifiable {
         // A file's content type decides whether it can be read, not its kind:
         // an image file has OCR, a `.txt` and a folder do not. PDF
         // deliberately does not conform to `.image` and is out of scope —
-        // `TargetSearchVM.imageExtensions` files `pdf` and `svg` under images
-        // for *thumbnails*, which is a different question and is not copied
-        // here.
+        // that `Thumbnails` draws a PDF's first page is a different question
+        // and is not copied here.
         case .file(let contentType):
             return fileActions(includingOCR: contentType.conforms(to: .image))
 

@@ -154,9 +154,14 @@ needs no `project.pbxproj` edit.
   `CommandCoordinator.canReportNoResults` is that entitlement and
   `isSearchInFlight` is the "Searching…" one. Clipboard, Emoji and Action search
   match in memory, so zero matches is true the instant the key lands and the
-  message must not be delayed. Subject search matches the app Index, and until
-  the first scan lands the Slab shows the Query bar **alone** — no message row,
+  message must not be delayed. In Subject search the row carries a "⌘E use as
+  text" `KeyHintChip`, the only way a Query becomes text. Subject search matches
+  the app Index, and until the first scan lands the Slab shows the Query bar
+  **alone** — no message row,
   which is the shortest Slab there is (`PanelLayout.queryOnlyResultsHeight`).
+  Its list below the apps answers once typing pauses, and until it has the Slab
+  says nothing either: `SubjectSearchVM.hasAnswered` waits for both, so "No
+  results" never flickers between keystrokes and then turns into files.
   Target search answers out of process and says "Searching…" instead, and OCR
   — which is not a search at all — says "Reading text…" off
   `CommandCoordinator.isOCRInFlight`. Subject
@@ -189,8 +194,26 @@ needs no `project.pbxproj` edit.
   in force — `EmojiSearchVM.displayed` for a cell, `resolvedSelection` for the Card.
   Toning is presentation only: selection, ordering and identity stay with the base,
   because a variant is never a Result.
-- **Nothing builds a `ResultDisplayItem` for an Emoji.** In grid Mode a Result is a
-  cell. `EmojiSearchVM.displayResults` is empty on purpose.
+- **Emoji Mode builds no `ResultDisplayItem`.** In grid Mode a Result is a cell, and
+  `EmojiSearchVM.displayResults` is empty on purpose. The one Emoji row is in Subject
+  search's list below the apps (`ResultDisplayItem(emoji:base:)`): the glyph in the
+  tone in force, through `EmojiRenderer`, with the base's id.
+- **Every picture of a file's contents goes through `Thumbnails`** — Quick Look's
+  `QLThumbnailGenerator`, `.thumbnail` representation only. A `Subject`, an
+  `ActionTarget` and a `ResultDisplayItem` carry a `thumbnailURL` beside their icon: a
+  file's own URL, or a Clipboard Image's stored PNG (`Subject(clipboardItem:imageURL:)`,
+  made only where the history is at hand — `CommandCoordinator.clipboardSubject(for:)`
+  and the list below the apps in `SubjectSearchVM` — because only the history
+  knows the path). `ThumbnailImage` draws the icon at once and swaps the thumbnail in
+  when it lands — no fade — and asks from `.task`, so only rows the `LazyVStack`
+  builds ask at all. Requests are the slot's side (`PanelLayout.resultIconSize`,
+  `Style.cardIcon`) at `displayScale`. The cache is an `NSCache` checked against the
+  file's modification date and size, because Rotate and Preview write in place; a
+  view's first frame is the last thumbnail made, so a row rebuilt by a keystroke does
+  not flash its icon. Only regular files are asked about — a folder or an app is its
+  icon. The Subject Card keys its thumbnail on `subject.id`, which is how a Rotate's
+  fresh Subject makes it look at the file again. The Clipboard browser's full-size
+  Card preview is not a thumbnail and reads the stored PNG directly.
 - Deployment target is **26.4**. Liquid Glass is unconditional — no `#available`.
 - `ConcentricRectangle` exists and derives nested radii from an enclosing
   `containerShape`, but it is a `Shape` and **not** an `InsettableShape`, so it has no
@@ -205,6 +228,7 @@ codiclensApp (@main)
   └─ AppDelegate (NSApplicationDelegateAdaptor)
        ├─ Registers Cmd+Space hotkey (Carbon EventHotKey)
        ├─ Creates PanelController
+       ├─ Starts the File Index (FileIndex.shared.start(); stop() on terminate)
        └─ Handles QLPreviewPanel responder chain
 ```
 
@@ -241,8 +265,10 @@ window no longer resizes, and the Card row's width is a SwiftUI animation driven
 `coordinator.cardCount`.
 
 Show and hide:
-- `showPanel()` centres the *Card row* on the screen the mouse is on, renders once at
-  `visible == false`, then flips it inside `withAnimation(Motion.entrance)`
+- `showPanel()` calls `coordinator.reset()`, which stands the **Last Subject** if
+  there is one (see CommandCoordinator below), centres the *Card row* on the screen
+  the mouse is on, renders once at `visible == false`, then flips it inside
+  `withAnimation(Motion.entrance)`
 - `hidePanel()` drops the observers and hands activation back immediately, and lets
   only the `orderOut` wait for the exit animation's completion. `isShowing` and
   `showGeneration` are what stop a re-show racing a pending completion
@@ -253,15 +279,38 @@ Focus lifecycle lives in **FocusHandoff** — `capture`, `restore`, `yield`. Eve
 
 ### CommandCoordinator — State machine + execution
 Owns four view models, one per search phase:
-- **SubjectSearchVM** — app discovery (recursive FileManager scan) + fuzzy matching
+- **SubjectSearchVM** — Subject search, as two lists that read as one. Up to five
+  apps and Built-ins, fuzzy-matched against the app Index on the keystroke and
+  always on top. Below them, **once typing pauses** (a 120ms Combine debounce, then
+  `searchSources()`), one list ranked by score mixing File Results (File Index),
+  Clipboard Items (text ones, `ClipboardSearchVM.scored`) and Emoji
+  (`EmojiSearchVM.scored`) — `SourceSearch` ranks it off the main actor on
+  `fuzzyScore`'s scale, files up to 50, Clipboard and Emoji capped at three each,
+  no priority between Sources. It lands once per Query and is never ranked again;
+  the next keystroke withdraws it rather than leave rows answering the previous
+  Query, and a late answer for a Query that has moved on is dropped. Each row names
+  its Source (`ResultDisplayItem(file:)`, `(clipboardResult:)`, `(emoji:base:)`,
+  ids prefixed by Source). Every Source's switch in `SourceStore` is read on every
+  search; folder switches are the File Index's own. See ADR 0012.
 - **ActionSearchVM** — context-sensitive actions based on selected subject
-- **TargetSearchVM** — file/app targets via `mdfind` subprocess
+- **TargetSearchVM** — file/app targets. The search itself is `FileTargetSearch`:
+  the **File Index first**, shown at once while "Searching…" still holds, then the
+  priority-folder and system-wide `mdfind`s, run side by
+  side, each read line by line and stopped at its `Scope.lineCap`, minus every path
+  the File Index already gave, appended below it so nothing on screen moves. Only
+  the ranked top 50 get an icon. Their thumbnails are not made here; a row asks
+  `Thumbnails` once it is on screen. The next keystroke, and leaving file search,
+  cancel it — every `mdfind` it started is terminated. Stages are `OSSignposter` intervals
+  under the "Search" category; `FileTargetSearchTimingTests` times them against the
+  real index and is skipped unless `TEST_RUNNER_CODICLENS_TIME_FILE_SEARCH=<runs>`
+  is set.
 - **ClipboardSearchVM** → **ClipboardManager** — clipboard history
 
 Phase state machine:
 ```
 searchingSubject ──Enter──→ executeDefaultAction + hide
-       │                      (app/file/folder/text)
+       │                      (app/file/folder/text, a Clipboard Item row pastes,
+       │                       an Emoji row inserts, or the Last Subject)
        │Tab
        ▼
   pickingAction ──Enter──→ executeAction + hide (final actions)
@@ -281,8 +330,17 @@ A file becomes a Subject two ways, and neither is a file browser — see
 beginning `/` or `~`, resolved by `PathSubject` to exactly one file or folder;
 those two prefixes cannot collide with an app name, so none of the Index's
 gates move for one. **Use as Subject** is a non-Final Action that promotes a
-file-or-app Target into the Subject and lands back on `.pickingAction`. Files
-are deliberately *not* ranked alongside apps in Subject search.
+file-or-app Target into the Subject and lands back on `.pickingAction`. ADR 0012
+added a third, the list below the apps: a File Result is a Subject once chosen,
+resolved again through `PathSubject.subject(for:)` as Enter or Tab lands
+(`CommandCoordinator.chosen`) — a file gone since it was indexed is not acted on.
+
+Rows of the list below the apps act as their own Mode would. A File Result opens
+on Enter and Tab gives its file Actions, Share among them. A Clipboard Item pastes
+on Enter; an Emoji inserts in the tone in force and becomes recent. Both become the
+Last Subject, and a file clears it. Shift+Tab from their Actions returns to
+Subject search (`isSubjectFromSearch`), not to the Clipboard browser or the grid
+they never came from.
 
 OCR returns `[.ocr(url)]` and **no `.hide`** — the OCR Text lands *in* the Panel — and
 `EffectRunner` awaits Vision before answering through `onOCRText`. QR Code and Rotate
@@ -290,11 +348,24 @@ also run behind the Effect seam and return no `.hide`; their work uses one seria
 so consecutive rotations reach disk in command order. `isOCRInFlight` and
 `isImageActionInFlight` gate a second Enter while their respective answer is pending.
 
-Text mode: activates only when fuzzy search returns zero app matches
-(result-dependent, not input-dependent) — **and only once the Index has
-answered**. `SubjectSearchVM.isIndexReady` is that gate. Before the first scan
-lands there are zero matches because nothing was searched, and standing a text
-Subject in for that turned every character of a cold start into prose.
+Text mode is **⌘E, and nothing else** (`docs/adr/0012-files-in-subject-search-text-mode-is-cmd-e.md`).
+Zero app matches is "No results" — offering ⌘E as a hint — never a text Subject.
+⌘E in Subject search with a non-empty Query opens the editor with the Query in it,
+whether or not anything matched and for a path Query too; saving stands the text
+as the only Result (`SubjectSearchVM.standAsText`), so Enter copies it and Tab
+opens its Actions. Escape in the editor discards it; Escape on the saved text goes
+back to what the Query matched. The next keystroke is a new Query: the text was
+written in the editor, not in the Query. `hasAnswered` — the Index landed and the
+list below the apps answered this Query — gates only "No results", the Card's "No
+match" and the shake. A list landing while text stands is kept for Escape.
+
+**Last Subject** (`CONTEXT.md`): Enter or a Final Action on a Clipboard Item or an
+Emoji makes it `lastSubject`; acting on anything else clears it. In memory only.
+`reset()` stands it with the Query empty (`standingSubject`) after looking the
+Clipboard Item up in history again — deleted or trimmed means none. It is not a
+Result, so the Slab stays away and `SubjectCardView.subject` reads it from the
+coordinator. Enter runs its default action, Tab opens its Actions and Shift+Tab
+comes back to it; the first keystroke ends it standing.
 
 ### FloatingPanel — Non-activating NSPanel
 ```swift
@@ -328,9 +399,16 @@ display-only. Routes to coordinator:
 - Up/Down → `moveUp()` / `moveDown()`
 - Left/Right → `moveLeft()` / `moveRight()`, which mean something only in a grid
 - Escape → `handleEscape()`
+- Cmd+Backspace → `deleteSelectedClipboardItem()` **first**, and only `retreatPhase()`
+  when there was no Clipboard Item to delete. In Clipboard Mode it deletes the selected
+  Clipboard Item from Clipboard History on the spot — Finder's Cmd+Delete habit, no
+  confirmation — and the Panel, the Mode and the Query stay, with the row that took its
+  place selected. Never a file. Shift+Tab is unaffected.
 - Shift+Space → `triggerQuickLook()`
 - Ctrl+E / Cmd+E → `toggleTextSubjectEdit()` — **any** text Subject, not just a
-  Clipboard Item: OCR Text and a transform's output too
+  Clipboard Item: OCR Text and a transform's output too. In Subject search it turns
+  a non-empty Query into a text Subject; with an empty Query it edits only a text
+  Subject already there, such as a standing Last Subject
 - Ctrl+J/K → `moveDown()` / `moveUp()`
 - Ctrl+H/L → `moveLeft()` / `moveRight()` **first**, and only `retreatPhase()` /
   `advancePhase()` when the horizontal move meant nothing. Routing them straight to
@@ -338,8 +416,8 @@ display-only. Routes to coordinator:
   Control-modified key are accepted, via `ControlKey.letter`.
 
 ### View Cards
-- **SubjectCardView** — shows app icon/name, text preview, emoji glyph, or clipboard
-  content, plus the corner chips
+- **SubjectCardView** — shows app icon/name (a file's thumbnail once it lands), text
+  preview, emoji glyph, or clipboard content, plus the corner chips
 - **ActionCardView** — shows available actions for selected subject
 - **TargetCardView** — shows file/app targets for selected action
 
@@ -366,6 +444,9 @@ Polls `NSPasteboard.general` every 0.5s. Stores up to 100 items as JSON in Appli
 Support. Images saved as PNG files in `codiclens/images/`. Text previews for Quick Look
 in `codiclens/previews/`. The pasteboard is only ever read on the main thread; the
 PNG re-encode goes through `ImageReencoder`, off-main in the app and inline in tests.
+A change carrying `org.nspasteboard.ConcealedType` or `org.nspasteboard.TransientType`
+(nspasteboard.org; what password managers mark a copied secret with) is not recorded at
+all — no text, image or file.
 
 **A Clipboard Item is a snapshot**: the text or the pixels at copy time. `previewURL`
 for an image returns the **stored PNG**, never the original file — it used to prefer the
@@ -385,6 +466,34 @@ app. Finder additionally shows Markup and Rotate because those are Finder **Quic
 Do not try to add them. The toolbar is Apple's and we add no keys inside the panel beyond
 the navigation ones above. An image Subject gets Rotate and Open in Preview from the Panel
 instead — `docs/adr/0011-image-edits-rotate-in-process-everything-else-is-preview.md`.
+
+### Settings — General and Sources
+`SettingsView` is two tabs. **General** is appearance, Emoji, the App Index refresh and
+the Acknowledgements sheet, which shows every bundled licence (`emoji-data-license.txt`,
+`digup-license.txt`; both are resources through the synchronised group). **Sources**
+(`SourcesSettingsView`) lists every Source (`CONTEXT.md`) with one switch and two counts,
+indexed and total, and nothing else: there is no priority between Sources. Folders are added
+with the open panel and removed with the row's "−" or its context menu, without a
+confirmation; removing one drops its File Index rows, never files. `SourcesPage` builds the
+rows from `SourceStore` and closures for counts and reading state, so `SourcesPageTests`
+runs it on its own `UserDefaults` suite. A row being read shows the Loading Ring with
+"Reading" beside it, never a `ProgressView`.
+
+Under Folders, **Skip** is what the File Index leaves out inside the folder Sources, all
+user-set and kept by `SourceStore` beside the Sources: a checkbox per
+`FileIndexRules.SkipGroup` (on = skipped; Caches, node_modules and build output, App bundles
+and packages on by default; Hidden, Repos, .env files, Keys and certificates off, because the
+user wants to find those) and a list of `SkipPattern`s. `.git` and bare-repo internals belong
+to the bundles group, so a repo is indexed and its `.git` is not; `.DS_Store` is a cache.
+Symlinks and iCloud files not downloaded are always out, not a switch. Patterns: no `/` is a
+name glob anywhere (`*`, `?`), a trailing `/` is folders only, any other `/` matches the path
+from the Source folder down (`**` = any folders). Nothing skips a Source itself. The writer is
+handed `SourceStore.fileIndexRules`, a plain `Sendable` value, never the store. A change
+re-applies through `FileIndexer.setRules`: rules that only skip *more* delete rows from the
+index alone (no walk); anything that lets more in re-crawls the enabled roots, and the crawl
+being a reconcile, that one pass also deletes what is newly skipped and leaves unchanged rows
+alone. With Repos included the dev machine's three default Sources are ~290k rows, almost
+all of it `~/Documents/Projects`: see `FileIndexTimingTests`.
 
 ## Data Flow: Paste
 
@@ -428,9 +537,12 @@ User types query → Enter
 | `CommandCoordinator.swift` | State machine, execution, paste simulation |
 | `FloatingPanel.swift` | Non-activating NSPanel subclass |
 | `CardContainerView.swift` | Hidden TextField keyboard capture |
-| `SubjectSearchVM.swift` | Recursive app discovery + fuzzy search |
+| `SubjectSearchVM.swift` | Subject search: apps on the keystroke, the debounced list below them, and when "No results" is true |
+| `SourceSearch.swift` | Ranking the list below the apps: File Results, Clipboard Items and Emoji on one scale, off the main actor |
 | `ActionSearchVM.swift` | Context-sensitive action loading |
-| `TargetSearchVM.swift` | File/app target search via mdfind |
+| `TargetSearchVM.swift` | Target list state; owns and cancels the file search |
+| `FileTargetSearch.swift` | One cancellable Finder file search: File Index first, then `mdfind` lookups, ranking, icons |
+| `Thumbnails.swift` | Quick Look thumbnails for files: async, cached per file version, and `ThumbnailImage`, the icon-then-thumbnail view |
 | `ClipboardHistory.swift` / `PasteboardWatcher.swift` | Clipboard storage, and the pasteboard poller that feeds it |
 | `ClipboardSearchVM.swift` | Clipboard search/filter |
 | `QuickLookHelper.swift` | QLPreviewPanel data source/delegate |
@@ -451,10 +563,26 @@ User types query → Enter
 | `LoadingRing.swift` | The app's own spinner, in place of a system `ProgressView` |
 | `AppIndex.swift` | The app Index: background scan, atomic swap, lazy icons |
 | `AppDirectoryWatcher.swift` | FSEvents watch over the application directories |
+| `Source.swift` | `Source` and `SourceStore`: the Sources, their switches and the folder list, in `UserDefaults` |
+| `FileIndex.swift` | The File Index: started at launch, `search` from any thread, counts and reading state for Settings |
+| `FileIndexStore.swift` | The File Index's SQLite schema, writer and thread-safe reader (`FileHit`) |
+| `FileIndexer.swift` | Crawling a folder Source and applying FSEvents changes to the index |
+| `FileIndexWatcher.swift` | FSEvents watch over the folder Sources |
+| `FileIndexRules.swift` | What the File Index leaves out, in one place for the crawl and FSEvents: the skip groups and patterns |
+| `SQLite.swift` | A thin SQLite connection and statement wrapper |
+| `SourcesPage.swift` | The Sources page's rows (switch, counts, reading state), its add/remove/switch controls, and the Skip switches and patterns |
+| `SourcesSettingsView.swift` | The Sources tab in Settings, drawn from `SourcesPage` |
 
 ## Known issues
 
 Real, unfixed, none urgent.
+
+- **A one-letter Target search is still slow, and it is Spotlight.** `mdfind -name a
+  -onlyin ~/Documents/` takes ~7s to return its *first* batch on the dev machine
+  (Downloads ~0.7s, system-wide ~2.4s), so the line cap cannot help. The File Index
+  now answers for the folder Sources first, so the list has rows at once and only
+  the files outside the Sources wait for it; "Searching…" stays up until it lands.
+  Cancellation means it only costs anything if the user stops typing at one letter.
 
 - Signing teams are inconsistent. Both targets override `DEVELOPMENT_TEAM` to
   `L256GR2793`, while the project-level default is `HHNPP7C8GB`. Will bite on a clean
