@@ -52,5 +52,7 @@
 	<string>26.4</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Codiclens asks QuickTime Player to open a video or recording at the moment your search found.</string>
 </dict>
 </plist>
