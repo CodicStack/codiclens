@@ -947,7 +947,14 @@ with the same expression, best bm25 Passage per file (a bare column beside `MIN(
 at `rankingCap` like names. One row per file. Names score on `fuzzyScore` (0–~110); a
 content-only hit scores `FileHit.contentScore` (120) plus its rank, below every name match
 and above `folderOnlyScore` (200) — DigUp's 3:1 name weight, by band, since two FTS tables
-share no bm25. A file that matched by name keeps no Passage. The `FileHit.Passage` excerpt is
+share no bm25. A file that matched by name keeps no Passage. **Not every word is required**
+(`requiredWords`): a folder word ("folder", "mappe": `MeaningRanking.folderWords`) never is,
+and a function word ("for", "the", "af"; not a kind word, not "file"/"fil") is not unless it
+is the last; with nothing else left, all are. A folder word only wins a folder a tie, never a
+filter or a list of folders. **A name the whole Query misses is scored on what its folders leave**:
+"code data intensive systems" finds `Data Intensive Systems/code` at `fuzzyScore("code")` +
+`nameAfterFoldersPenalty` (2), a name match, where it had sunk to 200 below 14 files that say
+the words. The `FileHit.Passage` excerpt is
 FTS5's `snippet()` (10 words, matches between U+0001/U+0002) fetched only for the hits
 returned. **In Passages the last word is a prefix only in the settled pass**
 (`PassageMatch`): on the keystroke (`FileIndex.search`, also Finder's Target list) Passages
@@ -1152,7 +1159,8 @@ on its evals):
   deviation of all of them (floor 0.02); a modality with under 20 rows takes the overall
   average; later steps' rows are scored but left out of the averages and the deviation;
 - a file is a candidate if its best segment reaches z ≥ 2.0, or it has ≥ 50% of the Query's
-  words (stopwords and kind words out, English and Danish) in its Passages or name — the word
+  words (stopwords and kind words out, English and Danish) in its Passages, name or folders (the
+  folders only beside a word of its own, so a folder-only match stays at 200) — the word
   search's own content hits have all of them; an any-word query brings 100 more;
 - score `max(z, 0) + 2 × coverage^1.5`, +1 when the Query names the file's kind ("video",
   "screenshot", "skærmbillede", "billede", "lyd", "pdf", "dokument"…); a **lookup** (every

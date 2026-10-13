@@ -129,6 +129,27 @@ struct MeaningRankingTests {
         #expect(MeaningRanking.terms("a b cd cd") == ["cd"])
     }
 
+    /// "folder" asks for a kind of row, as "video" asks for a kind of file:
+    /// no word to look for, and no Query of its own kind.
+    @Test func folderWordsAreStopwordsButNoKind() {
+        #expect(MeaningRanking.terms("code folder for data intensive systems") == ["code", "data", "intensive", "systems"])
+        #expect(MeaningRanking.terms("mappen med regnskabet") == ["regnskabet"])
+        for query in ["folder", "folders", "mappe", "mapper", "mappen", "my folders"] {
+            #expect(MeaningRanking.kindHints(query).isEmpty, "\(query)")
+            #expect(!MeaningRanking.isKindOnly(query), "\(query): no listing of folders")
+        }
+    }
+
+    @Test func functionWordsAreTheStopwordsThatAskForNothing() {
+        for word in ["for", "the", "of", "af", "med", "til"] {
+            #expect(MeaningRanking.functionWords.contains(word), "\(word)")
+        }
+        for word in ["file", "files", "fil", "filer", "pdf", "photo", "video", "billeder", "folder", "mappe"] {
+            #expect(!MeaningRanking.functionWords.contains(word), "\(word)")
+        }
+        #expect(MeaningRanking.functionWords.isSubset(of: MeaningRanking.stopwords))
+    }
+
     @Test func kindWordsAskForTheirKind() {
         #expect(MeaningRanking.kindHints("video from the beach") == [.video])
         #expect(MeaningRanking.kindHints("skærmbillede af fejlen") == [.screenshot])

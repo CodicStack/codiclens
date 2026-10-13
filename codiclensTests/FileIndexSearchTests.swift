@@ -91,6 +91,97 @@ struct FileIndexSearchTests {
         #expect(index.names("invoice") == ["invoice.pdf", "Invoices for 2024.pdf", "My invoice.pdf"])
     }
 
+    // MARK: - Folders and function words
+
+    @Test func folderWordsAndFunctionWordsAreNotRequired() {
+        func required(_ query: String) -> [String] { FileIndexReader.requiredWords(FileIndexReader.words(query)).words }
+
+        #expect(required("code folder for data intensive systems") == ["code", "data", "intensive", "systems"])
+        #expect(required("mappen med regnskab") == ["regnskab"])
+        #expect(required("code folder") == ["code"])
+        #expect(!FileIndexReader.requiredWords(["code", "folder"]).endsOnLastWord, "\"code\" was finished")
+        #expect(required("invoice for") == ["invoice", "for"], "the last word may be \"format\" half typed")
+        #expect(required("tax pdf") == ["tax", "pdf"], "a kind noun is still a word")
+        #expect(required("the tax file") == ["tax", "file"])
+        #expect(required("folder") == ["folder"], "nothing else to look for")
+        #expect(required("the folder") == ["the", "folder"])
+    }
+
+    @Test func aFunctionWordInTheMiddleIsNotRequired() throws {
+        let index = try Index([Self.documents + "/Invoices 2024.pdf", Self.documents + "/Invoices 2023.pdf"])
+
+        #expect(index.names("invoices for 2024") == ["Invoices 2024.pdf"])
+        #expect(index.names("the invoices 2024") == ["Invoices 2024.pdf"])
+    }
+
+    @Test func aKindNounIsStillRequired() throws {
+        let index = try Index([Self.documents + "/tax return.pdf", Self.documents + "/tax notes.txt",
+                               Self.documents + "/tax file.txt"])
+
+        #expect(index.names("tax pdf") == ["tax return.pdf"])
+        #expect(index.names("tax file") == ["tax file.txt"])
+    }
+
+    /// A name scores on what its folders leave of the Query, a step below a
+    /// name that answers all of it the same way.
+    @Test func aNameIsScoredOnWhatItsFoldersLeaveOfTheQuery() throws {
+        let index = try Index([
+            Self.documents + "/Uni/7. semester/Data Intensive Systems/code/",
+            Self.documents + "/Uni/7. semester/Data Intensive Systems/code/main.py",
+            Self.documents + "/Other/code data intensive systems.md",
+            Self.documents + "/Other/notes on code data intensive systems.md"
+        ])
+        let hits = index.reader.search("code data intensive systems", limit: 10, sources: [Self.documents])
+
+        #expect(hits.map(\.name) == ["code data intensive systems.md", "code",
+                                     "notes on code data intensive systems.md", "main.py"])
+        #expect(hits[1].score == FileIndexReader.nameAfterFoldersPenalty)
+        #expect(hits[3].score == FileHit.folderOnlyScore, "its folders hold every word: nothing left for the name")
+        #expect(index.names("code folder for intensive system data").first == "code", "\"system\" covers \"Systems\"")
+    }
+
+    /// "folder" picks the folder out of a tie and does nothing else: the file
+    /// is still there, and a better name still wins.
+    @Test func aFolderWordWinsAFolderATie() throws {
+        let index = try Index([
+            Self.documents + "/A/code",
+            Self.documents + "/B/code/",
+            Self.documents + "/C/code.txt"
+        ])
+
+        for query in ["code folder", "code mappe", "folder code"] {
+            let hits = index.reader.search(query, limit: 10, sources: [Self.documents])
+            #expect(hits.first?.kind == .folder, "\(query)")
+            #expect(Set(hits.map(\.name)) == ["code", "code.txt"], "\(query)")
+            #expect(hits.last?.name == "code.txt", "\(query)")
+        }
+    }
+
+    /// The bug this came from: `Data Intensive Systems/code` was missing for
+    /// "code folder for data intensive systems", since no file says "folder"
+    /// or "for", and under every file whose Passages say "code data intensive
+    /// systems" when it was found, since the name "code" is not the Query.
+    @Test func aFolderNamedForTheRestOfTheQueryIsAboveFilesThatSayIt() async throws {
+        let f = try MeaningFixture()
+        try f.make("Uni/7. semester/Data Intensive Systems/code/main.py", contents: "print('hello')")
+        for week in 1...14 {
+            try f.make("Lectures/week \(week).md", contents: "Week \(week): the code for data intensive systems, part \(week)")
+        }
+        try await f.index()
+
+        for query in ["code folder for data intensive systems", "code data intensive systems"] {
+            let keystroke = f.reader.search(query, limit: 50, sources: [f.root])
+            let settled = f.search(query)
+            for hits in [keystroke, settled] {
+                let first = try #require(hits.first, "\(query)")
+                #expect(first.name == "code" && first.kind == .folder, "\(query)")
+                #expect(first.passage == nil && first.score < FileHit.contentScore, "\(query): a name match")
+                #expect(hits.filter { $0.name.hasPrefix("week") }.count == 14, "\(query)")
+                #expect(hits.last?.name == "main.py" && hits.last?.score == FileHit.folderOnlyScore, "\(query)")
+            }
+        }
+    }
+
     // MARK: - Danish
 
     @Test func aDanishCompoundIsFoundByItsFirstWord() throws {

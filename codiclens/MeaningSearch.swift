@@ -162,8 +162,10 @@ nonisolated enum MeaningRanking {
 
     /// Words that say nothing about what is in a file: function words, and
     /// the kind words, which say what to look for rather than what is in it
-    /// (`kindWords` turns those into a boost instead). English and Danish.
+    /// (`kindWords` turns those into a boost instead; `folderWords` into a
+    /// tiebreak). English and Danish.
     static let stopwords: Set<String> = [
+        "folder", "folders", "mappe", "mapper", "mappen",
         "a", "an", "the", "of", "in", "on", "at", "to", "for", "with", "and", "or", "my", "me", "that", "this",
         "these", "those", "from", "about", "where", "what", "which", "who", "when", "is", "was", "are", "were", "be",
         "it", "its", "some", "any", "find", "show", "file", "files", "photo", "photos", "picture", "pictures",
@@ -221,6 +223,22 @@ nonisolated enum MeaningRanking {
         }
         return words
     }()
+
+    /// Words that ask for a folder: "code folder for data intensive systems",
+    /// "mappen med regnskabet". A folder is a `FileIndexRow.Kind`, not a
+    /// `FileContent`, so these are no `kindWords`: the word search does not
+    /// require them, and a folder wins a tie on them (`FileIndexReader.search`).
+    /// Never a filter, and never a list of folders on their own.
+    static let folderWords: Set<String> = ["folder", "folders", "mappe", "mapper", "mappen"]
+
+    /// The stopwords that only hold a sentence together ("for", "the", "af"),
+    /// which the word search need not find. Not the kind words, nor the kind
+    /// nouns "file" and "fil": a name that says "pdf" or "file" is what a
+    /// Query that says it wants.
+    static let functionWords: Set<String> = stopwords
+        .subtracting(kindWords.keys)
+        .subtracting(folderWords)
+        .subtracting(["file", "files", "fil", "filer"])
 
     /// Whether the Query is only a kind: it names one, and every word that
     /// is not a stopword is a kind word ("audio file", "music", "lydfiler").
