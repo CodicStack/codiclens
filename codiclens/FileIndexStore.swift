@@ -822,13 +822,16 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
                 var hit = self.hit(path: file.path, kind: file.kind,
                                    score: FileHit.contentScore + min(rank, FileHit.folderOnlyScore - FileHit.contentScore - 1))
                 hit.passage = entry.hit?.passage
-                // Pointed at the best segment by meaning where it stands out,
-                // else where the words matched. A picture found whole borrows
+                // Pointed at where the words matched, so the row, the Card and
+                // the preview can mark them; else at the best segment by
+                // meaning where it stands out. A picture found whole borrows
                 // the words of its OCR, which describe the same picture.
                 if let match = meaning.best(candidate.id), match.z >= MeaningRanking.zGate,
                    let modality = segmentModality(match.segment, db: db) {
                     hit.meaning = modality
-                    hit.passage = meaningPassage(match.segment, db: db) ?? hit.passage
+                    if hit.passage?.matches.isEmpty ?? true {
+                        hit.passage = meaningPassage(match.segment, db: db) ?? hit.passage
+                    }
                 }
                 hits.append(hit)
             }
