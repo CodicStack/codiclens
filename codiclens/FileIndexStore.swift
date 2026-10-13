@@ -543,10 +543,13 @@ nonisolated struct FileHit: Hashable, Sendable {
     let folder: String
     let kind: FileIndexRow.Kind
     /// On `fuzzyScore`'s scale — lower is better — so a File Result ranks
-    /// against the app's other searches. A match on what the file says is
-    /// `contentScore` and up, below every match on the name; a match on the
-    /// folder alone, where neither the name nor the words have anything to
-    /// show for it, is `folderOnlyScore`.
+    /// against the app's other searches. A name that answers only what its
+    /// folders leave of the Query ("code" in `Data Intensive Systems/code`)
+    /// is a name match a little below one that answers all of it
+    /// (`FileIndexReader.nameAfterFoldersPenalty`). A match on what the file
+    /// says is `contentScore` and up, below every match on the name; a match
+    /// on the folder alone, where neither the name nor the words have
+    /// anything to show for it, is `folderOnlyScore`.
     let score: Int
     /// Set when the file is here for what it says. A file whose name matched
     /// has none, whatever its words do; nor does a picture found by meaning,
@@ -630,23 +633,31 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
     }
 
     /// Files in `sources` (folder Source paths) whose name or folder, or one
-    /// of whose Passages, has every word of `query`, the last one as a
-    /// prefix (in Passages only with `.lastWordPrefix`). Best first, one row
-    /// per file; a file that matched on its words carries the best Passage
-    /// that did.
+    /// of whose Passages, has every word of `query` it requires
+    /// (`requiredWords`: not "folder" or "for"), the last one as a prefix (in
+    /// Passages only with `.lastWordPrefix`). Best first, one row per file; a
+    /// file that matched on its words carries the best Passage that did.
+    ///
+    /// A name is scored against the whole Query, and failing that against
+    /// what its folders leave of it, so "code folder for data intensive
+    /// systems" finds `Data Intensive Systems/code` as a name match. A folder
+    /// word in the Query wins a folder a tie, and nothing more.
     func search(_ query: String, limit: Int, sources: [String], passages: PassageMatch = .wholeWords) -> [FileHit] {
         lock.withLock { searchLocked(query, limit: limit, sources: sources, passages: passages) }
     }
 
     /// `search`, called with the lock held.
     private func searchLocked(_ query: String, limit: Int, sources: [String], passages: PassageMatch) -> [FileHit] {
-        let words = Self.words(query)
-        guard !words.isEmpty, !sources.isEmpty, limit > 0 else { return [] }
+        let allWords = Self.words(query)
+        guard !allWords.isEmpty, !sources.isEmpty, limit > 0 else { return [] }
+        let (words, endsOnLastWord) = Self.requiredWords(allWords)
         let sourceList = Self.jsonList(sources)
-        let match = Self.matchExpression(words)
-        let isLastWordOpen = passages == .lastWordPrefix && query.last?.isWhitespace != true
+        let match = Self.matchExpression(words, prefixMinimum: endsOnLastWord ? 1 : .max)
+        let isLastWordOpen = endsOnLastWord && passages == .lastWordPrefix && query.last?.isWhitespace != true
         let contentMatch = Self.matchExpression(words, prefixMinimum: isLastWordOpen ? Self.contentPrefixMinimum : .max)
         let foldedQuery = Self.fold(query)
+        let foldedWords = words.map(Self.fold)
+        let asksForFolder = allWords.contains(where: MeaningRanking.folderWords.contains)
 
         do {
             guard let statements = prepared() else { return [] }
@@ -660,13 +671,17 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
                 }
             }
             collect(statements.ranked, match)
-            if words.count == 1 { collect(statements.unranked, Self.namePrefixExpression(words[0])) }
+            if allWords.count == 1 { collect(statements.unranked, Self.namePrefixExpression(words[0])) }
 
             // Scored by name; a `URL` each only for the survivors, since one
-            // for four hundred candidates was a third of a search.
+            // for four hundred candidates was a third of a search. A folder's
+            // words are split only for a name the whole Query missed.
             for path in Array(candidates.keys) {
-                let name = (path as NSString).lastPathComponent
-                candidates[path]?.score = fuzzyScore(Self.fold(name), foldedQuery) ?? FileHit.folderOnlyScore
+                let name = Self.fold((path as NSString).lastPathComponent)
+                candidates[path]?.score = fuzzyScore(name, foldedQuery)
+                    ?? nameAfterFolders(name, path: path, words: foldedWords, of: allWords.count,
+                                        isLastOpen: endsOnLastWord)
+                    ?? FileHit.folderOnlyScore
             }
 
             // What files say, a row per file at its best Passage, ranked
@@ -688,8 +703,10 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
                 )
             }
 
+            // "…folder…" settles a tie for a folder: a nudge, never a filter.
+            func nudge(_ candidate: Candidate) -> Int { asksForFolder && candidate.kind == .folder ? 0 : 1 }
             return candidates
-                .sorted { ($0.value.score, $0.value.order) < ($1.value.score, $1.value.order) }
+                .sorted { ($0.value.score, nudge($0.value), $0.value.order) < ($1.value.score, nudge($1.value), $1.value.order) }
                 .prefix(limit)
                 .map { path, candidate in
                     var hit = hit(path: path, kind: candidate.kind, score: candidate.score)
@@ -701,6 +718,31 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
                 }
         }
     }
+
+    /// How well `name` answers what the folders in `path` leave of the
+    /// Query's `words` (folded, required): "code" in `Data Intensive
+    /// Systems/code` for "code data intensive systems", or "invoice" for "the
+    /// invoice", whose "the" is not required. Nil when the folders leave
+    /// nothing (a match on the folder alone), when the rest is every one of
+    /// the Query's `queryWordCount` words (the whole Query, already asked),
+    /// or when the name does not answer the rest either.
+    private func nameAfterFolders(_ name: String, path: String, words: [String], of queryWordCount: Int,
+                                  isLastOpen: Bool) -> Int? {
+        let folders = Self.folderWords(path, home: home)
+        let rest = words.enumerated().filter { index, word in
+            !Self.covers(folders, word, isPrefix: isLastOpen && index == words.count - 1)
+        }.map(\.element)
+        guard !rest.isEmpty, rest.count < queryWordCount,
+              let score = fuzzyScore(name, rest.joined(separator: " ")) else { return nil }
+        return min(score + Self.nameAfterFoldersPenalty, FileHit.contentScore - 1)
+    }
+
+    /// What a name that answers only the rest of the Query gives up: enough
+    /// that a name answering all of it the same way comes first. On
+    /// `fuzzyScore`'s tiers, `Data Intensive Systems/code` (0 + 2) sits below
+    /// a file called or beginning with "code data intensive systems" (0, 1)
+    /// and above one with the Query further into its name (10 and up).
+    static let nameAfterFoldersPenalty = 2
 
     // MARK: Words and meaning
 
@@ -717,13 +759,16 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
     /// before:
     ///
     /// - A file whose **name** matched keeps its `fuzzyScore` (0 to ~110) and
-    ///   no Passage: a name match is still above every file found by what it
-    ///   says or means.
+    ///   no Passage, as does one whose name answers what its folders leave of
+    ///   the Query (`search`): a name match is still above every file found
+    ///   by what it says or means.
     /// - Every other candidate — by its words (`contentScore` before), by
     ///   meaning, by both, or by its kind alone — is ordered (a kind-only
     ///   Query's kind first, then by the fused score) and placed at
     ///   `contentScore + rank` (120…199): the band content matches had, now
-    ///   ordered by meaning and words together.
+    ///   ordered by meaning and words together. Its words are counted in its
+    ///   Passages, its name and its folders, the folders only beside at least
+    ///   one word of its own.
     /// - A file found by its **folder** alone and by nothing else keeps
     ///   `folderOnlyScore` (200).
     func fusedSearch(_ query: String, limit: Int, sources: [String], meaning: MeaningScores) -> [FileHit] {
@@ -793,12 +838,20 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
             }
             entries = entries.filter { info[$0.key] != nil }
 
-            // How many of the Query's words each has, in its Passages or its
-            // name, where the word search did not already say all of them.
+            // How many of the Query's words each has, in its Passages, its
+            // name or its folders, where the word search did not already say
+            // all of them. A folder's words complete a file's own and never
+            // stand in for them: a file with none of the words itself
+            // measures 0, as the word search leaves a folder-only match at
+            // `folderOnlyScore`.
             let unmeasured = entries.filter { $0.value.coverage == nil }.map(\.key)
             if !unmeasured.isEmpty {
                 var found: [Int64: Int] = [:]
+                var own = Set<Int64>()
                 let files = Self.jsonList(unmeasured.map(String.init))
+                let folders = Dictionary(uniqueKeysWithValues: unmeasured.map {
+                    ($0, Self.folderWords(info[$0]?.path ?? "", home: home))
+                })
                 for (index, term) in terms.enumerated() {
                     let isPrefix = index == terms.count - 1 && isLastOpen && term.count >= Self.contentPrefixMinimum
                     let phrase = "\"\(term)\"" + (isPrefix ? "*" : "")
@@ -810,10 +863,16 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
                     try? db.query("""
                         SELECT value FROM json_each(?2) WHERE value IN (SELECT rowid FROM names WHERE names MATCH ?1)
                         """, [.text("{name} : " + phrase), .text(files)]) { has.insert($0.int(0)) }
-                    for file in has { found[file, default: 0] += 1 }
+                    own.formUnion(has)
+                    let folded = Self.fold(term)
+                    for id in unmeasured where has.contains(id)
+                        || Self.covers(folders[id] ?? [], folded, isPrefix: index == terms.count - 1 && isLastOpen) {
+                        found[id, default: 0] += 1
+                    }
                 }
                 for id in unmeasured {
-                    entries[id]?.coverage = terms.isEmpty ? 0 : Double(found[id] ?? 0) / Double(terms.count)
+                    let words = own.contains(id) ? found[id] ?? 0 : 0
+                    entries[id]?.coverage = terms.isEmpty ? 0 : Double(words) / Double(terms.count)
                 }
             }
 
@@ -1089,6 +1148,51 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
         query.precomposedStringWithCanonicalMapping.lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
+    }
+
+    /// The words of `words` a file must have: not a folder word ("folder",
+    /// "mappe"), which asks for a kind of row rather than naming one, and not
+    /// a function word ("for", "the", "af"), which a name or a path seldom
+    /// has. The whole Query still scores the name, so a name with them ranks
+    /// as before. A function word that is the last is kept: it may be the
+    /// start of a longer word still being typed ("for" of "format"). All of
+    /// `words` when that would leave none. `endsOnLastWord` says whether the
+    /// last kept is the Query's last, the one that may be a prefix.
+    static func requiredWords(_ words: [String]) -> (words: [String], endsOnLastWord: Bool) {
+        let kept = words.enumerated().filter { index, word in
+            !MeaningRanking.folderWords.contains(word)
+                && !(index < words.count - 1 && MeaningRanking.functionWords.contains(word))
+        }
+        guard let last = kept.last else { return (words, true) }
+        return (kept.map(\.element), last.offset == words.count - 1)
+    }
+
+    /// The words of the folders `path` is in, as the `names` table's folder
+    /// column has them (`FileIndexSchema.folderText`), folded.
+    static func folderWords(_ path: String, home: String) -> [String] {
+        words(FileIndexSchema.folderText(path, home: home)).map(fold)
+    }
+
+    /// Whether one of `folders` is `word` (folded): the same, a plural of it
+    /// or it of a plural ("system", "Systems", as FTS5's porter stemmer
+    /// matches them), or with `isPrefix`, a word that begins with it.
+    static func covers(_ folders: [String], _ word: String, isPrefix: Bool) -> Bool {
+        folders.contains { folder in
+            folder == word || (isPrefix && folder.hasPrefix(word))
+                || isPlural(folder, of: word) || isPlural(word, of: folder)
+        }
+    }
+
+    /// Whether `plural` is `word` with an English plural ending: "systems",
+    /// "classes", "studies". Rougher than porter, which stems the search
+    /// itself; a word this misses stays in the rest of the Query, and the
+    /// name is scored as it was before folders counted. Prefixes and lengths
+    /// only, since it runs for every word of up to `candidateLimit` paths.
+    static func isPlural(_ plural: String, of word: String) -> Bool {
+        let extra = plural.count - word.count
+        if extra == 1 { return plural.hasSuffix("s") && plural.hasPrefix(word) }
+        guard extra == 2, plural.hasSuffix("es") else { return false }
+        return plural.hasPrefix(word) || (word.hasSuffix("y") && plural.hasSuffix("ies") && plural.hasPrefix(word.dropLast()))
     }
 
     /// Every word quoted, all of them required, the last a prefix because it
