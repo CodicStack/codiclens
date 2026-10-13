@@ -1157,10 +1157,17 @@ on its evals):
 - score `max(z, 0) + 2 × coverage^1.5`, +1 when the Query names the file's kind ("video",
   "screenshot", "skærmbillede", "billede", "lyd", "pdf", "dokument"…); a **lookup** (every
   word an ID or number: `K7Q2LM`, `#1234`) weighs meaning 0.5 and words 4.
+- The kind word is a soft boost, not a filter, except in a **kind-only Query** ("audio file",
+  "billeder", "music": every word a kind word or a stopword). That means nothing beyond the
+  kind, and per-modality centring gives "audio-ness" nothing, so no file of the kind came in
+  (none of 91 recordings for "audio file"). It brings in that kind's newest `limit` files in
+  the enabled Sources, packaged documents included, ahead of the other candidates, newest
+  first; a file with the Query's words still comes in by coverage, after them.
 - **Where it lands** on `fuzzyScore`'s scale: a name match keeps its 0–~110 and no Passage,
-  so it stays above every file found by meaning; every other candidate — words, meaning or
-  both — is ordered by the fused score into `contentScore + rank` (120…199), the band content
-  matches had; a folder-only match that is no candidate keeps 200.
+  so it stays above every file found by meaning or kind; every other candidate — words,
+  meaning, both or a kind-only Query's kind — is ordered (that kind first, then the fused
+  score) into `contentScore + rank` (120…199), the band content matches had; a folder-only
+  match that is no candidate keeps 200.
 - A hit found by meaning carries `FileHit.meaning` (text, image, audio) and points at its
   best segment: the start of its text, its page, or its span in seconds (`Passage.start`,
   `end`; `subtitle` "at 14:02"); a picture found whole has no Passage, or borrows its OCR

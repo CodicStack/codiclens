@@ -47,6 +47,12 @@ nonisolated enum MeaningModality: UInt8, Sendable, CaseIterable {
 ///    plus 1 when the Query names its kind ("video", "skærmbillede").
 ///    A "lookup" — IDs and numbers like `K7Q2LM` or `#1234` — weighs words
 ///    double and meaning half: they mean nothing to an embedding.
+/// 4. A Query that is only a kind ("audio file", "billeder", "music": every
+///    word a kind word or a stopword, `isKindOnly`) means nothing beyond the
+///    kind, which the per-modality scale centres away, so no file of that
+///    kind would come in. Its newest files of that kind are candidates
+///    instead, ahead of the rest, newest first; a file with its words still
+///    comes in by coverage, after them.
 nonisolated enum MeaningRanking {
     static let zGate = 2.0
     static let coverageGate = 0.5
@@ -140,8 +146,10 @@ nonisolated enum MeaningRanking {
 
     // MARK: - Fusion
 
-    static func isCandidate(z: Double?, coverage: Double) -> Bool {
-        (z ?? -.infinity) >= zGate || coverage >= coverageGate
+    /// `isAskedForAlone`: the file is of the kind a Query asks for, and the
+    /// Query is only a kind (`isKindOnly`): it is a candidate by its kind.
+    static func isCandidate(z: Double?, coverage: Double, isAskedForAlone: Bool = false) -> Bool {
+        isAskedForAlone || (z ?? -.infinity) >= zGate || coverage >= coverageGate
     }
 
     /// The fused score, higher is better.
@@ -160,11 +168,12 @@ nonisolated enum MeaningRanking {
         "these", "those", "from", "about", "where", "what", "which", "who", "when", "is", "was", "are", "were", "be",
         "it", "its", "some", "any", "find", "show", "file", "files", "photo", "photos", "picture", "pictures",
         "image", "images", "screenshot", "screenshots", "video", "videos", "pdf", "pdfs", "document", "documents",
-        "recording", "recordings", "audio", "sound",
+        "recording", "recordings", "audio", "sound", "sounds",
         "og", "eller", "på", "til", "af", "for", "med", "en", "et", "den", "det", "de", "der", "som", "min", "mit",
         "mine", "fra", "om", "hvor", "hvad", "hvilken", "hvilket", "hvem", "hvornår", "er", "var", "at", "har",
         "jeg", "vi", "du", "noget", "nogle", "fil", "filer", "find", "vis", "billede", "billeder", "foto", "fotos",
         "skærmbillede", "skærmbilleder", "dokument", "dokumenter", "optagelse", "optagelser", "lyd", "lydfil",
+        "lydfiler", "videoer",
     ]
 
     /// The Query's content words as keyword search sees them, once each:
@@ -185,7 +194,8 @@ nonisolated enum MeaningRanking {
         }
     }
 
-    /// Words that ask for a kind of file: a soft boost, not a filter.
+    /// Words that ask for a kind of file: a soft boost, not a filter. Only a
+    /// Query of nothing but kind words lists that kind first (`MeaningRanking`, 4).
     static let kindWords: [String: Set<FileContent>] = {
         var words: [String: Set<FileContent>] = [:]
         for word in ["screenshot", "screenshots", "skærmbillede", "skærmbilleder", "skærmbilledet"] {
@@ -200,13 +210,23 @@ nonisolated enum MeaningRanking {
                      "noter", "notat", "notater"] {
             words[word] = [.document, .text]
         }
-        for word in ["video", "videos", "clip", "movie", "film", "filmen", "videoen", "klip"] { words[word] = [.video] }
-        for word in ["audio", "song", "podcast", "voice", "sound", "recording", "lyd", "lydfil", "lyden", "sang",
-                     "optagelse", "optagelsen", "stemme"] {
+        for word in ["video", "videos", "clip", "clips", "movie", "movies", "film", "filmen", "videoen", "videoer", "klip",
+                     "klippene"] {
+            words[word] = [.video]
+        }
+        for word in ["audio", "song", "songs", "podcast", "podcasts", "voice", "voices", "sound", "sounds", "recording",
+                     "recordings", "music", "lyd", "lydfil", "lydfiler", "lyden", "sang", "sange", "musik", "optagelse",
+                     "optagelser", "optagelsen", "stemme"] {
             words[word] = [.audio]
         }
         return words
     }()
+
+    /// Whether the Query is only a kind: it names one, and every word that
+    /// is not a stopword is a kind word ("audio file", "music", "lydfiler").
+    static func isKindOnly(_ query: String) -> Bool {
+        !kindHints(query).isEmpty && terms(query).allSatisfy { kindWords[$0] != nil }
+    }
 
     /// The kinds the Query asks for: "…in a video", "skærmbillede af…".
     static func kindHints(_ query: String) -> Set<FileContent> {
