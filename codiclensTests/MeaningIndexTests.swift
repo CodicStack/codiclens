@@ -497,6 +497,22 @@ struct MeaningIndexTests {
         #expect(hits[0].passage?.excerpt.hasPrefix("Blend banana") == true)
     }
 
+    /// Found by its words and by meaning both: the Passage stays where the
+    /// words matched, so the row, the Card and the preview can mark them.
+    @Test func aFileTheWordsMatchedKeepsItsMarkedPassage() async throws {
+        let f = try MeaningFixture()
+        try f.make("notes.md", contents: "Blend banana and berries: the smoothie we liked.")
+        try f.makeFillers()
+        try await f.index()
+
+        let hits = f.search("smoothie")
+        #expect(hits.first?.name == "notes.md")
+        #expect(hits.first?.meaning == .text)
+        let passage = try #require(hits.first?.passage)
+        #expect(!passage.matches.isEmpty)
+        #expect(passage.matches.map { Array(passage.excerpt)[$0].map(String.init).joined().lowercased() } == ["smoothie"])
+    }
+
     @Test func nameMatchesStayAboveMeaningAndMeaningLandsInTheContentBand() async throws {
         let f = try MeaningFixture()
         try f.make("zebra list.txt", contents: "unrelated words")
