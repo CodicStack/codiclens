@@ -75,6 +75,29 @@ struct MeaningRankingTests {
         #expect(!MeaningRanking.isCandidate(z: nil, coverage: 0))
     }
 
+    /// A Query of nothing but kind words takes every file of its kind
+    /// brought in, whatever its meaning or words.
+    @Test func aFileOfTheKindAKindOnlyQueryAsksForIsACandidate() {
+        #expect(MeaningRanking.isCandidate(z: nil, coverage: 0, isAskedForAlone: true))
+        #expect(MeaningRanking.isCandidate(z: -1, coverage: 0, isAskedForAlone: true))
+        #expect(!MeaningRanking.isCandidate(z: 1.99, coverage: 0.49, isAskedForAlone: false))
+    }
+
+    @Test func aQueryOfOnlyKindWordsHasNoTermsButAsksForTheKind() {
+        for query in ["audio file", "lydfil", "lydfiler", "sounds", "optagelser", "screenshots", "billeder", "videoer"] {
+            #expect(MeaningRanking.terms(query).isEmpty, "\(query)")
+            #expect(!MeaningRanking.kindHints(query).isEmpty, "\(query)")
+        }
+        #expect(MeaningRanking.kindHints("audio file") == [.audio])
+        for query in ["audio file", "lydfiler", "music", "songs", "podcasts", "my movies"] {
+            #expect(MeaningRanking.isKindOnly(query), "\(query): a kind word is no topic")
+        }
+        #expect(!MeaningRanking.isKindOnly("jazz music"), "\"jazz\" is a topic")
+        #expect(!MeaningRanking.isKindOnly("budget"))
+        #expect(!MeaningRanking.isKindOnly("the file"), "stopwords alone name no kind")
+        #expect(MeaningRanking.terms("jazz song") == ["jazz", "song"], "\"song\" asks for a kind and is a word")
+    }
+
     @Test func theScoreWeighsMeaningWordsAndTheKindAsked() {
         #expect(MeaningRanking.score(z: 3, coverage: 0, isKindAskedFor: false, isLookup: false) == 3)
         #expect(MeaningRanking.score(z: -1, coverage: 1, isKindAskedFor: false, isLookup: false) == 2,
@@ -113,6 +136,9 @@ struct MeaningRankingTests {
         #expect(MeaningRanking.kindHints("lyd fra mødet") == [.audio])
         #expect(MeaningRanking.kindHints("pdf med kontrakten") == [.pdf])
         #expect(MeaningRanking.kindHints("noter om budget") == [.document, .text])
+        #expect(MeaningRanking.kindHints("music from the party") == [.audio])
+        #expect(MeaningRanking.kindHints("optagelser fra mødet") == [.audio])
+        #expect(MeaningRanking.kindHints("movies") == [.video])
         #expect(MeaningRanking.kindHints("budget 2024").isEmpty)
     }
 

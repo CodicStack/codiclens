@@ -579,4 +579,77 @@ struct MeaningIndexTests {
         #expect(f.search("beach billede").map(\.name) == ["seaside.png", "trip.md"], "\"billede\" asks for a picture")
         #expect(f.search("beach dokument").map(\.name) == ["trip.md", "seaside.png"], "\"dokument\" for a note")
     }
+
+    /// "audio file" is all stopwords and means nothing past "audio", which
+    /// the per-modality scale centres away: no recording reaches the gate.
+    /// The newest recordings come in, first, ahead of a note the words found.
+    @Test func aQueryOfOnlyAKindListsTheNewestOfThatKindFirst() async throws {
+        let f = try MeaningFixture()
+        for (name, year) in [("old.wav", 2020), ("new.wav", 2024), ("mid.wav", 2022)] {
+            try TestMedia.wav(at: f.path(name), seconds: 5)
+            try f.setDate(name, try #require(Calendar.current.date(from: DateComponents(year: year, month: 6, day: 1))))
+        }
+        try f.make("notes.md", contents: "the audio file is ready")
+        try f.make("playlist.md", contents: "music for the drive")
+        try f.makeFillers()
+        try await f.index()
+
+        #expect(f.reader.fusedSearch("audio file", limit: 50, sources: [f.root], meaning: .none).map(\.name)
+                == ["new.wav", "mid.wav", "old.wav", "notes.md"], "without meaning too")
+        let hits = f.search("audio file")
+        #expect(hits.map(\.name) == ["new.wav", "mid.wav", "old.wav", "notes.md"])
+        #expect(hits.map(\.score) == (0..<4).map { FileHit.contentScore + $0 })
+        #expect(hits.prefix(3).allSatisfy { $0.meaning == nil }, "found by its kind, not by meaning")
+        #expect(f.search("lydfil").map(\.name) == ["new.wav", "mid.wav", "old.wav"])
+        #expect(f.search("music").map(\.name) == ["new.wav", "mid.wav", "old.wav", "playlist.md"],
+                "a kind word that is not a stopword is still only a kind; the note with it comes in after")
+        #expect(f.search("video").isEmpty, "no file of the kind: nothing, as before")
+    }
+
+    @Test func aNameMatchStaysAboveTheKindAskedFor() async throws {
+        let f = try MeaningFixture()
+        try TestMedia.wav(at: f.path("take.wav"), seconds: 5)
+        try f.make("audio file list.txt", contents: "nothing here")
+        try f.makeFillers()
+        try await f.index()
+
+        let hits = f.search("audio file")
+        #expect(hits.map(\.name) == ["audio file list.txt", "take.wav"])
+        #expect(hits[0].passage == nil && hits[0].score < FileHit.contentScore)
+        #expect(hits[1].score == FileHit.contentScore)
+    }
+
+    /// The kind word with other words is a nudge, not a filter: a
+    /// recording that means half of "music meeting recording" (z between 1
+    /// and 2) stays out, as it would without the kind word.
+    @Test func theKindAskedForWithATopicIsOnlyANudge() async throws {
+        let f = try MeaningFixture()
+        try TestMedia.wav(at: f.path("standup.wav"), seconds: 5)
+        try f.make("concert.md", contents: "music for the meeting")
+        try f.makeFillers()
+        try await f.index()
+
+        let query = "music meeting recording"
+        let scores = try #require(f.vectors.snapshot().map { MeaningScores($0, query: KeywordEmbedder.vector(for: query)) })
+        let recording = try #require(scores.best(try f.id("standup.wav"))?.z)
+        #expect(recording >= 1 && recording < MeaningRanking.zGate, "\(recording)")
+
+        #expect(f.search(query).map(\.name) == ["concert.md"])
+        #expect(f.search("music meeting").map(\.name) == ["concert.md"])
+    }
+
+    /// "documents" asks for documents, and a packaged one (`.rtfd`,
+    /// `.pages`, `.numbers`, `.key`) is one.
+    @Test func aKindOnlyQueryBringsInPackagedDocuments() async throws {
+        let f = try MeaningFixture()
+        try f.make("Notes.rtfd/TXT.rtf", contents: "{\\rtf1 hello}")
+        try f.make("old.md", contents: "ordinary")
+        try f.setDate("Notes.rtfd", try #require(Calendar.current.date(from: DateComponents(year: 2024, month: 6, day: 1))))
+        try f.setDate("old.md", try #require(Calendar.current.date(from: DateComponents(year: 2020, month: 6, day: 1))))
+        try await f.index()
+
+        let hits = f.reader.fusedSearch("documents", limit: 50, sources: [f.root], meaning: .none)
+        #expect(hits.map(\.name) == ["Notes.rtfd", "old.md"])
+        #expect(hits.first?.kind == .package)
+    }
 }

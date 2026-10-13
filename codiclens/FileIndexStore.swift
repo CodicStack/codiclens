@@ -708,7 +708,9 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
     /// prefix, then fused with `meaning` as DigUp fuses them
     /// (`MeaningRanking`) — files that stand out by meaning join, files with
     /// most of the Query's words rise, and the Query's kind word lifts its
-    /// kind.
+    /// kind. A Query of nothing but kind words and stopwords ("audio file",
+    /// "music") lists the newest `limit` files of that kind first, newest
+    /// first.
     ///
     /// **The scale it lands on** is the word search's, lower is better, so
     /// the list below the apps ranks it against Clipboard Items and Emoji as
@@ -718,7 +720,8 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
     ///   no Passage: a name match is still above every file found by what it
     ///   says or means.
     /// - Every other candidate — by its words (`contentScore` before), by
-    ///   meaning, or by both — is ordered by the fused score and placed at
+    ///   meaning, by both, or by its kind alone — is ordered (a kind-only
+    ///   Query's kind first, then by the fused score) and placed at
     ///   `contentScore + rank` (120…199): the band content matches had, now
     ///   ordered by meaning and words together.
     /// - A file found by its **folder** alone and by nothing else keeps
@@ -728,6 +731,8 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
             let wordHits = searchLocked(query, limit: limit, sources: sources, passages: .lastWordPrefix)
             guard let db = connection(), !sources.isEmpty, limit > 0 else { return wordHits }
             let terms = MeaningRanking.terms(query)
+            let hinted = MeaningRanking.kindHints(query)
+            let isKindOnly = MeaningRanking.isKindOnly(query)
             let isLastOpen = query.last?.isWhitespace != true
             let sourceList = Self.jsonList(sources)
 
@@ -762,16 +767,29 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
             for match in meaning.top where entries[match.file] == nil {
                 entries[match.file] = Fused(order: Int.max)
             }
+            // A Query that is only a kind: that kind's newest files, which
+            // neither its words nor its meaning would bring.
+            if isKindOnly {
+                try? db.query("""
+                    SELECT id FROM files WHERE content IN (SELECT value FROM json_each(?1))
+                        AND source IN (SELECT value FROM json_each(?2))
+                    ORDER BY mtime DESC LIMIT ?3
+                    """, [.text(Self.jsonList(hinted.map { String($0.rawValue) })), .text(sourceList),
+                          .int(Int64(limit))]) { row in
+                    let id = row.int(0)
+                    if entries[id] == nil { entries[id] = Fused(order: Int.max) }
+                }
+            }
 
             // Where each one is and what it is; a file meaning found outside
             // the enabled Sources drops out here.
-            var info: [Int64: (path: String, kind: FileIndexRow.Kind, content: FileContent?)] = [:]
+            var info: [Int64: (path: String, kind: FileIndexRow.Kind, content: FileContent?, mtime: Double)] = [:]
             try? db.query("""
-                SELECT id, path, kind, content FROM files
+                SELECT id, path, kind, content, mtime FROM files
                 WHERE id IN (SELECT value FROM json_each(?1)) AND source IN (SELECT value FROM json_each(?2))
                 """, [.text(Self.jsonList(entries.keys.map(String.init))), .text(sourceList)]) { row in
                 info[row.int(0)] = (row.text(1) ?? "", FileIndexRow.Kind(rawValue: row.text(2) ?? "") ?? .file,
-                                    row.isNull(3) ? nil : FileContent(rawValue: Int(row.int(3))))
+                                    row.isNull(3) ? nil : FileContent(rawValue: Int(row.int(3))), row.double(4))
             }
             entries = entries.filter { info[$0.key] != nil }
 
@@ -800,17 +818,26 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
             }
 
             let isLookup = MeaningRanking.isLookup(terms)
-            let hinted = MeaningRanking.kindHints(query)
-            var fused: [(id: Int64, score: Double, order: Int)] = []
+            var fused: [(id: Int64, score: Double, order: Int, isAskedForAlone: Bool)] = []
             for (id, entry) in entries where !entry.isNameMatch {
                 let z = meaning.best(id)?.z
                 let coverage = entry.coverage ?? 0
-                guard MeaningRanking.isCandidate(z: z, coverage: coverage) else { continue }
                 let isAskedFor = info[id]?.content.map(hinted.contains) ?? false
+                let isAskedForAlone = isAskedFor && isKindOnly
+                guard MeaningRanking.isCandidate(z: z, coverage: coverage, isAskedForAlone: isAskedForAlone) else {
+                    continue
+                }
                 fused.append((id, MeaningRanking.score(z: z, coverage: coverage, isKindAskedFor: isAskedFor,
-                                                       isLookup: isLookup), entry.order))
+                                                       isLookup: isLookup), entry.order, isAskedForAlone))
             }
-            fused.sort { ($0.score, -$0.order, -$0.id) > ($1.score, -$1.order, -$1.id) }
+            // A kind-only Query's kind first, newest first; the rest by score.
+            fused.sort { a, b in
+                if a.isAskedForAlone != b.isAskedForAlone { return a.isAskedForAlone }
+                if a.isAskedForAlone, let aTime = info[a.id]?.mtime, let bTime = info[b.id]?.mtime, aTime != bTime {
+                    return aTime > bTime
+                }
+                return (a.score, -a.order, -a.id) > (b.score, -b.order, -b.id)
+            }
 
             var hits = wordHits.filter { hit in
                 // Name matches stay; a folder-only match stays unless it is
