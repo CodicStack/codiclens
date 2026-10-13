@@ -1164,7 +1164,9 @@ on its evals):
 - A hit found by meaning carries `FileHit.meaning` (text, image, audio) and points at its
   best segment: the start of its text, its page, or its span in seconds (`Passage.start`,
   `end`; `subtitle` "at 14:02"); a picture found whole has no Passage, or borrows its OCR
-  words. Without meaning on, or before any vector, the settled search is the word search with
+  words. **Where the Query's words matched it keeps that Passage**, marks and all, so the
+  row, the Card and the preview can mark them: pointing it at meaning's segment instead
+  left nearly every File Result unmarked once typing paused. Without meaning on, or before any vector, the settled search is the word search with
   the prefix.
 - It is cancellable: a cancelled Task, or a newer call started while it waited for the
   vector, returns `[]`.
