@@ -128,7 +128,7 @@ class PanelController {
 
         runner.onQuickLook = { [weak self] context in
             guard let self else { return }
-            if self.quickLookActive && self.quickLookHelper.isVisible {
+            if self.quickLookActive && (self.quickLookHelper.isVisible || self.quickLookHelper.isTransitioning) {
                 self.dismissQuickLook()
                 return
             }
