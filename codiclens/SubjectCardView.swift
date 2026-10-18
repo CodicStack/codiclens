@@ -321,12 +321,16 @@ struct SubjectCardView: View {
             // Focus has to be taken *after* the update that inserted the editor
             // has committed — assigning it during that update is dropped,
             // because the text view it would move focus to does not exist yet.
-            // `task` is the event that says "committed": it starts on the main
-            // actor once the view is in the hierarchy. It replaces a fixed
-            // 0.1-second delay that was guessing at the same moment.
+            // `task` alone is not that moment: under a real ⌘E from the
+            // keyboard its body starts before the text view is in the window,
+            // and the editor opened with the keys still in the hidden field.
+            // A synthesised `NSEvent` does not show it; a posted `CGEvent` does,
+            // every time. The yield puts the assignment on the main actor's
+            // next turn, after the text view is mounted.
             .task {
                 let text = coordinator.textSubjectEditText
                 editorSelection = TextSelection(insertionPoint: text.endIndex)
+                await Task.yield()
                 isEditorFocused = true
             }
     }
@@ -390,8 +394,11 @@ struct SubjectCardView: View {
                     renameSelection = TextSelection(range: coordinator.renameSelectedRange)
                 }
                 // Focus after the update that inserted the field has committed,
-                // as the text editor takes it.
-                .task { isRenameFocused = true }
+                // as the text editor takes it, yield and all.
+                .task {
+                    await Task.yield()
+                    isRenameFocused = true
+                }
         }
         .padding(.horizontal, Style.padding)
     }
