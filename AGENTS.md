@@ -1363,10 +1363,12 @@ Real, unfixed, none urgent.
   output and was `.text`-only, so a promoted file fell straight through it. The
   name is marked up against the Query only in a Query Phase, for the same reason:
   a chosen Subject's name is not what the Query matched.
-- `SubjectCardView.textSubjectEditor` takes focus from a `.task`, which is the first
-  main-actor turn after the editor is inserted. That is ordering, not a delay — but it
-  is still the weakest link in the focus story, and if the clipboard editor ever comes
-  up unfocused, this is why.
+- `SubjectCardView.textSubjectEditor` (and the rename field) takes focus from a
+  `.task` that yields once first. `.task` alone came up unfocused under a real ⌘E:
+  its body started before the text view was in the window, and the assignment was
+  dropped (2026-10-18). A synthesised `NSEvent` through `NSApp.sendEvent` never
+  shows this; only a posted `CGEvent` does, so test focus with one. Ordering, not a
+  delay — but still the weakest link in the focus story.
 - `Motion.resizeDuration` and `Motion.resizeTimingFunction` are unused. They are the
   AppKit spelling of `resize`, kept for the next time something animates a window
   frame; nothing does now that the Panel never resizes.
