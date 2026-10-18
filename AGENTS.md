@@ -730,6 +730,13 @@ them. See `docs/adr/0010-a-clipboard-item-is-a-snapshot.md`.
 
 ### QuickLookHelper — QLPreviewPanel bridge
 Data source and delegate for system Quick Look. Handles keyboard events (j/k navigation, Shift+Space dismiss). Reports dismissal via `onDismiss` callback.
+
+**Quick Look opens and closes once Shift is up** (`whenShiftIsUp`). AppKit plays window
+animations in slow motion while Shift is held, and Shift+Space always has it held: the
+fade in took ~1.1 s instead of ~0.2 s, and a Shift+Space close was still on screen after
+2 s (measured 2026-10-18). The release is a `flagsChanged` event, watched by a local and
+a global monitor; `isTransitioning` is true while it waits.
+
 A context is one item, the selected one; up/down and j/k inside Quick Look move the
 Panel's selection and ask `quickLookContext()` again, which is how it walks a list.
 

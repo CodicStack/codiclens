@@ -136,7 +136,13 @@ class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
         return panel.isVisible
     }
 
-    var isTransitioning: Bool { false }
+    /// Whether Quick Look has been asked to open or close and is waiting for
+    /// Shift to come up first (`whenShiftIsUp`).
+    var isTransitioning: Bool { afterShift != nil }
+
+    /// What runs once Shift is up, and the monitors waiting for it.
+    private var afterShift: (() -> Void)?
+    private var shiftMonitors: [Any] = []
 
     // MARK: - Public API
 
@@ -146,9 +152,12 @@ class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
               let panel = QLPreviewPanel.shared() else { return false }
 
         self.context = context
-        panel.reloadData()
-        panel.currentPreviewItemIndex = context.clampedSelectedIndex
-        panel.makeKeyAndOrderFront(nil)
+        whenShiftIsUp { [weak self] in
+            guard let self else { return }
+            panel.reloadData()
+            panel.currentPreviewItemIndex = self.context.clampedSelectedIndex
+            panel.makeKeyAndOrderFront(nil)
+        }
         return true
     }
 
@@ -163,9 +172,53 @@ class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
     }
 
     func dismiss() {
+        cancelShiftWait()
         guard QLPreviewPanel.sharedPreviewPanelExists(),
               let panel = QLPreviewPanel.shared() else { return }
         panel.close()
+    }
+
+    /// Runs `action` now, or once Shift is released if it is held.
+    ///
+    /// AppKit plays a window's animations in slow motion while Shift is down,
+    /// and Quick Look's fade is one of them. Shift+Space opens and closes it,
+    /// so Shift is always down at that moment: the fade in took ~1.1 s instead
+    /// of ~0.2 s, and the fade out with Shift held was still on screen after
+    /// 2 s. AppKit reads Shift as the animation starts, so starting it on the
+    /// release gets the normal speed.
+    ///
+    /// The release is a `flagsChanged` event: in this app while the Panel or
+    /// Quick Look is the key window, which is always so for Shift+Space, and
+    /// in another app's otherwise, which only the global monitor sees. Missing
+    /// it would leave Quick Look never opening, so both listen.
+    private func whenShiftIsUp(_ action: @escaping () -> Void) {
+        cancelShiftWait()
+        guard NSEvent.modifierFlags.contains(.shift) else {
+            action()
+            return
+        }
+        afterShift = action
+        let released: (NSEvent) -> Void = { [weak self] event in
+            guard !event.modifierFlags.contains(.shift), let self else { return }
+            let action = self.afterShift
+            self.cancelShiftWait()
+            action?()
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged, handler: { event in
+            released(event)
+            return event
+        }) {
+            shiftMonitors.append(local)
+        }
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: released) {
+            shiftMonitors.append(global)
+        }
+    }
+
+    private func cancelShiftWait() {
+        shiftMonitors.forEach(NSEvent.removeMonitor)
+        shiftMonitors = []
+        afterShift = nil
     }
 
     // MARK: - Data Source
@@ -187,7 +240,7 @@ class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
             return false
         }
         if event.keyCode == 49 && event.modifierFlags.contains(.shift) {
-            panel.close()
+            whenShiftIsUp { panel.close() }
             return true
         }
         if event.keyCode == 126 || event.charactersIgnoringModifiers == "k" {
