@@ -61,7 +61,7 @@ A Result in Subject search that is a file, matched by its name or by what it con
 _Avoid_: file hit, document match, search result
 
 **Last Subject**:
-The Clipboard Item or Emoji the user last acted on, standing as the Subject when the Panel opens again, with the Query empty. Enter acts on it again; the first keystroke starts a new Query. Apps, files and text never become the Last Subject.
+The Subject the user last acted on or sent in as an Incoming Subject, standing as the Subject when the Panel opens again, with the Query empty: a Clipboard Item, an Emoji, a file, a folder or text. Enter acts on it again; the first keystroke starts a new Query. Apps and Built-ins never become the Last Subject. A file renamed or moved by Codiclens is followed; one trashed, or gone since, leaves no Last Subject.
 _Avoid_: recent, history, sticky subject, resume
 
 **Passage**:
@@ -214,6 +214,15 @@ path and nothing else — it cannot collide with an app name, so it never compet
 with the App Index. It resolves to exactly one Subject; a path that does not exist
 resolves to none and the Panel shakes.
 _Avoid_: file subject, browse, navigate, completion
+
+**Incoming Subject**:
+A Subject handed to Codiclens from outside it: a file or folder sent from
+Finder's right-click menu, or text selected in another app. The Panel opens on
+it standing, as a Last Subject stands: one Card, the Query empty. Enter runs its
+default Action, Tab goes to the Action Phase, the first keystroke starts a new
+Query. When several files are sent at once, the first becomes the Subject and
+the rest are dropped; the Subject Card says how many were sent.
+_Avoid_: sent subject, handed subject, dropped file, opened file
 
 ### Transcribing audio and video
 
