@@ -44,12 +44,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyRefs: [EventHotKeyRef] = []
     private var hotKeyHandlerRef: EventHandlerRef?
 
+    /// The app an Incoming Subject came from. See `LastActiveApp`.
+    private let lastActiveApp = LastActiveApp()
+    private let incomingService = IncomingService()
+
+    /// An Incoming Subject that arrived before the Panel existed.
+    ///
+    /// A cold launch from Open With delivers `application(_:open:)` before
+    /// `applicationDidFinishLaunching`, so the URLs wait here and are handed
+    /// over once the Panel is made. Only the latest is kept, as it would win
+    /// over an earlier one in a Panel already up.
+    private var pendingIncoming: Incoming?
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        guard !EmbeddingService.isRequested(), !Self.isTestHost else { return }
+        lastActiveApp.start()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Relaunched as the embedding helper: no Panel, no hotkeys, no File
         // Index, no clipboard recorder, only the request loop.
         if EmbeddingService.isRequested() { return EmbeddingService.start() }
         guard !Self.isTestHost else { return }
-        panelController = PanelController()
+        panelController = PanelController(lastActiveApp: lastActiveApp)
         // Off-thread, so neither launch nor the first Emoji Mode waits on the
         // 226 KB dataset being decoded.
         EmojiIndex.prewarm()
@@ -61,6 +78,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         installHotKeyHandler()
         register(HotKey.panel, as: HotKeyID.panel)
         register(HotKey.emoji, as: HotKeyID.emoji)
+
+        // "Open in Codiclens". Service requests that launched the app are
+        // delivered once this is set, after the Panel exists. The update makes
+        // a fresh install's Service show up without logging out.
+        incomingService.onIncoming = { [weak self] incoming in
+            self?.receive(incoming)
+        }
+        NSApp.servicesProvider = incomingService
+        NSUpdateDynamicServices()
+
+        if let pendingIncoming {
+            self.pendingIncoming = nil
+            receive(pendingIncoming)
+        }
     }
 
     /// Everything the app holds outside its own memory, released in one place.
@@ -72,11 +103,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         guard !Self.isTestHost, !EmbeddingService.isRequested() else { return }
         unregisterHotKeys()
+        lastActiveApp.stop()
         pasteboardWatcher?.stop()
         panelController?.tearDown()
         panelController = nil
         AppIndex.shared.stop()
         FileIndex.shared.stop()
+    }
+
+    // MARK: - Incoming Subjects
+
+    /// Finder's Open With ▸ Codiclens, for one file or several, and `open -a`.
+    ///
+    /// SwiftUI's app delegate hands this to the adaptor; with only a `Settings`
+    /// scene there is no window for it to open instead.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard !Self.isTestHost, !EmbeddingService.isRequested() else { return }
+        let fileURLs = urls.filter(\.isFileURL)
+        guard !fileURLs.isEmpty else { return }
+        receive(.urls(fileURLs))
+    }
+
+    private func receive(_ incoming: Incoming) {
+        guard let panelController else {
+            pendingIncoming = incoming
+            return
+        }
+        switch incoming {
+        case .urls(let urls): panelController.showIncoming(urls: urls)
+        case .text(let text): panelController.showIncoming(text: text)
+        }
     }
 
     // MARK: - QuickLook Responder Chain

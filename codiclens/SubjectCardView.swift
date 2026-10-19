@@ -153,6 +153,15 @@ struct SubjectCardView: View {
     /// The Card's bottom-trailing corner: what it holds, and what acts on it.
     private var corner: some View {
         HStack(spacing: 4) {
+            // Several files sent at once: this is the first, and the rest
+            // were dropped.
+            if coordinator.incomingCount > 1 {
+                Text("1 of \(coordinator.incomingCount)")
+                    .font(.system(size: 10, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .chipSurface()
+            }
             if let note = coordinator.fileOperationNote ?? coordinator.transcriptionNote ?? coordinator.momentOpenNote {
                 Text(note)
                     .font(.system(size: 10, weight: .medium))

@@ -26,6 +26,9 @@ class PanelController {
     private(set) var quickLookActive = false
     private var savePanelActive = false
     private let focus = FocusHandoff()
+    /// Where an Incoming Subject came from, when Codiclens has already been
+    /// activated by the time it arrives.
+    private let lastActiveApp: LastActiveApp
     /// Search by meaning's query encoder, held while the Panel is up.
     private let queryEncoder = QueryEncoderHold.fileIndex
     private var isTornDown = false
@@ -41,7 +44,8 @@ class PanelController {
     /// whether it is still the current one before it orders the window out.
     private var showGeneration = 0
 
-    init() {
+    init(lastActiveApp: LastActiveApp) {
+        self.lastActiveApp = lastActiveApp
         let runner = SystemEffectRunner(pasteboard: .general)
         effectRunner = runner
         coordinator = CommandCoordinator(
@@ -222,14 +226,51 @@ class PanelController {
     }
 
     func showPanel() {
+        show(handingBackTo: NSWorkspace.shared.frontmostApplication)
+    }
+
+    /// Opens the Panel on files or folders sent from Finder, or stands them in
+    /// the Panel already up. The coordinator drops whatever command was under
+    /// way; the first URL is the Subject and the rest are counted.
+    func showIncoming(urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        receiveIncoming { $0.receiveIncoming(urls: urls) }
+    }
+
+    /// Opens the Panel on text selected in another app, or stands it in the
+    /// Panel already up.
+    func showIncoming(text: String) {
+        receiveIncoming { $0.receiveIncoming(text: text) }
+    }
+
+    /// An Incoming Subject is stood after `reset()` and before the Panel's
+    /// first render, so the entrance animates the Subject that was sent rather
+    /// than the Last Subject it replaces.
+    ///
+    /// The app activation goes back to is `LastActiveApp.source`, not the
+    /// frontmost app: Open With and the Service both activate Codiclens, and by
+    /// now Codiclens may be frontmost. With the Panel already up, its
+    /// `FocusHandoff` already holds the app from when it opened.
+    private func receiveIncoming(_ receive: (CommandCoordinator) -> Void) {
+        guard isShowing else {
+            return show(handingBackTo: lastActiveApp.source, standing: receive)
+        }
+        receive(coordinator)
+    }
+
+    private func show(
+        handingBackTo previousApp: NSRunningApplication?,
+        standing stand: (CommandCoordinator) -> Void = { _ in }
+    ) {
         guard !isTornDown else { return }
         showGeneration += 1
         isShowing = true
 
         coordinator.reset()
+        stand(coordinator)
         queryEncoder.panelShown()
         updatePanelAppearance()
-        focus.capture(frontmost: NSWorkspace.shared.frontmostApplication)
+        focus.capture(frontmost: previousApp)
         centerOnScreen()
 
         // The Panel arrives out of `Motion.entrance`, so it has to be rendered

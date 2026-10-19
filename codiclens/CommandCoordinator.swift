@@ -134,47 +134,124 @@ class CommandCoordinator {
 
     // MARK: - Last Subject
 
-    /// The Clipboard Item or Emoji the user last acted on (`GLOSSARY.md`,
-    /// **Last Subject**). In memory only: it outlives the Panel, not the app.
+    /// The Subject the user last acted on or sent in (`GLOSSARY.md`, **Last
+    /// Subject**): a Clipboard Item, an Emoji, a file, a folder or text. In
+    /// memory only: it outlives the Panel, not the app. See
+    /// `docs/adr/0014-incoming-subjects-and-the-wider-last-subject.md`.
     private(set) var lastSubject: Subject?
 
-    /// Whether the Last Subject is standing as the Subject: the Panel opened on
-    /// it and nothing has been typed since.
+    /// Whether the Last Subject, or an Incoming Subject, is standing as the
+    /// Subject: the Panel opened on it and nothing has been typed since.
     private(set) var isLastSubjectStanding = false
 
     /// The Subject Card's Subject, and what Enter and Tab act on, while the
-    /// Last Subject stands. Not in `subjectVM.results`: it was not matched by
-    /// a Query, so it has no Result row and the Slab stays away.
+    /// Last Subject or an Incoming Subject stands. Not in `subjectVM.results`:
+    /// it was not matched by a Query, so it has no Result row and the Slab
+    /// stays away.
     var standingSubject: Subject? {
         guard isLastSubjectStanding, phase == .searchingSubject else { return nil }
-        return lastSubject
+        return incoming?.subject ?? lastSubject
     }
 
-    /// Notes what was just acted on. Only a Clipboard Item still in Clipboard
-    /// History, or an Emoji, becomes the Last Subject; acting on anything else
-    /// ends it, because it is the *last* thing acted on.
+    /// The Incoming Subject this showing of the Panel was opened on, and how
+    /// many things were sent with it. Kept apart from `lastSubject` because an
+    /// app can be sent in, and stand, without ever becoming the Last Subject.
+    /// Ends as the Panel opens again, on the first keystroke, and once
+    /// anything else is acted on.
+    private var incoming: (subject: Subject, sent: Int)?
+
+    /// How many things were sent with the Incoming Subject on the Subject
+    /// Card: 1 for one, more when the rest were dropped, 0 when the Card is
+    /// on anything else. The Card says "1 of N" above 1.
+    var incomingCount: Int {
+        guard let incoming else { return 0 }
+        let onCard: Subject? = switch phase {
+        case .searchingSubject: standingSubject
+        case .pickingAction, .pickingTarget: selectedSubject
+        default: nil
+        }
+        return onCard?.id == incoming.subject.id ? incoming.sent : 0
+    }
+
+    /// Notes what was just acted on, or sent in. Everything becomes the Last
+    /// Subject but an app or a Built-in — launching Safari is not something to
+    /// find standing on every hotkey — and acting on one of those ends it,
+    /// because it is the *last* thing acted on. A Clipboard Item counts only
+    /// while it is still in Clipboard History.
     private func remember(actedOn subject: Subject) {
+        if let incoming, incoming.subject.id != subject.id { self.incoming = nil }
         switch subject.kind {
         case .clipboard(let item):
             lastSubject = history.index(of: item) == nil ? nil : subject
-        case .emoji:
+        case .file, .folder, .text, .emoji:
             lastSubject = subject
-        default:
+        case .app, .builtIn:
             lastSubject = nil
         }
     }
 
     /// Stands the Last Subject as the Panel opens, with the Query empty.
     ///
-    /// A Clipboard Item is looked up again rather than trusted: it may have
-    /// been deleted, or fallen off the end of the history, since. Without a
-    /// Last Subject the previous Query stays, settled, as it always has.
+    /// What lives outside the Panel is looked up again rather than trusted. A
+    /// Clipboard Item may have been deleted, or fallen off the end of the
+    /// history, since; a file or folder resolved again from disk, as a File
+    /// Result is when it is chosen, may be gone or another thing now. Gone
+    /// means no Last Subject and an empty Panel, with nothing to shake about.
+    /// Without a Last Subject at all the previous Query stays, settled, as it
+    /// always has.
     private func standLastSubject() {
-        if let item = lastSubject?.clipboardItem {
+        guard let remembered = lastSubject else {
+            isLastSubjectStanding = false
+            return
+        }
+        switch remembered.kind {
+        case .clipboard(let item):
             lastSubject = history.index(of: item).map { clipboardSubject(for: history.items[$0]) }
+        case .file, .folder:
+            var resolved = remembered.url.flatMap { PathSubject.subject(for: $0) }
+            if case .app? = resolved?.kind { resolved = nil }
+            resolved?.passage = remembered.passage
+            lastSubject = resolved
+        default:
+            break
         }
         isLastSubjectStanding = lastSubject != nil
-        if isLastSubjectStanding { subjectVM.reset() }
+        subjectVM.reset()
+    }
+
+    // MARK: - Incoming Subjects
+
+    /// Files or folders sent from Finder (Open With or the Service).
+    ///
+    /// The first is the Incoming Subject, resolved as a typed path is, so an
+    /// app bundle comes in as an app; the rest are dropped, and the Subject
+    /// Card says how many came. When nothing resolves, the Panel stays open
+    /// and empty.
+    func receiveIncoming(urls: [URL]) {
+        stand(incoming: urls.first.flatMap { PathSubject.subject(for: $0) }, sent: urls.count)
+    }
+
+    /// Text sent from another app through the Service. A selection of
+    /// nothing but whitespace is not text to act on, and is ignored.
+    func receiveIncoming(text: String) {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        stand(incoming: Subject(text: text), sent: 1)
+    }
+
+    /// Drops whatever command the Panel was in the middle of and stands the
+    /// Incoming Subject as a Last Subject stands: one Card, the Query empty.
+    /// Sent in counts as acted on, so anything but an app is the Last Subject
+    /// from here, and stands again next time even if this one is dismissed.
+    private func stand(incoming subject: Subject?, sent: Int) {
+        dropCommand()
+        if let subject {
+            remember(actedOn: subject)
+            incoming = (subject, sent)
+        }
+        isLastSubjectStanding = subject != nil
+        subjectVM.reset()
+        syncQueryDisplay()
+        focusTrigger.toggle()
     }
 
     /// A Subject search Result as it is chosen, by Enter or Tab.
@@ -278,6 +355,7 @@ class CommandCoordinator {
         isEditingTextSubject = false
 
         let edited = textSubjectEditText
+        let editing = selectedSubject
         let newSubject: Subject
 
         // A Clipboard Item is written through to history, because that is where
@@ -297,9 +375,15 @@ class CommandCoordinator {
             if lastSubject?.clipboardItem?.id == item.id { lastSubject = newSubject }
         } else {
             newSubject = Subject(text: edited)
-            // Saved from Subject search, the text stands where the Query was,
-            // so Enter and Tab find it there.
-            if phase == .searchingSubject { subjectVM.standAsText(newSubject) }
+            if let editing, editing.id == lastSubject?.id || editing.id == incoming?.subject.id {
+                // The Last Subject, or text sent in, is the edit now, and
+                // goes on standing as it.
+                remember(actedOn: newSubject)
+            } else if phase == .searchingSubject {
+                // Saved from Subject search, the text stands where the Query
+                // was, so Enter and Tab find it there.
+                subjectVM.standAsText(newSubject)
+            }
         }
 
         selectedSubject = newSubject
@@ -422,8 +506,9 @@ class CommandCoordinator {
     /// then "n", and the search is "n" — not "safn". A Query standing as text
     /// is no exception: its text was written in the editor, not here.
     ///
-    /// The first keystroke also ends a standing Last Subject, which stays on
-    /// the Card until the new Query has something to show.
+    /// The first keystroke also ends a standing Last Subject or Incoming
+    /// Subject, which stays on the Card until the new Query has something to
+    /// show.
     /// - Returns: the text the field should now show, which differs from what
     ///   was typed whenever a settled query has just been replaced.
     @discardableResult
@@ -432,7 +517,10 @@ class CommandCoordinator {
         passagePreview = nil
         let startsNewQuery = phase == .searchingSubject && subjectVM.isSearchCommitted
         if let standing = standingSubject { subjectVM.holdOnCard(standing) }
-        if phase == .searchingSubject { isLastSubjectStanding = false }
+        if phase == .searchingSubject {
+            isLastSubjectStanding = false
+            incoming = nil
+        }
 
         currentSearchText = queryBuffer.accept(typed, startsNewQuery: startsNewQuery)
         return queryBuffer.display
@@ -817,7 +905,10 @@ class CommandCoordinator {
             break
         }
 
+        // The Last Subject follows the file: renamed or moved, and to the copy
+        // or the zip the Subject has become.
         selectedSubject = landed
+        remember(actedOn: landed)
         selectedAction = nil
         actionVM.loadActions(for: landed)
         phase = .pickingAction
@@ -892,7 +983,8 @@ class CommandCoordinator {
         switch phase {
         case .searchingSubject:
             // Enter on the Last Subject does what Enter did when it was chosen:
-            // paste the Clipboard Item, insert the Emoji.
+            // paste the Clipboard Item, insert the Emoji, open the file. An
+            // Incoming Subject gets its default Action the same way.
             if let standing = standingSubject {
                 selectedSubject = standing
                 remember(actedOn: standing)
@@ -949,6 +1041,11 @@ class CommandCoordinator {
                 return []
             }
             let effects = effects(for: action, on: subject)
+            if case .moveToTrash = action.handler {
+                // A file in the Trash is not one to stand next time.
+                lastSubject = nil
+                return effects
+            }
             // What the Action left as the Subject: a transformed Clipboard
             // Item is a new entry, and a deleted one is none.
             remember(actedOn: selectedSubject ?? subject)
@@ -966,8 +1063,8 @@ class CommandCoordinator {
             return effects
 
         case .showingResult(let result):
-            // Copying a count acts on text.
-            lastSubject = nil
+            // Copying a count acts on text: the count.
+            remember(actedOn: Subject(text: result))
             return [.copy(.text(result)), .hide]
         }
     }
@@ -985,6 +1082,9 @@ class CommandCoordinator {
     private func retarget(at result: String, writingTheQuery: Bool) {
         let newSubject = Subject(text: result)
         selectedSubject = newSubject
+        // The Subject an Action turned into is what it left behind, and the
+        // Last Subject follows it, as it follows a moved file.
+        remember(actedOn: newSubject)
         if writingTheQuery {
             subjectVM.searchText = result
             subjectVM.standAsText(newSubject)
@@ -1033,6 +1133,7 @@ class CommandCoordinator {
         clipboardVM.load()
         let subject = clipboardSubject(for: item)
         selectedSubject = subject
+        remember(actedOn: subject)
         selectedAction = nil
         actionVM.loadActions(for: subject)
         phase = .pickingAction
@@ -1189,7 +1290,27 @@ class CommandCoordinator {
         onPhaseChange?()
     }
 
+    /// The Panel opening again: no command, the Last Subject standing if there
+    /// is one, or Emoji Mode if its hotkey asked.
     func reset() {
+        dropCommand()
+        standLastSubject()
+
+        if wantsEmojiMode {
+            wantsEmojiMode = false
+            enterEmojiMode()
+        }
+
+        syncQueryDisplay()
+        focusTrigger.toggle()
+    }
+
+    /// Everything a command in progress holds — its Phase, Subject, editors,
+    /// preview and any answer still out — let go of, with the Query left as it
+    /// was. What the Panel opening again and an Incoming Subject both start
+    /// from.
+    private func dropCommand() {
+        incoming = nil
         phase = .searchingSubject
         selectedSubject = nil
         selectedAction = nil
@@ -1222,15 +1343,6 @@ class CommandCoordinator {
         targetVM.reset()
         clipboardVM.reset()
         emojiVM.reset()
-        standLastSubject()
-
-        if wantsEmojiMode {
-            wantsEmojiMode = false
-            enterEmojiMode()
-        }
-
-        syncQueryDisplay()
-        focusTrigger.toggle()
     }
 
     /// Shift+Space. The Quick Look Action is the same thing on Enter, so both
@@ -1309,12 +1421,23 @@ class CommandCoordinator {
     /// there. Anything else, or a Subject with no moment, opens as files do.
     private func openEffects(for subject: Subject, url: URL) -> [Effect] {
         guard let passage = subject.passage, let seconds = passage.seconds, let label = passage.momentLabel,
-              PassagePreview.isRecording(url) else { return [.hide, .open(url)] }
+              PassagePreview.isRecording(url) else { return ordinaryOpenEffects(url) }
         momentOpenGeneration += 1
         isMomentOpenInFlight = true
         momentOpenFailed = false
         pendingMoment = (url, label)
         return [.openAtMoment(url, seconds: seconds, generation: momentOpenGeneration)]
+    }
+
+    /// A file or folder opened the ordinary way: the Panel goes and its
+    /// default app opens it. Unless that app is Codiclens itself, as it is for
+    /// a type nothing else installed claims (Open With's rank `Alternate`
+    /// makes it so). Opening would only send the file back in, so Quick Look
+    /// shows it instead, as Shift+Space would, and the Panel stays: Quick
+    /// Look previews from it. A preview of the Panel's own already open stays.
+    private func ordinaryOpenEffects(_ url: URL) -> [Effect] {
+        guard runner.opensInCodiclens(url) else { return [.hide, .open(url)] }
+        return passagePreview == nil ? quickLookEffects() : []
     }
 
     /// QuickTime's answer, handed back by the runner. Opened: the Panel goes,
@@ -1327,6 +1450,12 @@ class CommandCoordinator {
         pendingMoment = nil
         if succeeded {
             runner.run([.hide])
+        } else if runner.opensInCodiclens(moment.url) {
+            // The Phase may have moved on while QuickTime was asked, so the
+            // file itself, not what the Phase is about now.
+            runner.run([.quickLook(QuickLookContext(
+                items: [quickLookItem(moment.url, title: moment.url.lastPathComponent)], selectedIndex: 0
+            ))])
         } else {
             momentOpenFailed = true
             runner.run([.open(moment.url)])
@@ -1464,9 +1593,12 @@ class CommandCoordinator {
 
     private func defaultEffects(for subject: Subject) -> [Effect] {
         switch subject.kind {
-        case .app, .folder:
+        case .app:
             guard let url = subject.url else { return [.hide] }
             return [.hide, .open(url)]
+        case .folder:
+            guard let url = subject.url else { return [.hide] }
+            return ordinaryOpenEffects(url)
         case .file:
             guard let url = subject.url else { return [.hide] }
             return openEffects(for: subject, url: url)
@@ -1516,7 +1648,7 @@ class CommandCoordinator {
         case .openFile:
             guard let url = fileURL(for: subject, target: target) else { return [.hide] }
             // Open on the Subject is Enter on it, at its moment where it has one.
-            return target == nil ? openEffects(for: subject, url: url) : [.hide, .open(url)]
+            return target == nil ? openEffects(for: subject, url: url) : ordinaryOpenEffects(url)
 
         case .openWith:
             guard let appURL = target?.url, let url = subject.url else { return [.hide] }

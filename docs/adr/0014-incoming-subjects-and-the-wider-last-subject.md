@@ -11,15 +11,20 @@ keystroke starts a new Query. Sent while the Panel is mid-command, it drops that
 stands. Several files sent at once: the first is the Subject, the rest are dropped, and the
 Subject Card says how many came.
 
-**Files arrive through Finder's own Open With menu.** Codiclens declares every file type at
-the lowest handler rank, so "Open With ▸ Codiclens" is on every file and Codiclens can never
-become a type's default app by itself. The cost is deliberate: Codiclens is listed in every
-file's Open With menu and in Get Info's "Open with". That is where the user wants it, one
-level from the top of the right-click menu.
+**Files arrive through Finder's own Open With menu.** Codiclens declares itself a Viewer at
+rank `Alternate` for 21 broad types (text, composite content, images, audiovisual content,
+archives, folders and the like). Neither the lowest rank, `None`, nor a claim on `public.item`,
+`public.data` or `public.content` is ever listed in Open With on macOS 26, measured with
+`urlsForApplications(toOpen:)`, so `Alternate` over named types is the only way in. The
+cost is deliberate: Codiclens is listed in nearly every file's Open With menu and in Get
+Info's "Open with", and it **becomes the default app for a type no other installed app
+claims** (`.pages`, `.numbers` and `.key` on a Mac without iWork). Open on a file whose
+default app is Codiclens shows Quick Look instead, so it never hands the file back to
+itself. That is where the user wants it, one level from the top of the right-click menu.
 
 **Everything Open With cannot reach comes through a Service, "Open in Codiclens"**: text
-selected in any app, and whatever Finder does not offer Open With on (a `.app`, and folders if
-Finder leaves them out). A `.app` arrives as an app Subject, as if found in search; any other
+selected in any app, and whatever Open With does not list Codiclens for (a `.app`, a `.pkg`,
+a type no installed app declares). A `.app` arrives as an app Subject, as if found in search; any other
 package as a file.
 
 Rejected: **a Service alone.** It covers everything with one mechanism, but sits under
