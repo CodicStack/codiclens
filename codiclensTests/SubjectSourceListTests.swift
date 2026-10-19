@@ -851,7 +851,7 @@ struct SubjectSourceListTests {
 
     // MARK: - Enter and Tab
 
-    @Test func enterOnAFileOpensItAndEndsTheLastSubject() async throws {
+    @Test func enterOnAFileOpensItAndMakesItTheLastSubject() async throws {
         let file = try fixtureFile()
         defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
         let fixture = try makeFixture(
@@ -870,7 +870,7 @@ struct SubjectSourceListTests {
         coordinator.moveDown()
 
         #expect(coordinator.submit() == [.hide, .open(file.standardizedFileURL)])
-        #expect(coordinator.lastSubject == nil, "a file is never the Last Subject")
+        #expect(coordinator.lastSubject?.url == file.standardizedFileURL, "the file, in place of the Emoji")
     }
 
     @Test func tabOnAFileOpensItsActionsAsAFileSubject() async throws {

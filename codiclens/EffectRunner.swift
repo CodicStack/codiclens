@@ -5,6 +5,14 @@ import UniformTypeIdentifiers
 /// `RecordingEffectRunner` in tests.
 protocol EffectRunner: AnyObject {
     func run(_ effects: [Effect])
+
+    /// Whether opening `url` the ordinary way would hand it to Codiclens
+    /// itself. Codiclens claims broad types at rank `Alternate` for Open With,
+    /// which makes it the default app for a type nothing else installed claims
+    /// (`.pages` without iWork); `.open` on such a file would only send it
+    /// back in as an Incoming Subject. The coordinator asks before it opens a
+    /// file or folder, and shows Quick Look instead.
+    func opensInCodiclens(_ url: URL) -> Bool
 }
 
 /// Performs effects against the real system.
@@ -44,12 +52,29 @@ final class SystemEffectRunner: EffectRunner {
     /// Main thread only.
     private var transcription: TranscriptionRun?
 
+    /// The bundle identifier of the app that opens a URL the ordinary way.
+    /// LaunchServices in the app; a test says who without asking it.
+    private let defaultApplication: (URL) -> String?
+
     init(
         pasteboard: NSPasteboard,
-        codictate: @escaping @Sendable () -> Transcription.Location = { Transcription.locate() }
+        codictate: @escaping @Sendable () -> Transcription.Location = { Transcription.locate() },
+        defaultApplication: @escaping (URL) -> String? = SystemEffectRunner.defaultApplication(for:)
     ) {
         self.pasteboard = pasteboard
         self.codictate = codictate
+        self.defaultApplication = defaultApplication
+    }
+
+    /// Compared by bundle identifier, not by URL: a Debug build in
+    /// DerivedData and a Release one in `/Applications` are both Codiclens.
+    func opensInCodiclens(_ url: URL) -> Bool {
+        guard url.isFileURL, let own = Bundle.main.bundleIdentifier else { return false }
+        return defaultApplication(url) == own
+    }
+
+    static func defaultApplication(for url: URL) -> String? {
+        NSWorkspace.shared.urlForApplication(toOpen: url).flatMap { Bundle(url: $0)?.bundleIdentifier }
     }
 
     var onHide: (() -> Void)?
@@ -339,6 +364,13 @@ final class SystemEffectRunner: EffectRunner {
 /// Records effects instead of performing them. The test adapter.
 final class RecordingEffectRunner: EffectRunner {
     private(set) var recorded: [Effect] = []
+
+    /// Which URLs Codiclens itself opens. None unless a test says so.
+    var codiclensOpens: (URL) -> Bool = { _ in false }
+
+    func opensInCodiclens(_ url: URL) -> Bool {
+        codiclensOpens(url)
+    }
 
     func run(_ effects: [Effect]) {
         recorded.append(contentsOf: effects)

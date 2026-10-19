@@ -431,8 +431,11 @@ runs that one, after its `status` check. Either may start that Codictate hidden.
 ```
 codiclensApp (@main)
   └─ AppDelegate (NSApplicationDelegateAdaptor)
+       ├─ Starts LastActiveApp (applicationWillFinishLaunching)
        ├─ Registers Cmd+Space hotkey (Carbon EventHotKey)
        ├─ Creates PanelController
+       ├─ Registers the "Open in Codiclens" Service, then hands over an
+       │  Incoming Subject that arrived before the Panel existed
        ├─ Starts the File Index (FileIndex.shared.start(); stop() on terminate)
        ├─ Handles QLPreviewPanel responder chain
        ├─ In the unit-test host, none of the above (AppDelegate.isTestHost)
@@ -584,8 +587,8 @@ resolved again through `PathSubject.subject(for:)` as Enter or Tab lands
 Rows of the list below the apps act as their own Mode would. A File Result opens
 on Enter (a recording or a video that matched at a moment opens in QuickTime there; see
 the Panel's own preview below) and Tab gives its file Actions, Share among them. A Clipboard Item pastes
-on Enter; an Emoji inserts in the tone in force and becomes recent. Both become the
-Last Subject, and a file clears it. Shift+Tab from their Actions returns to
+on Enter; an Emoji inserts in the tone in force and becomes recent. Each becomes the
+Last Subject, the file included. Shift+Tab from their Actions returns to
 Subject search (`isSubjectFromSearch`), not to the Clipboard browser or the grid
 they never came from.
 
@@ -610,14 +613,36 @@ written in the editor, not in the Query. `hasAnswered` — the Index landed and 
 settled pass of the list below the apps answered this Query — gates only "No
 results", the Card's "No match" and the shake. A list landing while text stands is kept for Escape.
 
-**Last Subject** (`GLOSSARY.md`): Enter or a Final Action on a Clipboard Item or an
-Emoji makes it `lastSubject`; acting on anything else clears it. In memory only.
-`reset()` stands it with the Query empty (`standingSubject`) after looking the
-Clipboard Item up in history again — deleted or trimmed means none. It is not a
+**Last Subject** (`GLOSSARY.md`, `docs/adr/0014-incoming-subjects-and-the-wider-last-subject.md`):
+Enter or a Final Action on anything but an app or a Built-in makes it `lastSubject`
+(`remember(actedOn:)`): a Clipboard Item still in history, an Emoji, a file, a folder,
+text (⌘E, OCR Text, a transform's output, a transcript, a count copied). Acting on an
+app or a Built-in clears it; Move to Trash clears it. In memory only. Where an Action
+turns the Subject into another — Rename, Move To…, Copy To…, Compress, OCR,
+Transcribe, a transform, QR Code — the Last Subject follows it there. `reset()`
+stands it with the Query empty (`standingSubject`) after looking it up again: a
+Clipboard Item in history, a file or folder on disk through `PathSubject.subject(for:)`
+(its Passage kept). Gone means none and an empty Panel, no shake. It is not a
 Result, so the Slab stays away and `SubjectCardView.subject` reads it from the
 coordinator. Enter runs its default action, Tab opens its Actions and Shift+Tab
 comes back to it; the first keystroke ends it standing, and the Card keeps it
-until the new Query has something to show.
+until the new Query has something to show. ⌘E on standing text edits it, and the
+edit is the Last Subject.
+
+**Incoming Subject** (`GLOSSARY.md`): `PanelController` shows the Panel and then
+hands it to `receiveIncoming(urls:)` or `receiveIncoming(text:)`. Either drops the
+command in progress (`dropCommand()`, the part of `reset()` that is not standing
+anything: Phase, editors, Passage Preview, and every answer still out, by
+generation) and stands the Subject through the Last Subject's machinery, so Enter,
+Tab, Shift+Tab and the first keystroke behave identically. The first URL is resolved by
+`PathSubject.subject(for:)`, so a `.app` is an app Subject; nothing resolving leaves
+the Panel empty, and whitespace-only text is ignored. Sent in counts as acted on, so
+it is `remember`ed: anything but an app is the Last Subject from then on. The
+Subject itself is held in `incoming` for this showing only, which is how an app
+stands without being remembered; it ends on the next `reset()`, the first keystroke,
+or anything else being acted on. `incomingCount` is how many were sent while the
+Card is on it (standing, or chosen in the Action and Target Phases), 0 otherwise;
+above 1 the Subject Card's corner says "1 of N".
 
 ### FloatingPanel — Non-activating NSPanel
 ```swift
@@ -625,7 +650,82 @@ styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView]
 ```
 Critical contract: the panel floats over other apps WITHOUT stealing macOS activation. This means the previously active app stays frontmost, which is required for paste simulation (CGEvent Cmd+V targets the frontmost app).
 
-When Quick Look is shown, `NSApp.activate()` breaks this contract. PanelController captures `previousApp` and restores it event-driven before pasting.
+When Quick Look is shown, `NSApp.activate()` breaks this contract. PanelController captures `previousApp` and restores it event-driven before pasting. An Incoming Subject breaks it too, from outside: see below.
+
+### Incoming Subjects — Open With and the Service
+How a file, folder or text gets in from another app (`GLOSSARY.md`,
+`docs/adr/0014-incoming-subjects-and-the-wider-last-subject.md`). The coordinator's
+half is under CommandCoordinator above; this is the AppKit half.
+
+**The plist.** The Info.plist is still generated; `codiclens-Info.plist` at the
+repository root is merged into it (`INFOPLIST_FILE`, app target, Debug and Release)
+and holds `CFBundleDocumentTypes` and `NSServices`. It sits outside `codiclens/` so
+the synchronized group does not copy it into the bundle as a resource.
+
+**Open With is one document type, role Viewer, rank `Alternate`, over a list of broad
+types** (`public.text`, `public.image`, `public.composite-content`, `public.folder`
+and the rest in the plist), not `public.item` at `None`, which LaunchServices does
+not list. Codiclens leaves itself out of its own Open With… Targets
+(`ActionTarget.openWithTargets`). Measured on macOS 26 with
+`NSWorkspace.urlsForApplications(toOpen:)`, the list Finder's Open With is built from:
+- rank `None` is never listed, even on a specific type;
+- a claim on `public.item`, `public.data`, `public.content`, `public.directory`,
+  `com.apple.package` or a `*` extension is never listed at any rank, so a type
+  declared only as `public.data` (an extension no app declares, `.odt`, `.p12`) has
+  no Open With ▸ Codiclens;
+- `public.folder` at `Alternate` is listed for folders, and Finder stays their default.
+
+The cost of `Alternate`: Codiclens becomes the default app for a type that no other
+installed app claims (on the Mac it was measured on, `.pages`, `.numbers` and `.key`
+without iWork); across ~95 common extensions no other default changed. Adding a type:
+compare `urlsForApplications(toOpen:)` and `urlForApplication(toOpen:)` before and
+after `lsregister -f`. LaunchServices leaves out a bundle under `/tmp` (`in-temp-dir`
+in `lsregister -dump`) and one never launched (`launch-disabled`), so check with a
+build that is neither; unregister it afterwards (`lsregister -u`).
+
+**A file Codiclens itself would open is shown in Quick Look instead.** Opening it
+would only send it back in as an Incoming Subject. Before Enter on a file or folder
+(a Result, the Last Subject, an Incoming Subject), the Open Action, Finder's Open File
+on a Target, or the fallback after QuickTime says no, the coordinator asks
+`EffectRunner.opensInCodiclens(_:)`: `SystemEffectRunner` compares the bundle
+identifier of `NSWorkspace.urlForApplication(toOpen:)`'s app with its own, so a Debug
+and a Release copy both count. When it does, the Effects are the Quick Look Action's,
+with no `.hide`, since Quick Look previews from the Panel (a Passage Preview already
+open stays open). An app Subject still opens. In tests `RecordingEffectRunner.codiclensOpens`
+says which URLs Codiclens opens, and LaunchServices is never asked
+(`OpensInCodiclensTests`).
+
+**Everything else comes through one Service, "Open in Codiclens"**: `NSSendFileTypes`
+`public.item` (any file, a folder, a `.app`, a package) and `NSSendTypes`
+`public.utf8-plain-text` in one entry, so there is never a file "Open in Codiclens"
+beside a text one. `NSRequiredContext` is empty so it is on without a trip to
+Keyboard Shortcuts. The provider is `IncomingService` (`Incoming.swift`), set as
+`NSApp.servicesProvider` in `applicationDidFinishLaunching` after the Panel exists,
+followed by `NSUpdateDynamicServices()` so a fresh install's Service shows up. A
+request with file URLs is files; text only when there are none.
+
+**Open With arrives as `application(_:open:)`** on `AppDelegate`: SwiftUI's own app
+delegate forwards it to the adaptor, and with only a `Settings` scene no window opens
+for it. Several files are one call. On a cold launch it comes **before**
+`applicationDidFinishLaunching`, so it waits in `pendingIncoming` (the latest only) and
+is handed over once the Panel is made. A Service that launches the app is delivered
+after `servicesProvider` is set, so it never waits.
+
+**Focus.** Both doors activate Codiclens: LaunchServices activates the app it opens
+documents with, and a Service's provider is activated as the message is delivered. By
+then `frontmostApplication` can already be Codiclens, and `FocusHandoff.capture` would
+have no one to give activation back to. `LastActiveApp` remembers the last app other
+than Codiclens to be activated, and `PanelController.showIncoming` captures
+`LastActiveApp.source` (the frontmost app unless that is Codiclens) instead. It starts
+in `applicationWillFinishLaunching`: on a cold launch the frontmost app is still the
+one the user was in then, and Codiclens by `applicationDidFinishLaunching`. The Panel
+then stays up with Codiclens active, as with Quick Look, and every hide path hands
+activation back through `restore` or `yield`, the paste included. Sent to a Panel
+already up, the Subject just stands, and the app captured when it opened stays the
+one handed back to. `showIncoming` stands the Subject after `reset()` and before the
+first render, so the entrance animates the Subject that was sent.
+
+None of this runs in the unit-test host or the embedding helper.
 
 ### CardContainerView — Keyboard input capture
 Contains a hidden `TextField` that captures all keyboard input, and the Card row.
@@ -1277,7 +1377,9 @@ User types query → Enter
 | File | Role |
 |------|------|
 | `codiclensApp.swift` | @main entry, AppDelegate adaptor |
-| `AppDelegate.swift` | Hotkey registration, QLPreviewPanel responder, and `isTestHost`: the test host starts nothing |
+| `AppDelegate.swift` | Hotkey registration, QLPreviewPanel responder, Open With (`application(_:open:)`) and the Service's registration, and `isTestHost`: the test host starts nothing |
+| `Incoming.swift` | How an Incoming Subject gets in: `Incoming` read off a Service's pasteboard, `IncomingService` (the "Open in Codiclens" provider), and `LastActiveApp`, the app it came from |
+| `codiclens-Info.plist` | Merged into the generated Info.plist: the Open With document types and the Service |
 | `PanelController.swift` | The one window: show/hide, focus lifecycle, observers, hit test |
 | `PanelView.swift` | The SwiftUI content of the Panel: Card row, gap, Results Slab |
 | `PanelLayout.swift` | The Panel's fixed geometry, the margin, and `PanelHitRegions` |

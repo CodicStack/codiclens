@@ -54,10 +54,15 @@ nonisolated struct ActionTarget: Identifiable {
         )
     }
 
+    /// Every app that opens the Subject's file, except Codiclens: it claims
+    /// nearly every type for Finder's Open With (ADR 0014), and picking it here
+    /// would only send the file back in as an Incoming Subject.
     @MainActor
     static func openWithTargets(for subject: Subject) -> [ActionTarget] {
         guard let subjectURL = subject.url else { return [] }
-        let appURLs = NSWorkspace.shared.urlsForApplications(toOpen: subjectURL)
+        let appURLs = NSWorkspace.shared.urlsForApplications(toOpen: subjectURL).filter {
+            Bundle(url: $0)?.bundleIdentifier != Bundle.main.bundleIdentifier
+        }
         return appURLs.compactMap { appURL in
             let name = (appURL.lastPathComponent as NSString).deletingPathExtension
             let icon = NSWorkspace.shared.icon(forFile: appURL.path)
