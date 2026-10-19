@@ -21,6 +21,13 @@ import Foundation
 /// replay cannot be trusted for it: nothing stored yet, its volume's event
 /// history replaced, the rules changed, or its last crawl never finished.
 ///
+/// **A restart does not make a file new.** Rows record the device number
+/// (`st_dev`) a file was on, and macOS may number a volume differently at
+/// each boot. Each root's volume is kept by its UUID beside the number its
+/// rows say (`adoptVolume`), and when only the number changed the rows take
+/// the new one before anything compares them with the disk; otherwise every
+/// file would look changed, and be read and embedded again.
+///
 /// **What git ignores is git's to say** (`GitIgnored`). A crawl lists each
 /// repo it walks into; a batch asks about the paths it brings that have no
 /// row; and a `.gitignore`, `.git/info/exclude` or `.git` that changes reads
@@ -45,6 +52,7 @@ nonisolated final class FileIndexer: @unchecked Sendable {
     private let gitIgnored: GitIgnored
     private let home: String
     private let volumeID: (String) -> String?
+    private let volume: (String) -> FileIndexVolume?
     private let onProgress: (Progress) -> Void
 
     /// Where the watcher starts: the event the index has caught up to. Set
@@ -75,12 +83,16 @@ nonisolated final class FileIndexer: @unchecked Sendable {
     ///   - volumeID: the FSEvents history a path's events are kept in,
     ///     `volumeID(of:)`. Tests pass their own to stand for a disk whose
     ///     history was replaced.
+    ///   - volume: the volume a path is on and its device number now,
+    ///     `volume(of:)`. Tests pass their own to stand for a restart that
+    ///     renumbered it, or another disk.
     init(
         writer: FileIndexWriter,
         rules: FileIndexRules = .defaults,
         gitIgnored: GitIgnored = GitIgnored(),
         home: String = NSHomeDirectory(),
         volumeID: @escaping (String) -> String? = FileIndexer.volumeID(of:),
+        volume: @escaping (String) -> FileIndexVolume? = FileIndexer.volume(of:),
         onProgress: @escaping (Progress) -> Void = { _ in }
     ) {
         self.writer = writer
@@ -88,6 +100,7 @@ nonisolated final class FileIndexer: @unchecked Sendable {
         self.gitIgnored = gitIgnored
         self.home = home
         self.volumeID = volumeID
+        self.volume = volume
         self.onProgress = onProgress
     }
 
@@ -107,6 +120,10 @@ nonisolated final class FileIndexer: @unchecked Sendable {
     /// The rows of a folder no longer listed go. A disabled Source keeps its
     /// rows but is neither crawled nor watched; search leaves it out, and it
     /// is crawled again when it comes back, since nothing watched it.
+    ///
+    /// The first time, before any of that, every root's rows take the device
+    /// number its volume has this boot (`adoptVolume`), the disabled ones'
+    /// too: they are compared with the disk when they come back.
     func setSources(_ folders: [(path: String, isEnabled: Bool)]) throws -> [String] {
         let isFirst = !hasSources
         hasSources = true
@@ -114,6 +131,11 @@ nonisolated final class FileIndexer: @unchecked Sendable {
         let resolved = folders.map { (path: Self.realPath($0.path), isEnabled: $0.isEnabled) }
         allRoots = Set(resolved.map(\.path)).sorted { $0.count > $1.count }
         enabledRoots = Set(resolved.filter(\.isEnabled).map(\.path))
+
+        try writer.db.transaction {
+            if isFirst { for root in allRoots { try adoptVolume(of: root) } }
+            try writer.forgetVolumes(keeping: Set(allRoots))
+        }
 
         // If a removed Source sat inside another, its folder belongs to that
         // one again and is read under it.
@@ -267,6 +289,9 @@ nonisolated final class FileIndexer: @unchecked Sendable {
         defer { onProgress(.reading(source: root, isReading: false)) }
         // Every repo in it is listed again as the walk reaches it.
         gitIgnored.forget(below: root)
+        // Its volume is noted before the walk writes rows on it: a new
+        // Source's first, or one mounted again since launch under a new number.
+        try writer.db.transaction { try adoptVolume(of: root) }
         try reconcile(root, root: root)
         try writer.setCaughtUp(root, volume: volumeID(root))
     }
@@ -672,6 +697,24 @@ nonisolated final class FileIndexer: @unchecked Sendable {
         allRoots.first { path == $0 || path.hasPrefix($0 + "/") }
     }
 
+    /// Notes the volume `root` is on now. If its rows were read on the same
+    /// volume under another device number — a restart renumbers volumes —
+    /// they take the new one, so a walk or a replay still finds each file
+    /// unchanged instead of reading it, and embedding it, again. Rows on a
+    /// different volume, or with none noted, are left as they are: those are
+    /// other files. A root that is not there now keeps what was noted.
+    private func adoptVolume(of root: String) throws {
+        guard let current = volume(root) else { return }
+        let stored = try writer.volume(of: root)
+        guard stored != current else { return }
+        if let stored, stored.uuid == current.uuid {
+            let changed = try writer.renumberDevice(from: stored.device, to: current.device, source: root)
+            NSLog("File Index: %@ is on device %llu now, was %llu; %ld rows renumbered",
+                  root, current.device, stored.device, changed)
+        }
+        try writer.setVolume(current, of: root)
+    }
+
     /// Whether something is at exactly `path` — this spelling, not another
     /// case of it. FSEvents reports a case-only rename under both names, and
     /// on a case-insensitive volume both of them `lstat` fine.
@@ -688,6 +731,16 @@ nonisolated final class FileIndexer: @unchecked Sendable {
         guard stat(path, &info) == 0,
               let uuid = FSEventsCopyUUIDForDevice(info.st_dev) else { return nil }
         return CFUUIDCreateString(nil, uuid) as String
+    }
+
+    /// The volume `path` is on, by its UUID, and its device number as
+    /// `lstat` gives it to rows. Nil where either is missing.
+    static func volume(of path: String) -> FileIndexVolume? {
+        var info = stat()
+        guard lstat(path, &info) == 0,
+              let uuid = try? URL(fileURLWithPath: path).resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString
+        else { return nil }
+        return FileIndexVolume(uuid: uuid, device: UInt64(bitPattern: Int64(info.st_dev)))
     }
 
     /// `path` with symlinks resolved, as FSEvents and the enumerator report it

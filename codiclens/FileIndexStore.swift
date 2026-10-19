@@ -68,7 +68,9 @@ nonisolated enum FileIndexSchema {
             CREATE INDEX segments_file ON segments(file);
             CREATE VIRTUAL TABLE passages USING fts5(body, tokenize = "\(tokenizer)");
             -- What a launch needs to catch up by replaying FSEvents instead of crawling:
-            -- 'event_id', 'rules' (FileIndexRules.fingerprint), and 'root:<path>' = volume UUID.
+            -- 'event_id', 'rules' (FileIndexRules.fingerprint), and 'root:<path>' = FSEvents volume UUID.
+            -- 'device:<path>' = '<volume UUID>|<st_dev>': the volume a root's rows were read on,
+            -- so a restart that renumbers it keeps them (FileIndexer.adoptVolume).
             -- Search by meaning's: 'meaning' (MeaningPass.fingerprint, what the vectors were
             -- made with), 'vector_cache' (VectorCache.id, the cache the keys point into) and
             -- 'vector_rows' (rows the vector file should hold, `MeaningVectors`).
@@ -136,6 +138,13 @@ nonisolated struct FileIndexRow: Equatable, Sendable {
     func isSameVersion(as other: FileIndexRow) -> Bool {
         device == other.device && inode == other.inode && size == other.size && abs(mtime - other.mtime) < 0.001
     }
+}
+
+/// The volume a folder Source is on: its UUID, which a restart keeps, and the
+/// device number (`st_dev`) its rows record, which a restart may change.
+nonisolated struct FileIndexVolume: Equatable, Sendable {
+    var uuid: String
+    var device: UInt64
 }
 
 // MARK: - Writer
@@ -469,6 +478,40 @@ nonisolated final class FileIndexWriter {
         for root in try caughtUpRoots().keys where !keeping.contains(root) {
             try setCaughtUp(root, volume: nil)
         }
+    }
+
+    /// The volume `root`'s rows were read on, if it was noted.
+    func volume(of root: String) throws -> FileIndexVolume? {
+        guard let value = try meta("device:" + root),
+              let bar = value.lastIndex(of: "|"),
+              let device = UInt64(value[value.index(after: bar)...]) else { return nil }
+        return FileIndexVolume(uuid: String(value[..<bar]), device: device)
+    }
+
+    func setVolume(_ volume: FileIndexVolume, of root: String) throws {
+        try setMeta("device:" + root, volume.uuid + "|" + String(volume.device))
+    }
+
+    /// Forgets the volume of every root not in `keeping`: a Source no longer
+    /// listed has no rows left to keep.
+    func forgetVolumes(keeping: Set<String>) throws {
+        var roots: [String] = []
+        try db.query("SELECT key FROM meta WHERE key >= 'device:' AND key < 'device;'") { row in
+            roots.append(String((row.text(0) ?? "").dropFirst("device:".count)))
+        }
+        for root in roots where !keeping.contains(root) {
+            try db.run("DELETE FROM meta WHERE key = ?", [.text("device:" + root)])
+        }
+    }
+
+    /// The rows `source` owns on device `old` say `new` instead: the same
+    /// volume under the number a restart gave it. A volume of its own inside
+    /// the Source has another number and keeps it. Returns how many changed.
+    @discardableResult
+    func renumberDevice(from old: UInt64, to new: UInt64, source: String) throws -> Int {
+        try db.run("UPDATE files SET device = ? WHERE device = ? AND source = ?",
+                   [.int(Int64(bitPattern: new)), .int(Int64(bitPattern: old)), .text(source)])
+        return db.changes
     }
 
     private func meta(_ key: String) throws -> String? {
