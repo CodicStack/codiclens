@@ -8,6 +8,41 @@
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
 	<string>Codiclens</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Anything</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.text</string>
+				<string>public.log</string>
+				<string>public.composite-content</string>
+				<string>public.spreadsheet</string>
+				<string>public.presentation</string>
+				<string>public.image</string>
+				<string>public.audiovisual-content</string>
+				<string>public.archive</string>
+				<string>public.disk-image</string>
+				<string>public.executable</string>
+				<string>public.font</string>
+				<string>public.3d-content</string>
+				<string>public.database</string>
+				<string>public.calendar-event</string>
+				<string>public.contact</string>
+				<string>public.message</string>
+				<string>public.stored-url</string>
+				<string>com.apple.property-list</string>
+				<string>com.microsoft.word.doc</string>
+				<string>public.x509-certificate</string>
+				<string>public.folder</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleExecutable</key>
 	<string>codiclens</string>
 	<key>CFBundleIconFile</key>
@@ -54,5 +89,29 @@
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Codiclens asks QuickTime Player to open a video or recording at the moment your search found.</string>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Open in Codiclens</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>openInCodiclens</string>
+			<key>NSPortName</key>
+			<string>codiclens</string>
+			<key>NSRequiredContext</key>
+			<dict/>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>public.item</string>
+			</array>
+			<key>NSSendTypes</key>
+			<array>
+				<string>public.utf8-plain-text</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
