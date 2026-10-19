@@ -889,7 +889,14 @@ the `FileIndexRules.fingerprint` the rows were read under, and per root the
 `FSEventsCopyUUIDForDevice` volume UUID of a crawl that *finished*. At launch the first
 `setSources` returns only the roots a replay cannot vouch for, and the watcher starts at the
 stored ID, so FSEvents delivers what changed while the app was not running and then
-`historyDone`. A root is crawled instead when there is no stored ID (first launch: the
+`historyDone`. **A restart does not make a file new**: rows keep `st_dev`, which macOS
+may renumber at each boot, and `isSameVersion` compares it, so after 2026-10-19's reboot
+every row was read and embedded again. `meta` keeps per root `device:<path>` =
+`<volume UUID>|<st_dev>` (`.volumeUUIDStringKey`, not the FSEvents UUID), and the first
+`setSources` (and each `crawl`), before any replay or walk, moves a root's rows on the old
+number to the new one in one `UPDATE` when only the number changed, logging
+`File Index: <root> is on device <new> now, was <old>`; another volume UUID renumbers
+nothing. A root is crawled instead when there is no stored ID (first launch: the
 current ID is stored before anything is read), the fingerprint differs (a switch, a pattern,
 or a skip list changed in an update), its volume UUID changed or is missing (history
 replaced, or a volume FSEvents does not log), or its last crawl never finished — a rules

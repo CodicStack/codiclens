@@ -19,6 +19,9 @@ struct FileIndexCatchUpTests {
         var crawled: [String] = []
         /// What `volumeID` answers for a root, by its path relative to the folder.
         var volumes: [String: String] = [:]
+        /// The volume UUID `volume` answers for a root, by its path relative
+        /// to the folder; the device number is the real one, as rows get it.
+        var disks: [String: String] = [:]
 
         init() throws {
             folder = try TemporaryFolder()
@@ -41,6 +44,9 @@ struct FileIndexCatchUpTests {
                 writer: writer,
                 rules: rules,
                 volumeID: { [unowned self] path in volumes[relative(path)] ?? "volume" },
+                volume: { [unowned self] path in
+                    FileIndexer.volume(of: path).map { FileIndexVolume(uuid: disks[relative(path)] ?? "disk", device: $0.device) }
+                },
                 onProgress: { [unowned self] progress in
                     if case .reading(let source, true) = progress { crawled.append(relative(source)) }
                 }
@@ -58,6 +64,26 @@ struct FileIndexCatchUpTests {
 
         var indexed: Set<String> {
             get throws { Set(try writer.rows(inTree: folder.path).map { relative($0.path) }) }
+        }
+
+        /// Makes the rows under `root` look read and embedded on the device
+        /// number `device` — as the boot before this one numbered the volume —
+        /// with the volume noted to match.
+        func readOnAnEarlierBoot(_ root: String, device: UInt64) throws {
+            try writer.db.run("UPDATE files SET device = ?, state = 'done', indexed_at = 1, vec_state = 'done'",
+                              [.int(Int64(bitPattern: device))])
+            try writer.setVolume(FileIndexVolume(uuid: disks[root] ?? "disk", device: device), of: path(root))
+        }
+
+        /// Each file's device number and whether what was read from it is
+        /// still there, by relative path.
+        func files() throws -> [String: (device: UInt64, isRead: Bool)] {
+            var files: [String: (device: UInt64, isRead: Bool)] = [:]
+            try writer.db.query("SELECT path, device, state, indexed_at, vec_state FROM files WHERE kind = 'file'") { row in
+                let isRead = row.text(2) == "done" && !row.isNull(3) && row.text(4) == "done"
+                files[relative(row.text(0) ?? "")] = (UInt64(bitPattern: row.int(1)), isRead)
+            }
+            return files
         }
     }
 
@@ -215,6 +241,67 @@ struct FileIndexCatchUpTests {
         #expect(try first.setRules(tighter).isEmpty)
 
         #expect(try f.start(f.launch(rules: tighter), ["A"]).isEmpty)
+    }
+
+    // MARK: - A restart renumbering the volume
+
+    /// macOS may give a volume another `st_dev` at each boot. The rows were
+    /// read under the old number; the files have not changed.
+    @Test func aRestartThatRenumbersTheVolumeKeepsWhatWasRead() throws {
+        let f = try Fixture()
+        try f.folder.makeFile("A/a.txt")
+        try f.folder.makeFile("A/b.md")
+        try f.start(f.launch(), ["A"])
+        let device = try #require(FileIndexer.volume(of: f.path("A"))).device
+        try f.readOnAnEarlierBoot("A", device: device &+ 1)
+        var removed: [Int64] = []
+        f.writer.onVectorsRemoved = { removed += $0 }
+
+        let relaunched = f.launch()
+        #expect(try f.start(relaunched, ["A"]).isEmpty, "caught up: a replay, no crawl")
+        #expect(try f.files().mapValues(\.device) == ["A/a.txt": device, "A/b.md": device])
+        // A walk compares every row with the disk.
+        try relaunched.crawl(f.path("A"))
+
+        #expect(try f.files().allSatisfy { $0.value.isRead && $0.value.device == device }, "nothing read again")
+        #expect(removed.isEmpty, "no vectors dropped")
+        #expect(try f.writer.volume(of: f.path("A")) == FileIndexVolume(uuid: "disk", device: device))
+    }
+
+    @Test func anotherVolumeAtTheSamePathRenumbersNothing() throws {
+        let f = try Fixture()
+        try f.folder.makeFile("A/a.txt")
+        try f.start(f.launch(), ["A"])
+        let device = try #require(FileIndexer.volume(of: f.path("A"))).device
+        try f.readOnAnEarlierBoot("A", device: device &+ 1)
+        var removed: [Int64] = []
+        f.writer.onVectorsRemoved = { removed += $0 }
+
+        f.disks["A"] = "another disk"
+        let relaunched = f.launch()
+        try f.start(relaunched, ["A"])
+
+        #expect(try f.files()["A/a.txt"]?.device == device &+ 1, "other files, not renumbered")
+        #expect(try f.writer.volume(of: f.path("A")) == FileIndexVolume(uuid: "another disk", device: device))
+        try relaunched.crawl(f.path("A"))
+        #expect(try f.files()["A/a.txt"].map { !$0.isRead && $0.device == device } == true, "read as new")
+        #expect(!removed.isEmpty)
+    }
+
+    @Test func aSourcesVolumeIsNotedWhenItIsReadAndForgottenWhenItGoes() throws {
+        let f = try Fixture()
+        try f.folder.makeFolder("A")
+        try f.folder.makeFolder("B")
+        let indexer = f.launch()
+        try f.start(indexer, ["A"])
+        #expect(try f.writer.volume(of: f.path("B")) == nil)
+
+        #expect(try f.start(indexer, ["A", "B"]) == ["B"])
+        #expect(try f.writer.volume(of: f.path("B"))?.uuid == "disk", "a Source added later")
+
+        try f.start(f.launch(), ["A"])
+        #expect(try f.writer.volume(of: f.path("A")) != nil)
+        #expect(try f.writer.volume(of: f.path("B")) == nil)
     }
 
     // MARK: - FSEvents losing track
