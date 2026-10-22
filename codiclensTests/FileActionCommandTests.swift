@@ -73,8 +73,8 @@ struct FileActionCommandTests {
     // MARK: - Order
 
     private static let fileOrder = [
-        "Open", "Quick Look", "Reveal in Finder", "Share…", "Open With…", "Copy File", "Copy Path",
-        "Move To…", "Copy To…", "Rename", "Compress", "Use as Subject", "Move to Trash",
+        "Open", "Quick Look", "Reveal in Finder", "Share…", "Open With…", "Paste File", "Copy File",
+        "Copy Path", "Move To…", "Copy To…", "Rename", "Compress", "Use as Subject", "Move to Trash",
     ]
 
     private func subject(_ name: String, kind: SubjectKind) -> Subject {
@@ -124,7 +124,7 @@ struct FileActionCommandTests {
 
     /// A Clipboard Image's stored PNG is not a file of the user's.
     @Test func noClipboardItemOrAppIsMovedRenamedOrZipped() {
-        let fileOnly: Set = ["Copy File", "Move To…", "Copy To…", "Rename", "Compress"]
+        let fileOnly: Set = ["Paste File", "Copy File", "Move To…", "Copy To…", "Rename", "Compress"]
         let image = Subject(clipboardItem: ClipboardItem(imageFileName: "i.png"), imageURL: nil)
         let app = subject("Safari.app", kind: .app(bundleIdentifier: "com.apple.Safari", isRunning: false))
 
@@ -148,6 +148,15 @@ struct FileActionCommandTests {
         try selectAction("Copy File", in: fixture.coordinator)
 
         #expect(fixture.coordinator.submit() == [.hide, .copy(.fileURL(fixture.note))])
+    }
+
+    @Test func pasteFilePastesTheFileItselfIntoThePreviousApp() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        choose(fixture.note, in: fixture.coordinator)
+        try selectAction("Paste File", in: fixture.coordinator)
+
+        #expect(fixture.coordinator.submit() == [.paste(.fileURL(fixture.note))])
     }
 
     // MARK: - Move To… and Copy To…

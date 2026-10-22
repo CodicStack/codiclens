@@ -151,7 +151,7 @@ runs that one, after its `status` check. Either may start that Codictate hidden.
   never silently discarded.
 - **File and folder Actions run most-used first, Move to Trash last:** Open, Quick Look,
   (an image's OCR, Rotate Left, Rotate Right, Open in Preview; audio's and video's
-  Transcribe), Reveal in Finder, Share…, Open With…, Copy File, Copy Path, Move To…,
+  Transcribe), Reveal in Finder, Share…, Open With…, Paste File, Copy File, Copy Path, Move To…,
   Copy To…, Rename, Compress, Use as Subject, Move to Trash. Quick Look sat below Move
   to Trash in a list of twelve and the user could not find it. What a content type adds
   goes straight after Quick Look (`SubjectAction.contentActions(for:)`). Clipboard Items
@@ -174,7 +174,8 @@ runs that one, after its `status` check. Either may start that Codictate hidden.
   Documents, Downloads and Home; typing filters those and adds the File Index's folders
   below them. None of these is offered on a Clipboard Item or an app: a Clipboard Image's
   stored PNG is not the user's file. Copy File is `.copy(.fileURL)`, the file itself on the
-  pasteboard, Final and hiding like Copy.
+  pasteboard, Final and hiding like Copy; Paste File is `.paste(.fileURL)`, the same
+  write followed by Cmd+V into the app the Panel was opened over, like Paste.
 - **Rename is the name in an editor on the Subject Card**, prefilled, the name without its
   extension selected as Finder does (a folder's whole name). Enter or ⌘E renames, Escape
   cancels, and the Card takes the Emphasis while it is open because it has the keyboard.
