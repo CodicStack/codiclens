@@ -1673,6 +1673,11 @@ class CommandCoordinator {
             guard let url = fileOnDisk(subject) else { return [.hide] }
             return [.hide, .copy(.fileURL(url))]
 
+        case .pasteFile:
+            // No `.hide`: `.paste` hides without animation before Cmd+V.
+            guard let url = fileOnDisk(subject) else { return [.hide] }
+            return [.paste(.fileURL(url))]
+
         case .moveTo:
             guard let url = fileOnDisk(subject), let folder = target?.url else { return [] }
             return beginFileOperation(.move(url, into: folder), on: subject)

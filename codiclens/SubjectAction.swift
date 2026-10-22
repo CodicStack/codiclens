@@ -170,6 +170,10 @@ enum ActionHandler {
     /// The file itself on the pasteboard, so Finder and Mail paste the file.
     case copyFile
 
+    /// Copy File and Cmd+V in one: the file itself pasted into the app the
+    /// Panel was opened over.
+    case pasteFile
+
     /// Move To… and Copy To…: not Final, the Target is a folder. The Subject
     /// follows the file to where it landed. See `FileOperation`.
     case moveTo, copyTo
@@ -392,6 +396,7 @@ struct SubjectAction: Identifiable {
                 isFinal: false,
                 handler: .openWith
             ),
+            .init(name: "Paste File", icon: .sfSymbol("clipboard"), isFinal: true, handler: .pasteFile),
             .init(name: "Copy File", icon: .sfSymbol("doc.on.doc"), isFinal: true, handler: .copyFile),
             .init(name: "Copy Path", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .copyPath),
             .init(name: "Move To…", icon: .sfSymbol("arrowshape.turn.up.right"), isFinal: false, handler: .moveTo),
