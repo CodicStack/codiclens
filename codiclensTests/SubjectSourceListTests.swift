@@ -751,6 +751,37 @@ struct SubjectSourceListTests {
         #expect(ranked.contains { if case .emoji = $0.hit { true } else { false } })
     }
 
+    /// The Kind a Kind Word asks for scores below zero (`FileHit.kindScore`),
+    /// so 📹 and a Clipboard Item that say "video" come after the videos;
+    /// below the block they mix with the rest by score as ever.
+    @Test func emojiAndClipboardGoBelowTheKindBlock() throws {
+        let search = SourceSearch(
+            query: "video",
+            searchFiles: { _ in [] },
+            clipboard: [ClipboardItem(content: "video")],
+            emoji: try EmojiIndex.bundled().all,
+            recentEmoji: []
+        )
+        let ranked = search.rank(files: [
+            hit("/v/standup.mov", score: FileHit.kindScore),
+            hit("/v/beach.mov", score: FileHit.kindScore + 1),
+            hit("/v/VideoSlide.tsx", score: 1),
+        ])
+
+        func key(_ row: SourceSearch.Ranked) -> String {
+            switch row.hit {
+            case .file(let file): file.name
+            case .clipboard: "clipboard"
+            case .emoji: "emoji"
+            }
+        }
+        let keys = ranked.map(key)
+        #expect(Array(keys.prefix(2)) == ["standup.mov", "beach.mov"])
+        #expect(keys.contains("emoji") && keys.contains("clipboard"))
+        #expect(keys.firstIndex(of: "clipboard")! < keys.firstIndex(of: "VideoSlide.tsx")!,
+                "the exact Clipboard Item still beats a prefix name below the block")
+    }
+
     /// Clipboard and Emoji give three rows each at most; files are not capped
     /// below the File Index's own fifty.
     @Test func clipboardAndEmojiAreCappedAndFilesAreNot() async throws {

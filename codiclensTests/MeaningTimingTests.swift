@@ -142,9 +142,9 @@ struct MeaningTimingTests {
             for _ in 0..<5 {
                 var vector: [Float] = []
                 embed.append(try await ContinuousClock().measure { vector = try await encoder.embedQuery(query, code: false) })
-                var scores = MeaningScores.none
+                var scores = MeaningScores.empty
                 score.append(ContinuousClock().measure {
-                    scores = vectors.snapshot().map { MeaningScores($0, query: vector) } ?? .none
+                    scores = vectors.snapshot().map { MeaningScores($0, query: vector) } ?? .empty
                 })
                 fuse.append(ContinuousClock().measure {
                     hits = reader.fusedSearch(query, limit: 50, sources: roots, meaning: scores)

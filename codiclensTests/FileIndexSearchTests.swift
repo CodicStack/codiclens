@@ -107,6 +107,35 @@ struct FileIndexSearchTests {
         #expect(required("the folder") == ["the", "folder"])
     }
 
+    /// Once typing pauses a function word last is finished: never a prefix,
+    /// and no more required than one in the middle.
+    @Test func aFunctionWordLastIsFinishedOnceTypingPauses() {
+        func settled(_ query: String) -> (words: [String], endsOnLastWord: Bool) {
+            FileIndexReader.requiredWords(FileIndexReader.words(query), isSettled: true)
+        }
+        #expect(settled("image of me").words == ["image"])
+        #expect(!settled("image of me").endsOnLastWord)
+        #expect(settled("invoice for").words == ["invoice"])
+        #expect(settled("invoice 20").words == ["invoice", "20"] && settled("invoice 20").endsOnLastWord)
+        #expect(settled("me").words == ["me"] && !settled("me").endsOnLastWord, "alone, whole")
+        #expect(settled("folder").words == ["folder"] && settled("folder").endsOnLastWord)
+    }
+
+    /// "me" stops finding "meeting" once typing pauses; on the keystroke it
+    /// may still be the start of it.
+    @Test func aStopwordLastNeverBeginsALongerWordOnceTypingPauses() throws {
+        let index = try Index([Self.documents + "/meeting.md", Self.documents + "/me.md",
+                               Self.documents + "/image of the meeting.png", Self.documents + "/image.png"])
+        func settled(_ query: String) -> [String] {
+            index.reader.search(query, limit: 50, sources: [Self.documents], passages: .lastWordPrefix).map(\.name)
+        }
+        #expect(Set(index.names("me")) == ["meeting.md", "me.md", "image of the meeting.png"], "the keystroke is as it was")
+        #expect(settled("me") == ["me.md"])
+        #expect(!settled("image of me").isEmpty)
+        #expect(Set(settled("image of me")) == ["image.png", "image of the meeting.png"], "found by \"image\" alone")
+        #expect(settled("meeting me").isEmpty == false && !settled("the me").contains("meeting.md"))
+    }
+
     @Test func aFunctionWordInTheMiddleIsNotRequired() throws {
         let index = try Index([Self.documents + "/Invoices 2024.pdf", Self.documents + "/Invoices 2023.pdf"])
 
