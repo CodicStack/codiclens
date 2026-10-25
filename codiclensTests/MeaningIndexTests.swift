@@ -585,20 +585,20 @@ struct MeaningIndexTests {
     }
 
     /// "video of the standup": a text with every word of the Query and the
-    /// same meaning outscores the video, by its words, yet the video comes
-    /// first: the Query asked for one.
+    /// same meaning outscores the video, which only its soundtrack finds, by
+    /// its words, yet the video comes first: the Query asked for one.
     @Test func aKindWordWithATopicPutsTheKindAboveATextWithAllTheWords() async throws {
         let f = try MeaningFixture()
         let tone = f.folder.path("tone.wav")
         try TestMedia.wav(at: tone, seconds: 4)
-        try await TestMedia.movie(at: f.path("standup.mov"), seconds: 4, audio: URL(fileURLWithPath: tone))
+        try await TestMedia.movie(at: f.path("meeting.mov"), seconds: 4, audio: URL(fileURLWithPath: tone))
         try f.make("standup notes.md", contents: "the video of the standup is on the drive")
         try f.makeFillers()
         try await f.index()
 
         let query = "video of the standup"
         let scores = try #require(f.vectors.snapshot().map { MeaningScores($0, query: KeywordEmbedder.vector(for: query)) })
-        let video = try #require(scores.best(try f.id("standup.mov"))?.z)
+        let video = try #require(scores.best(try f.id("meeting.mov"))?.z)
         let text = try #require(scores.best(try f.id("standup notes.md"))?.z)
         #expect(video >= MeaningRanking.zGate, "\(video)")
         #expect(MeaningRanking.score(z: text, coverage: 1, isKindLifted: false, isLookup: false)
@@ -607,7 +607,7 @@ struct MeaningIndexTests {
 
         for query in [query, "video af mig til standup"] {
             let hits = f.search(query)
-            #expect(Array(hits.map(\.name).prefix(2)) == ["standup.mov", "standup notes.md"], "\(query)")
+            #expect(Array(hits.map(\.name).prefix(2)) == ["meeting.mov", "standup notes.md"], "\(query)")
             #expect(hits.first?.score == FileHit.kindScore, "\(query)")
             #expect(hits.first?.meaning == .audio, "\(query): found by its soundtrack")
         }
@@ -632,8 +632,11 @@ struct MeaningIndexTests {
         #expect(block.map(\.score) == (0..<10).map { FileHit.kindScore + $0 })
         #expect(hits.filter { $0.name.hasSuffix(".png") }.count == 10, "the other two are no guess")
         #expect(hits.dropFirst(10).first?.name == "beach.md")
-        // Without meaning there is nothing to guess by.
-        #expect(f.reader.fusedSearch("photo of the beach", limit: 50, sources: [f.root], meaning: nil).isEmpty)
+        // Without meaning there is nothing to guess by: the note's name
+        // answers "beach", and nothing is first.
+        let words = f.reader.fusedSearch("photo of the beach", limit: 50, sources: [f.root], meaning: nil)
+        #expect(words.map(\.name) == ["beach.md"])
+        #expect(words.allSatisfy { $0.score >= 0 })
     }
 
     /// "photo", "image" and "billede" ask for photos and screenshots alike;
@@ -813,5 +816,126 @@ struct MeaningIndexTests {
         }
         #expect(f.search("folder").allSatisfy { $0.score >= 0 })
         #expect(f.search("my folders").allSatisfy { $0.score >= 0 })
+    }
+
+    // MARK: - The Kind block at scale
+
+    /// Meaning scores made by hand for the fixture's files, by name: what
+    /// each stands out by, and files that do not exist standing in for the
+    /// rest of a large index.
+    private func scores(_ f: MeaningFixture, _ z: [String: Double], others: [Double] = []) throws -> MeaningScores {
+        var byID: [Int64: Double] = [:]
+        for (name, value) in z { byID[try f.id(name)] = value }
+        let made = byID
+        let stand = others.enumerated().map { MeaningScores.Match(file: 9_000_000 + Int64($0.offset), z: $0.element, segment: 0) }
+        let gated = (stand + made.filter { $0.value >= MeaningRanking.zGate }
+            .map { MeaningScores.Match(file: $0.key, z: $0.value, segment: 0) })
+            .sorted { $0.z > $1.z }
+        return MeaningScores(gated: gated, best: { id in made[id].map { MeaningScores.Match(file: id, z: $0, segment: 0) } })
+    }
+
+    /// The 200 best files by meaning across every Kind are no measure of
+    /// the asked Kind: on the user's index "image of me" had 36 pictures
+    /// over the gate and the cut kept 3. Every gated file of the Kind comes
+    /// in, however far down, and the Kind's other files stay out.
+    @Test func everyGatedFileOfTheAskedKindComesInPastTheTop200() async throws {
+        let f = try MeaningFixture()
+        for index in 0..<15 { try TestMedia.picture(at: f.path("portrait\(index).png"), hue: CGFloat(index) / 15) }
+        try await f.index()
+
+        var z: [String: Double] = [:]
+        for index in 0..<12 { z["portrait\(index).png"] = 3.0 }
+        for index in 12..<15 { z["portrait\(index).png"] = 1.0 }
+        let meaning = try scores(f, z, others: .init(repeating: 5.0, count: MeaningRanking.meaningCandidates))
+        #expect(meaning.top.allSatisfy { $0.file >= 9_000_000 }, "the cut keeps none of them")
+
+        let hits = f.reader.fusedSearch("photo of me", limit: 50, sources: [f.root], meaning: meaning)
+        let block = hits.filter { $0.score < 0 }.map(\.name)
+        #expect(Set(block) == Set((0..<12).map { "portrait\($0).png" }), "\(block)")
+    }
+
+    /// A best guess is scored with its words like any member of the block:
+    /// one of three words in its name lifts it above guesses with a little
+    /// more meaning and none of the words.
+    @Test func aBestGuessScoresWithItsWords() async throws {
+        let f = try MeaningFixture()
+        for index in 0..<9 { try TestMedia.picture(at: f.path("p\(index).png"), hue: CGFloat(index) / 9) }
+        try TestMedia.picture(at: f.path("march.png"), hue: 0.95)
+        try await f.index()
+
+        var z: [String: Double] = ["march.png": 1.0]
+        for index in 0..<9 { z["p\(index).png"] = 1.2 }
+        let query = "photo of the invoice from march 2024"
+        #expect(MeaningRanking.terms(query) == ["invoice", "march", "2024"])
+        let hits = f.reader.fusedSearch(query, limit: 50, sources: [f.root], meaning: try scores(f, z))
+        #expect(hits.filter { $0.score < 0 }.count == MeaningRanking.kindGuesses)
+        #expect(hits.first?.name == "march.png", "1.0 + 2 × (1/3)^1.5 beats 1.2")
+    }
+
+    /// Once typing pauses a Kind Word is answered by the Kind, not looked
+    /// for in the words: a receipt PDF that never says "pdf" is found by
+    /// "invoice" and leads, as an invoice note does not.
+    @Test func aKindWordIsNotRequiredInTheSettledWordSearch() async throws {
+        let f = try MeaningFixture()
+        try FileContentReaderTests.makePDF(at: f.path("Receipt-2851-2040.pdf"),
+                                           pages: [String(repeating: "Invoice for the consulting work in March. ", count: 8)])
+        try f.make("invoice.md", contents: "an invoice to send")
+        try f.makeFillers()
+        try await f.index()
+
+        #expect(f.reader.search("pdf invoice", limit: 50, sources: [f.root]).isEmpty, "the keystroke is as it was")
+        for hits in [f.search("pdf invoice"), f.reader.fusedSearch("pdf invoice", limit: 50, sources: [f.root], meaning: nil)] {
+            #expect(hits.first?.name == "Receipt-2851-2040.pdf")
+            #expect(hits.first.map { $0.score < 0 && $0.passage != nil } == true)
+            #expect(hits.contains { $0.name == "invoice.md" && $0.score >= 0 })
+        }
+    }
+
+    /// "image of me": `image.png` and `image001.png` match only the Kind
+    /// Word. They take their place in the block by their score and leave the
+    /// ten to what stands out and the best guesses; a name match on a topic
+    /// word still leads.
+    @Test func aNameMatchOnTheKindWordAloneRanksByItsScore() async throws {
+        let f = try MeaningFixture()
+        for index in 0..<12 { try TestMedia.picture(at: f.path("portrait\(index).png"), hue: CGFloat(index) / 12) }
+        try TestMedia.picture(at: f.path("image.png"), hue: 0.31)
+        try TestMedia.picture(at: f.path("image001.png"), hue: 0.62)
+        try TestMedia.picture(at: f.path("beach.png"), hue: 0.93)
+        try await f.index()
+
+        var z: [String: Double] = ["image.png": 1.9, "image001.png": -0.6, "beach.png": 0]
+        for index in 0..<3 { z["portrait\(index).png"] = 3.0 }
+        for index in 3..<12 { z["portrait\(index).png"] = 1.5 - Double(index) / 100 }
+        let meaning = try scores(f, z)
+
+        let hits = f.reader.fusedSearch("image of me", limit: 50, sources: [f.root], meaning: meaning)
+        let block = hits.filter { $0.score < 0 }.map(\.name)
+        #expect(Set(block.prefix(3)) == ["portrait0.png", "portrait1.png", "portrait2.png"], "\(block)")
+        #expect(block[3] == "image.png", "\(block)")
+        #expect(block.dropFirst(4).prefix(7) == ArraySlice((3..<10).map { "portrait\($0).png" }), "seven guesses: \(block)")
+        #expect(block.last == "image001.png", "\(block)")
+        #expect(!block.contains("beach.png"))
+
+        let beach = f.reader.fusedSearch("image of the beach", limit: 50, sources: [f.root], meaning: meaning)
+        #expect(beach.first?.name == "beach.png", "a name match on the topic leads")
+    }
+
+    /// "video folder": a folder found only because a folder above it is
+    /// called video stays out of the block, so its subfolders do not bury
+    /// the rest. The folders that match by their own name lead.
+    @Test func aFolderInsideALeadingFolderDoesNotJoinTheBlock() async throws {
+        let f = try MeaningFixture()
+        for index in 0..<55 { try f.make("Projects/koffeelab-video/sub\(index)/a.txt", contents: "x") }
+        try f.make("Projects/koffeelab-video/src/video-player/b.txt", contents: "x")
+        try f.make("Other/video stuff/c.txt", contents: "x")
+        try f.make("video notes.md", contents: "notes")
+        try f.makeFillers()
+        try await f.index()
+
+        for hits in [f.search("video folder"), f.reader.fusedSearch("video folder", limit: 50, sources: [f.root], meaning: nil)] {
+            let block = hits.filter { $0.score < 0 }.map(\.name)
+            #expect(Set(block) == ["koffeelab-video", "video stuff", "video-player"], "\(block)")
+            #expect(hits.contains { $0.name == "video notes.md" }, "the files are not cut")
+        }
     }
 }

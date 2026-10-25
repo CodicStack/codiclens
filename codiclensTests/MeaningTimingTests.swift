@@ -190,6 +190,18 @@ struct MeaningTimingTests {
         }
         print("\(rows) vectors: cosine \(format(median(cosine))), with the scale and the best per file "
               + "\(format(median(whole))) (median of 7)")
+        // A Kind Word's part: its Kind's files out of every gated one, and
+        // the best z of each file of the Kind for the best guesses — a
+        // tenth of the files here.
+        let scores = MeaningScores(snapshot, query: query)
+        let kind = Set(stride(from: Int64(1), through: Int64(rows / 6), by: 10))
+        var picking: [Duration] = [], guessing: [Duration] = []
+        for _ in 0..<7 {
+            picking.append(ContinuousClock().measure { _ = scores.gated.filter { kind.contains($0.file) } })
+            guessing.append(ContinuousClock().measure { for file in kind { _ = scores.best(file) } })
+        }
+        print("\(scores.gated.count) files over the gate; the Kind's of them \(format(median(picking))), "
+              + "the best of each of its \(kind.count) files \(format(median(guessing))) (median of 7)")
     }
 
     /// Files of `kind` still to embed, and Passages of it still without a
