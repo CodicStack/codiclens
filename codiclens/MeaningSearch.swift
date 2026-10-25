@@ -52,9 +52,10 @@ nonisolated enum MeaningModality: UInt8, Sendable, CaseIterable {
 ///    first in any Query, ahead of name matches of every other Kind: the
 ///    Kind's name matches, then the rest of it. With a topic ("video of me
 ///    speaking", "billede af kontrakten") the rest is every candidate of the
-///    Kind by its score, filled up to `kindGuesses` with the Kind's best z
-///    below the gate, since a Kind Word is a request even when nothing stands
-///    out. A Query that is only a Kind ("videos", "my videos", "video file":
+///    Kind by its score, however far down the files found by meaning,
+///    filled up to `kindGuesses` with the Kind's best z below the gate, since
+///    a Kind Word is a request even when nothing stands out; a name that
+///    matched only the Kind Word ranks among them by its score. A Query that is only a Kind ("videos", "my videos", "video file":
 ///    `isKindOnly`) means nothing beyond the Kind, which the per-modality scale
 ///    centres away, so its rest is the Kind's newest files instead, the
 ///    whole block at most `kindOnlyFiles`. A folder word with something else
@@ -71,8 +72,9 @@ nonisolated enum MeaningRanking {
     /// A modality with fewer vectors than this takes the overall average:
     /// three photos say nothing about where photos sit.
     static let minimumModalityRows = 20
-    /// How many files found by meaning a search looks at, best first. More
-    /// cannot reach a list of 50 below the name matches.
+    /// How many files found by meaning join every search, best first. More
+    /// cannot reach a list of 50 below the name matches. The Kind a Kind
+    /// Word asks for takes every one of its own (`MeaningScores.gated`).
     static let meaningCandidates = 200
     /// How many files of the Kind a Kind Word asks for come first with a
     /// topic, at least: its best guesses fill up to this when fewer stand
@@ -323,19 +325,30 @@ nonisolated struct MeaningScores: Sendable {
         let segment: Int64
     }
 
-    /// Files whose best segment reaches `MeaningRanking.zGate`, best first,
-    /// at most `MeaningRanking.meaningCandidates`.
-    let top: [Match]
+    /// Every file whose best segment reaches `MeaningRanking.zGate`, best
+    /// first. The scan that finds them is the one that scores every row, so
+    /// keeping all of them costs nothing more: a Kind Word takes every one of
+    /// its Kind from here, however far down (`FileIndexReader.fusedSearch`).
+    let gated: [Match]
     /// Any file's best segment, or nil for a file with no vectors.
     let best: @Sendable (Int64) -> Match?
 
-    static let empty = MeaningScores(top: [], best: { _ in nil })
+    /// The files found by meaning that join every search: the best
+    /// `MeaningRanking.meaningCandidates` of `gated`. More cannot reach a
+    /// list of 50 below the name matches.
+    var top: ArraySlice<Match> { gated.prefix(MeaningRanking.meaningCandidates) }
+
+    static let empty = MeaningScores(gated: [], best: { _ in nil })
 
     /// Scores every row of `vectors` against `query` and puts them on this
     /// Query's scale.
     init(_ vectors: MeaningVectors.Snapshot, query: [Float]) {
-        let rows = vectors.rows
-        let z = MeaningRanking.zScores(vectors.scores(query), masks: rows.masks)
+        self.init(rows: vectors.rows, scores: vectors.scores(query))
+    }
+
+    /// `scores`, the cosine of every row in `rows`, on this Query's scale.
+    init(rows: MeaningVectors.Rows, scores: [Float]) {
+        let z = MeaningRanking.zScores(scores, masks: rows.masks)
         var bestRow: [Int64: Int] = [:]
         let gate = Float(MeaningRanking.zGate)
         z.withUnsafeBufferPointer { z in
@@ -346,9 +359,8 @@ nonisolated struct MeaningScores: Sendable {
                 }
             }
         }
-        top = bestRow.values
+        gated = bestRow.values
             .sorted { z[$0] > z[$1] }
-            .prefix(MeaningRanking.meaningCandidates)
             .map { Match(file: rows.file[$0], z: Double(z[$0]), segment: rows.segment[$0]) }
         best = { file in
             guard let indices = rows.ofFile[file], let row = indices.max(by: { z[$0] < z[$1] }) else { return nil }
@@ -356,8 +368,8 @@ nonisolated struct MeaningScores: Sendable {
         }
     }
 
-    init(top: [Match], best: @escaping @Sendable (Int64) -> Match?) {
-        self.top = top
+    init(gated: [Match], best: @escaping @Sendable (Int64) -> Match?) {
+        self.gated = gated
         self.best = best
     }
 }

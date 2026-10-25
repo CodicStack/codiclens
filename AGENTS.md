@@ -1071,9 +1071,13 @@ and a function word ("for", "the", "af", "me", "mig"; not a Kind Word, not "file
 not unless it is the last on the keystroke, where it may be the start of a longer word ("for"
 of "format"); with nothing else left, all are. In the settled pass a function word last is a
 finished word, never a prefix, in names and Passages alike, so it is dropped like the others
-("image of me" requires "image"; "me" no longer finds "meeting"); alone, it is matched whole.
-On the keystroke a folder word wins a folder a tie and nothing more; the settled pass puts the
-folders first (see The settled search). **A name the whole Query misses is scored on what its folders leave**:
+("me" no longer finds "meeting"); alone, it is matched whole. A Kind Word is not required
+there either, nor "file"/"fil" beside one: the Kind answers it ("pdf invoice" finds a receipt
+PDF that never says "pdf"; "screenshot of error" a screenshot whose OCR says "error"), unless
+nothing else is left ("image of me", "audio file") or a folder word makes it a word to find
+in folder names ("video folder"). On the keystroke a folder word wins a folder a tie and
+nothing more, and a Kind Word is required; the settled pass puts the folders first (see The
+settled search). **A name the whole Query misses is scored on what its folders leave**:
 "code data intensive systems" finds `Data Intensive Systems/code` at `fuzzyScore("code")` +
 `nameAfterFoldersPenalty` (2), a name match, where it had sunk to 200 below 14 files that say
 the words. The `FileHit.Passage` excerpt is
@@ -1293,10 +1297,17 @@ on its evals):
   alone; pdf(s); recording, optagelse, audio, lyd, lydfil, podcast and their forms. Two of
   them share one block. The block is the Kind's name matches, then the rest of the Kind: with
   a topic ("video of me speaking", "billede af kontrakten") every candidate of the Kind by the
-  fused score, filled up to `kindGuesses` (10) with the Kind's best z below the gate — a Kind
-  Word is a request even when nothing stands out, and a text with every word of the Query
-  outscored the best video (row 16 for "video of me speaking"); the rest of the Kind is no
-  candidate. A **kind-only Query** (a Kind Word and nothing but "file"/"fil" and determiners:
+  fused score — every file of it over the gate (`MeaningScores.gated`), not only those among
+  the best 200 of every Kind (`meaningCandidates`), which kept 3 of the 36 pictures over the
+  gate for "image of me" — filled up to `kindGuesses` (10) with the Kind's best z below the
+  gate, each scored with its words like any member: a Kind Word is a request even when nothing
+  stands out, and a text with every word of the Query outscored the best video (row 16 for
+  "video of me speaking"); the rest of the Kind is no candidate. With a topic only a name
+  match on a word of the topic leads the block; one on the Kind Word alone (`image001.png`
+  for "image of me") takes its place in it by its score and leaves the ten to the rest.
+  Picking the Kind out of the gated files and its best z per file cost 0.3 ms and 1.3 ms
+  (Debug, 187k vectors of noise, 3,976 files gated, 3,117 of the Kind;
+  `TEST_RUNNER_CODICLENS_TIME_MEANING_SCALE`). A **kind-only Query** (a Kind Word and nothing but "file"/"fil" and determiners:
   "videos", "my videos", "video file", "billeder"; `isKindOnly`) means nothing beyond the
   Kind, and per-modality centring gives "audio-ness" nothing, so none of 91 recordings came in
   for "audio file": its rest is the Kind's newest in the enabled Sources, packaged documents
@@ -1305,7 +1316,9 @@ on its evals):
 - **A folder word with something else to look for** ("code folder for data intensive
   systems", "video folder"; `asksForFolders`) makes the folders whose name or path match the
   rest the block, by their words alone (folders have no vectors), and no Kind Word beside it
-  puts its Kind first. "folder" alone does nothing.
+  puts its Kind first. A folder found by its path only joins the block where no folder in it
+  is above it (`FileIndexReader.leadingFolders`): `koffeelab-video/src` and ~45 like it had
+  filled all 50 rows of "video folder". "folder" alone does nothing.
 - **A Kind Hint** (document, note, notat, paper, clip, klip, movie, film, song, sang, music,
   musik, sound, voice, stemme and their forms; `kindHints`) is a word of the Query and only
   lifts its Kind by the +1: "release notes" is not a request for notes.

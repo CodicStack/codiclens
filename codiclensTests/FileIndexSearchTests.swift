@@ -121,6 +121,27 @@ struct FileIndexSearchTests {
         #expect(settled("folder").words == ["folder"] && settled("folder").endsOnLastWord)
     }
 
+    /// Once typing pauses a Kind Word is answered by the Kind, so it is not
+    /// required either, unless nothing else is left; beside a folder word
+    /// it is a word like any other ("video folder" wants folders called
+    /// video).
+    @Test func aKindWordIsNotRequiredOnceTypingPauses() {
+        func settled(_ query: String) -> [String] {
+            FileIndexReader.requiredWords(FileIndexReader.words(query), isSettled: true).words
+        }
+        #expect(settled("pdf invoice") == ["invoice"])
+        #expect(settled("screenshot of error") == ["error"])
+        #expect(settled("image of me") == ["image"], "nothing but the Kind Word left")
+        #expect(settled("video") == ["video"])
+        #expect(settled("audio file") == ["audio", "file"], "nothing but the Kind left")
+        #expect(settled("audio file from the standup") == ["standup"])
+        #expect(settled("the tax file") == ["tax", "file"], "no Kind Word: \"file\" is a word")
+        #expect(settled("video folder") == ["video"])
+        #expect(settled("video folder for uni") == ["video", "uni"])
+        #expect(FileIndexReader.requiredWords(FileIndexReader.words("pdf invoice")).words == ["pdf", "invoice"],
+                "the keystroke is as it was")
+    }
+
     /// "me" stops finding "meeting" once typing pauses; on the keystroke it
     /// may still be the start of it.
     @Test func aStopwordLastNeverBeginsALongerWordOnceTypingPauses() throws {
