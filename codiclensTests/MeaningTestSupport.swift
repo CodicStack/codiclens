@@ -207,7 +207,7 @@ final class MeaningFixture {
 
     /// The settled search, as `FileIndex.searchSettled` runs it.
     func search(_ query: String) -> [FileHit] {
-        let scores = vectors.snapshot().map { MeaningScores($0, query: KeywordEmbedder.vector(for: query)) } ?? .none
+        let scores = vectors.snapshot().map { MeaningScores($0, query: KeywordEmbedder.vector(for: query)) } ?? .empty
         return reader.fusedSearch(query, limit: 50, sources: [root], meaning: scores)
     }
 

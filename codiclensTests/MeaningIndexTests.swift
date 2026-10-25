@@ -547,7 +547,7 @@ struct MeaningIndexTests {
         try f.make("a.md", contents: "faktura for huslejen")
         try await f.index()
 
-        let words = f.reader.fusedSearch("husl", limit: 50, sources: [f.root], meaning: .none)
+        let words = f.reader.fusedSearch("husl", limit: 50, sources: [f.root], meaning: nil)
         #expect(words.map(\.name) == ["a.md"])
         #expect(f.reader.search("husl", limit: 50, sources: [f.root]).isEmpty, "the keystroke's whole words")
     }
@@ -560,15 +560,15 @@ struct MeaningIndexTests {
 
         let words = f.reader.search("alpha beta gamma", limit: 50, sources: [f.root], passages: .lastWordPrefix)
         #expect(words.isEmpty, "the word search wants every word")
-        let fused = f.reader.fusedSearch("alpha beta gamma", limit: 50, sources: [f.root], meaning: .none)
+        let fused = f.reader.fusedSearch("alpha beta gamma", limit: 50, sources: [f.root], meaning: .empty)
         #expect(fused.map(\.name) == ["a.md"], "two of three words pass the 50% gate, one does not")
         #expect(fused.first?.passage == nil && fused.first?.meaning == nil)
     }
 
-    @Test func theKindWordLiftsItsKind() async throws {
+    @Test func aKindWordPutsItsKindFirstAndAKindHintLiftsIt() async throws {
         let f = try MeaningFixture()
         // The same meaning, and no word of the Query in either: a tie but for
-        // the kind the Query asks for.
+        // the Kind the Query asks for.
         try f.make("trip.md", contents: "a day on the strand")
         try TestMedia.picture(at: f.path("seaside.png"))
         try f.makeFillers()
@@ -576,13 +576,107 @@ struct MeaningIndexTests {
 
         let plain = f.search("beach").map(\.name)
         #expect(Set(plain) == ["trip.md", "seaside.png"])
-        #expect(f.search("beach billede").map(\.name) == ["seaside.png", "trip.md"], "\"billede\" asks for a picture")
-        #expect(f.search("beach dokument").map(\.name) == ["trip.md", "seaside.png"], "\"dokument\" for a note")
+        let picture = f.search("beach billede")
+        #expect(picture.map(\.name) == ["seaside.png", "trip.md"], "\"billede\" asks for a picture")
+        #expect(picture[0].score == FileHit.kindScore && picture[1].score >= FileHit.contentScore)
+        let note = f.search("beach dokument")
+        #expect(note.map(\.name) == ["trip.md", "seaside.png"], "\"dokument\" lifts a note")
+        #expect(note.allSatisfy { $0.score >= FileHit.contentScore }, "a Kind Hint puts nothing first")
     }
 
-    /// "audio file" is all stopwords and means nothing past "audio", which
-    /// the per-modality scale centres away: no recording reaches the gate.
-    /// The newest recordings come in, first, ahead of a note the words found.
+    /// "video of the standup": a text with every word of the Query and the
+    /// same meaning outscores the video, by its words, yet the video comes
+    /// first: the Query asked for one.
+    @Test func aKindWordWithATopicPutsTheKindAboveATextWithAllTheWords() async throws {
+        let f = try MeaningFixture()
+        let tone = f.folder.path("tone.wav")
+        try TestMedia.wav(at: tone, seconds: 4)
+        try await TestMedia.movie(at: f.path("standup.mov"), seconds: 4, audio: URL(fileURLWithPath: tone))
+        try f.make("standup notes.md", contents: "the video of the standup is on the drive")
+        try f.makeFillers()
+        try await f.index()
+
+        let query = "video of the standup"
+        let scores = try #require(f.vectors.snapshot().map { MeaningScores($0, query: KeywordEmbedder.vector(for: query)) })
+        let video = try #require(scores.best(try f.id("standup.mov"))?.z)
+        let text = try #require(scores.best(try f.id("standup notes.md"))?.z)
+        #expect(video >= MeaningRanking.zGate, "\(video)")
+        #expect(MeaningRanking.score(z: text, coverage: 1, isKindLifted: false, isLookup: false)
+                > MeaningRanking.score(z: video, coverage: 0, isKindLifted: true, isLookup: false),
+                "fused alone, the text would win")
+
+        for query in [query, "video af mig til standup"] {
+            let hits = f.search(query)
+            #expect(Array(hits.map(\.name).prefix(2)) == ["standup.mov", "standup notes.md"], "\(query)")
+            #expect(hits.first?.score == FileHit.kindScore, "\(query)")
+            #expect(hits.first?.meaning == .audio, "\(query): found by its soundtrack")
+        }
+    }
+
+    /// A Kind Word is a request even when nothing of the Kind stands out:
+    /// its best guesses fill the block up to ten, ranked with the one that
+    /// does, and the rest of the Kind stays out.
+    @Test func theKindsBestGuessesFillTheBlockToTen() async throws {
+        let f = try MeaningFixture()
+        try TestMedia.picture(at: f.path("seaside.png"))
+        for index in 0..<12 { try TestMedia.picture(at: f.path("p\(index).png"), hue: CGFloat(index) / 12) }
+        try f.make("beach.md", contents: "a beach day")
+        try f.makeFillers()
+        try await f.index()
+
+        let hits = f.search("photo of the beach")
+        let block = hits.filter { $0.score < 0 }
+        #expect(block.count == MeaningRanking.kindGuesses)
+        #expect(block.first?.name == "seaside.png")
+        #expect(block.allSatisfy { $0.name.hasSuffix(".png") })
+        #expect(block.map(\.score) == (0..<10).map { FileHit.kindScore + $0 })
+        #expect(hits.filter { $0.name.hasSuffix(".png") }.count == 10, "the other two are no guess")
+        #expect(hits.dropFirst(10).first?.name == "beach.md")
+        // Without meaning there is nothing to guess by.
+        #expect(f.reader.fusedSearch("photo of the beach", limit: 50, sources: [f.root], meaning: nil).isEmpty)
+    }
+
+    /// "photo", "image" and "billede" ask for photos and screenshots alike;
+    /// "screenshot" for screenshots alone.
+    @Test func pictureWordsAskForPhotosAndScreenshots() async throws {
+        let f = try MeaningFixture()
+        try TestMedia.picture(at: f.path("seaside.png"))
+        try TestMedia.picture(at: f.path("Screenshot strand.png"), hue: 0.7)
+        try f.make("trip.md", contents: "a day at the beach")
+        try f.makeFillers()
+        try await f.index()
+        #expect(f.reader.content(atPath: f.path("Screenshot strand.png")) == .screenshot)
+
+        for query in ["photo of the beach", "image of the beach", "billede af stranden"] {
+            let hits = f.search(query)
+            #expect(Set(hits.prefix(2).map(\.name)) == ["seaside.png", "Screenshot strand.png"], "\(query)")
+            #expect(hits.prefix(2).allSatisfy { $0.score < 0 }, "\(query)")
+            #expect(hits.dropFirst(2).allSatisfy { $0.score >= 0 }, "\(query)")
+        }
+        let screenshots = f.search("screenshot of the beach")
+        #expect(screenshots.first?.name == "Screenshot strand.png")
+        #expect(screenshots.filter { $0.score < 0 }.map(\.name) == ["Screenshot strand.png"])
+        #expect(screenshots.contains { $0.name == "seaside.png" }, "still found by meaning, below the block")
+    }
+
+    /// Two Kind Words share one block, ranked together.
+    @Test func twoKindWordsShareOneBlock() async throws {
+        let f = try MeaningFixture()
+        try TestMedia.picture(at: f.path("seaside.png"))
+        try TestMedia.wav(at: f.path("strand.wav"), seconds: 5)
+        try f.make("trip.md", contents: "a day at the beach")
+        try f.makeFillers()
+        try await f.index()
+
+        let hits = f.search("photo or recording of the beach")
+        #expect(Set(hits.prefix(2).map(\.name)) == ["seaside.png", "strand.wav"])
+        #expect(hits.prefix(2).map(\.score) == [FileHit.kindScore, FileHit.kindScore + 1])
+        #expect(hits.dropFirst(2).first?.name == "trip.md")
+    }
+
+    /// "audio file" is only a Kind and means nothing past it, which the
+    /// per-modality scale centres away: no recording reaches the gate. The
+    /// newest recordings come first, ahead of a note the words found.
     @Test func aQueryOfOnlyAKindListsTheNewestOfThatKindFirst() async throws {
         let f = try MeaningFixture()
         for (name, year) in [("old.wav", 2020), ("new.wav", 2024), ("mid.wav", 2022)] {
@@ -594,19 +688,63 @@ struct MeaningIndexTests {
         try f.makeFillers()
         try await f.index()
 
-        #expect(f.reader.fusedSearch("audio file", limit: 50, sources: [f.root], meaning: .none).map(\.name)
+        #expect(f.reader.fusedSearch("audio file", limit: 50, sources: [f.root], meaning: nil).map(\.name)
                 == ["new.wav", "mid.wav", "old.wav", "notes.md"], "without meaning too")
         let hits = f.search("audio file")
         #expect(hits.map(\.name) == ["new.wav", "mid.wav", "old.wav", "notes.md"])
-        #expect(hits.map(\.score) == (0..<4).map { FileHit.contentScore + $0 })
-        #expect(hits.prefix(3).allSatisfy { $0.meaning == nil }, "found by its kind, not by meaning")
+        #expect(hits.map(\.score) == [FileHit.kindScore, FileHit.kindScore + 1, FileHit.kindScore + 2, FileHit.contentScore])
+        #expect(hits.prefix(3).allSatisfy { $0.meaning == nil }, "found by its Kind, not by meaning")
         #expect(f.search("lydfil").map(\.name) == ["new.wav", "mid.wav", "old.wav"])
-        #expect(f.search("music").map(\.name) == ["new.wav", "mid.wav", "old.wav", "playlist.md"],
-                "a kind word that is not a stopword is still only a kind; the note with it comes in after")
-        #expect(f.search("video").isEmpty, "no file of the kind: nothing, as before")
+        #expect(f.search("my recordings").map(\.name) == ["new.wav", "mid.wav", "old.wav"])
+        #expect(f.search("music").map(\.name) == ["playlist.md"], "a Kind Hint lists nothing")
+        #expect(f.search("video").isEmpty, "no file of the Kind: nothing")
     }
 
-    @Test func aNameMatchStaysAboveTheKindAskedFor() async throws {
+    /// A kind-only Query's block is the Kind's name matches, then its
+    /// newest, 25 in all; name matches of other Kinds come after it.
+    @Test func aKindOnlyBlockIsCappedAndOtherKindsNameMatchesFollow() async throws {
+        let f = try MeaningFixture()
+        for index in 0..<30 {
+            try TestMedia.picture(at: f.path("shot \(index).png"), hue: CGFloat(index % 5) / 5)
+            try f.setDate("shot \(index).png", Date(timeIntervalSince1970: 1_600_000_000 + Double(index) * 1000))
+        }
+        try TestMedia.picture(at: f.path("photo.png"))
+        try f.setDate("photo.png", Date(timeIntervalSince1970: 1_500_000_000))
+        try f.make("photo booth.md", contents: "a booth")
+        try await f.index()
+
+        for hits in [f.search("photo"), f.reader.fusedSearch("photo", limit: 50, sources: [f.root], meaning: nil)] {
+            #expect(hits.first?.name == "photo.png", "the Kind's own name match first")
+            #expect(hits[1].name == "shot 29.png", "then the newest")
+            #expect(hits.prefix(MeaningRanking.kindOnlyFiles).allSatisfy { $0.name.hasSuffix(".png") && $0.score < 0 })
+            #expect(hits.filter { $0.name.hasSuffix(".png") }.count == MeaningRanking.kindOnlyFiles)
+            #expect(hits[MeaningRanking.kindOnlyFiles].name == "photo booth.md")
+            #expect(hits[MeaningRanking.kindOnlyFiles].score >= 0 && hits[MeaningRanking.kindOnlyFiles].score < FileHit.contentScore)
+        }
+    }
+
+    /// "video": a file named video is not a video. The videos come first, the
+    /// one named video ahead of them, and `VideoSlide.tsx` after.
+    @Test func aKindWordPutsRealVideosAboveFilesNamedLikeIt() async throws {
+        let f = try MeaningFixture()
+        try await TestMedia.movie(at: f.path("clip.mov"), seconds: 2)
+        try await TestMedia.movie(at: f.path("video.mov"), seconds: 2)
+        try f.make("VideoSlide.tsx", contents: "export const VideoSlide = () => null")
+        try f.make("video notes.md", contents: "notes")
+        try f.makeFillers()
+        try await f.index()
+
+        for hits in [f.search("video"), f.search("my video"),
+                     f.reader.fusedSearch("video", limit: 50, sources: [f.root], meaning: nil)] {
+            #expect(Array(hits.map(\.name).prefix(2)) == ["video.mov", "clip.mov"])
+            #expect(Set(hits.dropFirst(2).prefix(2).map(\.name)) == ["VideoSlide.tsx", "video notes.md"])
+        }
+        let keystroke = f.reader.search("video", limit: 50, sources: [f.root])
+        #expect(keystroke.first?.name != "clip.mov", "the keystroke is as it was")
+    }
+
+    /// The Kind block sits above name matches of every other Kind.
+    @Test func theKindBlockIsAboveOtherKindsNameMatches() async throws {
         let f = try MeaningFixture()
         try TestMedia.wav(at: f.path("take.wav"), seconds: 5)
         try f.make("audio file list.txt", contents: "nothing here")
@@ -614,15 +752,16 @@ struct MeaningIndexTests {
         try await f.index()
 
         let hits = f.search("audio file")
-        #expect(hits.map(\.name) == ["audio file list.txt", "take.wav"])
-        #expect(hits[0].passage == nil && hits[0].score < FileHit.contentScore)
-        #expect(hits[1].score == FileHit.contentScore)
+        #expect(hits.map(\.name) == ["take.wav", "audio file list.txt"])
+        #expect(hits[0].score == FileHit.kindScore)
+        #expect(hits[1].passage == nil && hits[1].score >= 0 && hits[1].score < FileHit.contentScore)
     }
 
-    /// The kind word with other words is a nudge, not a filter: a
-    /// recording that means half of "music meeting recording" (z between 1
-    /// and 2) stays out, as it would without the kind word.
-    @Test func theKindAskedForWithATopicIsOnlyANudge() async throws {
+    /// "music meeting recording": the recording means only half of it (z
+    /// between 1 and 2), below the gate, yet "recording" asks for one, so it
+    /// is the best guess and comes first. With "music meeting", whose
+    /// "music" is only a Kind Hint, it stays out.
+    @Test func aKindWordBringsItsBestGuessAndAKindHintDoesNot() async throws {
         let f = try MeaningFixture()
         try TestMedia.wav(at: f.path("standup.wav"), seconds: 5)
         try f.make("concert.md", contents: "music for the meeting")
@@ -634,22 +773,45 @@ struct MeaningIndexTests {
         let recording = try #require(scores.best(try f.id("standup.wav"))?.z)
         #expect(recording >= 1 && recording < MeaningRanking.zGate, "\(recording)")
 
-        #expect(f.search(query).map(\.name) == ["concert.md"])
+        #expect(f.search(query).map(\.name) == ["standup.wav", "concert.md"])
         #expect(f.search("music meeting").map(\.name) == ["concert.md"])
     }
 
-    /// "documents" asks for documents, and a packaged one (`.rtfd`,
-    /// `.pages`, `.numbers`, `.key`) is one.
-    @Test func aKindOnlyQueryBringsInPackagedDocuments() async throws {
+    /// "release notes" is not a request for notes: a Kind Hint reorders
+    /// nothing, and a name match of another Kind stays first.
+    @Test func aKindHintDoesNotPutItsKindFirst() async throws {
         let f = try MeaningFixture()
-        try f.make("Notes.rtfd/TXT.rtf", contents: "{\\rtf1 hello}")
-        try f.make("old.md", contents: "ordinary")
-        try f.setDate("Notes.rtfd", try #require(Calendar.current.date(from: DateComponents(year: 2024, month: 6, day: 1))))
-        try f.setDate("old.md", try #require(Calendar.current.date(from: DateComponents(year: 2020, month: 6, day: 1))))
+        try f.make("release notes.swift", contents: "let version = 2")
+        try f.make("changes.md", contents: "the release notes for 2.0")
+        try f.makeFillers()
         try await f.index()
 
-        let hits = f.reader.fusedSearch("documents", limit: 50, sources: [f.root], meaning: .none)
-        #expect(hits.map(\.name) == ["Notes.rtfd", "old.md"])
-        #expect(hits.first?.kind == .package)
+        let hits = f.search("release notes")
+        #expect(hits.map(\.name) == ["release notes.swift", "changes.md"])
+        #expect(hits.allSatisfy { $0.score >= 0 })
+        #expect(f.search("documents").allSatisfy { $0.score >= 0 })
+    }
+
+    /// A folder word beside something to look for puts the folders whose
+    /// name or path match first, by their words alone; it does not put the
+    /// Kind of a Kind Word beside it first. "folder" alone does nothing.
+    @Test func aFolderWordPutsMatchingFoldersFirst() async throws {
+        let f = try MeaningFixture()
+        try f.make("Video/a.txt", contents: "first")
+        try f.make("Old/video stuff/b.txt", contents: "second")
+        try await TestMedia.movie(at: f.path("clip video.mov"), seconds: 2)
+        try f.make("video.md", contents: "notes")
+        try f.makeFillers()
+        try await f.index()
+
+        for hits in [f.search("video folder"), f.search("mappe med video"),
+                     f.reader.fusedSearch("video folder", limit: 50, sources: [f.root], meaning: nil)] {
+            #expect(Array(hits.map(\.name).prefix(2)) == ["Video", "video stuff"])
+            #expect(hits.prefix(2).allSatisfy { $0.kind == .folder && $0.score < 0 })
+            #expect(hits.dropFirst(2).allSatisfy { $0.score >= 0 }, "no video first")
+            #expect(hits.contains { $0.name == "clip video.mov" })
+        }
+        #expect(f.search("folder").allSatisfy { $0.score >= 0 })
+        #expect(f.search("my folders").allSatisfy { $0.score >= 0 })
     }
 }

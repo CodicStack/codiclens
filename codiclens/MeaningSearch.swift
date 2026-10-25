@@ -44,15 +44,23 @@ nonisolated enum MeaningModality: UInt8, Sendable, CaseIterable {
 /// 2. A file is a candidate by meaning (z ≥ `zGate`) or by words (at least
 ///    `coverageGate` of the Query's words in it).
 /// 3. Its score is `meaningWeight × max(z, 0) + wordWeight × coverage^1.5`,
-///    plus 1 when the Query names its kind ("video", "skærmbillede").
-///    A "lookup" — IDs and numbers like `K7Q2LM` or `#1234` — weighs words
-///    double and meaning half: they mean nothing to an embedding.
-/// 4. A Query that is only a kind ("audio file", "billeder", "music": every
-///    word a kind word or a stopword, `isKindOnly`) means nothing beyond the
-///    kind, which the per-modality scale centres away, so no file of that
-///    kind would come in. Its newest files of that kind are candidates
-///    instead, ahead of the rest, newest first; a file with its words still
-///    comes in by coverage, after them.
+///    plus 1 when a Kind Word or a Kind Hint names its Kind ("video",
+///    "notes": `liftedKinds`). A "lookup" — IDs and numbers like `K7Q2LM` or
+///    `#1234` — weighs words double and meaning half: they mean nothing to an
+///    embedding.
+/// 4. A Kind Word ("video", "billede", "pdf": `askedKinds`) puts its Kind
+///    first in any Query, ahead of name matches of every other Kind: the
+///    Kind's name matches, then the rest of it. With a topic ("video of me
+///    speaking", "billede af kontrakten") the rest is every candidate of the
+///    Kind by its score, filled up to `kindGuesses` with the Kind's best z
+///    below the gate, since a Kind Word is a request even when nothing stands
+///    out. A Query that is only a Kind ("videos", "my videos", "video file":
+///    `isKindOnly`) means nothing beyond the Kind, which the per-modality scale
+///    centres away, so its rest is the Kind's newest files instead, the
+///    whole block at most `kindOnlyFiles`. A folder word with something else
+///    to look for does the same for folders, by their names and paths
+///    (`asksForFolders`). A Kind Hint never puts anything first: "release
+///    notes" is not a request for notes.
 nonisolated enum MeaningRanking {
     static let zGate = 2.0
     static let coverageGate = 0.5
@@ -66,6 +74,13 @@ nonisolated enum MeaningRanking {
     /// How many files found by meaning a search looks at, best first. More
     /// cannot reach a list of 50 below the name matches.
     static let meaningCandidates = 200
+    /// How many files of the Kind a Kind Word asks for come first with a
+    /// topic, at least: its best guesses fill up to this when fewer stand
+    /// out by meaning or words.
+    static let kindGuesses = 10
+    /// How many files of the Kind come first when the Query is only a Kind:
+    /// its newest, below its name matches.
+    static let kindOnlyFiles = 25
 
     // MARK: - The scale
 
@@ -146,37 +161,46 @@ nonisolated enum MeaningRanking {
 
     // MARK: - Fusion
 
-    /// `isAskedForAlone`: the file is of the kind a Query asks for, and the
-    /// Query is only a kind (`isKindOnly`): it is a candidate by its kind.
-    static func isCandidate(z: Double?, coverage: Double, isAskedForAlone: Bool = false) -> Bool {
-        isAskedForAlone || (z ?? -.infinity) >= zGate || coverage >= coverageGate
+    static func isCandidate(z: Double?, coverage: Double) -> Bool {
+        (z ?? -.infinity) >= zGate || coverage >= coverageGate
     }
 
-    /// The fused score, higher is better.
-    static func score(z: Double?, coverage: Double, isKindAskedFor: Bool, isLookup: Bool) -> Double {
+    /// The fused score, higher is better. `isKindLifted`: a Kind Word or a
+    /// Kind Hint of the Query names the file's Kind.
+    static func score(z: Double?, coverage: Double, isKindLifted: Bool, isLookup: Bool) -> Double {
         let (meaningWeight, wordsWeight) = isLookup ? (0.5, wordWeight * 2) : (1.0, wordWeight)
-        return meaningWeight * max(z ?? 0, 0) + wordsWeight * pow(coverage, 1.5) + (isKindAskedFor ? 1 : 0)
+        return meaningWeight * max(z ?? 0, 0) + wordsWeight * pow(coverage, 1.5) + (isKindLifted ? 1 : 0)
     }
 
     // MARK: - The Query's words
 
-    /// Words that say nothing about what is in a file: function words, and
-    /// the kind words, which say what to look for rather than what is in it
-    /// (`kindWords` turns those into a boost instead; `folderWords` into a
-    /// tiebreak). English and Danish.
-    static let stopwords: Set<String> = [
-        "folder", "folders", "mappe", "mapper", "mappen",
+    /// The stopwords that only hold a sentence together ("for", "the", "af",
+    /// "me", "mig"), which the word search need not find and which never
+    /// begin a longer word once typing pauses (`FileIndexReader.requiredWords`).
+    /// Not the Kind Words, the folder words, nor the kind nouns "file" and
+    /// "fil": a name that says "pdf" or "file" is what a Query that says it
+    /// wants. English and Danish.
+    static let functionWords: Set<String> = [
         "a", "an", "the", "of", "in", "on", "at", "to", "for", "with", "and", "or", "my", "me", "that", "this",
         "these", "those", "from", "about", "where", "what", "which", "who", "when", "is", "was", "are", "were", "be",
-        "it", "its", "some", "any", "find", "show", "file", "files", "photo", "photos", "picture", "pictures",
-        "image", "images", "screenshot", "screenshots", "video", "videos", "pdf", "pdfs", "document", "documents",
-        "recording", "recordings", "audio", "sound", "sounds",
-        "og", "eller", "på", "til", "af", "for", "med", "en", "et", "den", "det", "de", "der", "som", "min", "mit",
-        "mine", "fra", "om", "hvor", "hvad", "hvilken", "hvilket", "hvem", "hvornår", "er", "var", "at", "har",
-        "jeg", "vi", "du", "noget", "nogle", "fil", "filer", "find", "vis", "billede", "billeder", "foto", "fotos",
-        "skærmbillede", "skærmbilleder", "dokument", "dokumenter", "optagelse", "optagelser", "lyd", "lydfil",
-        "lydfiler", "videoer",
+        "it", "its", "some", "any", "find", "show",
+        "og", "eller", "på", "til", "af", "med", "en", "et", "den", "det", "de", "der", "som", "min", "mit",
+        "mine", "fra", "om", "hvor", "hvad", "hvilken", "hvilket", "hvem", "hvornår", "er", "var", "har",
+        "jeg", "vi", "du", "noget", "nogle", "vis", "mig", "dig", "sig", "ham", "hende", "os", "jer", "dem",
     ]
+
+    /// The kind nouns: "file" asks for no Kind, only for a file.
+    static let fileWords: Set<String> = ["file", "files", "fil", "filer"]
+
+    /// Words that say nothing about what is in a file: the function words,
+    /// the file words, and the Kind Words and folder words, which say what
+    /// to look for rather than what is in it (`askedKinds` and
+    /// `asksForFolders` put that first instead). A Kind Hint is a word: it
+    /// may be the topic.
+    static let stopwords: Set<String> = functionWords
+        .union(fileWords)
+        .union(kindWords.keys)
+        .union(folderWords)
 
     /// The Query's content words as keyword search sees them, once each:
     /// stopwords out, and words of at least two letters.
@@ -196,59 +220,96 @@ nonisolated enum MeaningRanking {
         }
     }
 
-    /// Words that ask for a kind of file: a soft boost, not a filter. Only a
-    /// Query of nothing but kind words lists that kind first (`MeaningRanking`, 4).
+    /// The Kind Words (`GLOSSARY.md`): words that ask for a Kind outright,
+    /// in any Query, and put it first (`MeaningRanking`, 4). A picture word
+    /// asks for photos and screenshots alike; a screenshot word for
+    /// screenshots alone.
     static let kindWords: [String: Set<FileContent>] = {
         var words: [String: Set<FileContent>] = [:]
+        for word in ["video", "videos", "videoen", "videoer"] { words[word] = [.video] }
+        for word in ["photo", "photos", "picture", "pictures", "image", "images", "billede", "billeder", "billedet",
+                     "foto", "fotos", "fotoet"] {
+            words[word] = [.image, .screenshot]
+        }
         for word in ["screenshot", "screenshots", "skærmbillede", "skærmbilleder", "skærmbilledet"] {
             words[word] = [.screenshot]
         }
-        for word in ["photo", "photos", "picture", "pictures", "image", "images", "billede", "billeder", "billedet",
-                     "foto", "fotos", "fotoet"] {
-            words[word] = [.image]
-        }
-        for word in ["pdf", "pdfs", "paper", "papers"] { words[word] = [.pdf] }
-        for word in ["document", "documents", "note", "notes", "dokument", "dokumenter", "dokumentet",
-                     "noter", "notat", "notater"] {
-            words[word] = [.document, .text]
-        }
-        for word in ["video", "videos", "clip", "clips", "movie", "movies", "film", "filmen", "videoen", "videoer", "klip",
-                     "klippene"] {
-            words[word] = [.video]
-        }
-        for word in ["audio", "song", "songs", "podcast", "podcasts", "voice", "voices", "sound", "sounds", "recording",
-                     "recordings", "music", "lyd", "lydfil", "lydfiler", "lyden", "sang", "sange", "musik", "optagelse",
-                     "optagelser", "optagelsen", "stemme"] {
+        for word in ["pdf", "pdfs"] { words[word] = [.pdf] }
+        for word in ["recording", "recordings", "optagelse", "optagelser", "optagelsen", "audio", "lyd", "lydfil",
+                     "lydfiler", "lyden", "podcast", "podcasts"] {
             words[word] = [.audio]
         }
         return words
     }()
 
-    /// Words that ask for a folder: "code folder for data intensive systems",
-    /// "mappen med regnskabet". A folder is a `FileIndexRow.Kind`, not a
-    /// `FileContent`, so these are no `kindWords`: the word search does not
-    /// require them, and a folder wins a tie on them (`FileIndexReader.search`).
-    /// Never a filter, and never a list of folders on their own.
+    /// The Kind Hints (`GLOSSARY.md`): words that may name a Kind or may
+    /// just be the topic ("release notes", "film om havet"). They lift that
+    /// Kind by the score's +1 and never put it first, and they are words the
+    /// Query looks for.
+    static let kindHints: [String: Set<FileContent>] = {
+        var words: [String: Set<FileContent>] = [:]
+        for word in ["document", "documents", "dokument", "dokumenter", "dokumentet", "note", "notes", "noter",
+                     "notat", "notater"] {
+            words[word] = [.document, .text]
+        }
+        for word in ["paper", "papers"] { words[word] = [.pdf] }
+        for word in ["clip", "clips", "klip", "klippene", "movie", "movies", "film", "filmen"] { words[word] = [.video] }
+        for word in ["song", "songs", "sang", "sange", "music", "musik", "sound", "sounds", "voice", "voices",
+                     "stemme"] {
+            words[word] = [.audio]
+        }
+        return words
+    }()
+
+    /// Words that ask for a folder, the way a Kind Word asks for a Kind:
+    /// "code folder for data intensive systems", "mappen med regnskabet". A
+    /// folder is a `FileIndexRow.Kind`, not a `FileContent`, and has no
+    /// vectors, so the folders whose name or path match the rest of the
+    /// Query come first, by their words alone (`asksForFolders`). The word
+    /// search does not require them; on the keystroke a folder wins only a
+    /// tie on one (`FileIndexReader.search`).
     static let folderWords: Set<String> = ["folder", "folders", "mappe", "mapper", "mappen"]
 
-    /// The stopwords that only hold a sentence together ("for", "the", "af"),
-    /// which the word search need not find. Not the kind words, nor the kind
-    /// nouns "file" and "fil": a name that says "pdf" or "file" is what a
-    /// Query that says it wants.
-    static let functionWords: Set<String> = stopwords
-        .subtracting(kindWords.keys)
-        .subtracting(folderWords)
-        .subtracting(["file", "files", "fil", "filer"])
+    /// The words a kind-only Query may have beside its Kind Words: the file
+    /// words and the determiners ("my videos", "video file", "alle
+    /// billeder"). Anything else is a topic.
+    static let kindOnlyWords: Set<String> = fileWords.union([
+        "a", "an", "the", "my", "our", "your", "some", "all", "any",
+        "en", "et", "den", "det", "de", "min", "mit", "mine", "din", "dit", "dine", "vores", "nogle", "alle",
+    ])
 
-    /// Whether the Query is only a kind: it names one, and every word that
-    /// is not a stopword is a kind word ("audio file", "music", "lydfiler").
-    static func isKindOnly(_ query: String) -> Bool {
-        !kindHints(query).isEmpty && terms(query).allSatisfy { kindWords[$0] != nil }
+    /// Whether the Query asks for folders: a folder word, and something else
+    /// to look for in their names or paths. "folder" or "my folders" alone
+    /// asks for nothing.
+    static func asksForFolders(_ query: String) -> Bool {
+        let words = FileIndexReader.words(query)
+        return words.contains(where: folderWords.contains)
+            && !FileIndexReader.requiredWords(words, isSettled: true).words.contains(where: folderWords.contains)
     }
 
-    /// The kinds the Query asks for: "…in a video", "skærmbillede af…".
-    static func kindHints(_ query: String) -> Set<FileContent> {
-        FileIndexReader.words(query).reduce(into: Set<FileContent>()) { $0.formUnion(kindWords[$1] ?? []) }
+    /// The Kinds the Query's Kind Words put first: "…in a video", "billede
+    /// af…", "screenshot pdf". None beside a folder word: "video folder"
+    /// asks for folders.
+    static func askedKinds(_ query: String) -> Set<FileContent> {
+        guard !asksForFolders(query) else { return [] }
+        return FileIndexReader.words(query).reduce(into: Set<FileContent>()) { $0.formUnion(kindWords[$1] ?? []) }
+    }
+
+    /// The Kinds the score lifts by 1: every Kind its Kind Words and Kind
+    /// Hints name.
+    static func liftedKinds(_ query: String) -> Set<FileContent> {
+        FileIndexReader.words(query).reduce(into: Set<FileContent>()) {
+            $0.formUnion(kindWords[$1] ?? [])
+            $0.formUnion(kindHints[$1] ?? [])
+        }
+    }
+
+    /// Whether the Query is only a Kind: it has a Kind Word, and every other
+    /// word is a file word or a determiner (`kindOnlyWords`: "videos", "my
+    /// videos", "video file", "billeder"). "image of me" has a topic.
+    static func isKindOnly(_ query: String) -> Bool {
+        !askedKinds(query).isEmpty
+            && FileIndexReader.words(query).allSatisfy { kindWords[$0] != nil || kindOnlyWords.contains($0) }
     }
 }
 
@@ -268,7 +329,7 @@ nonisolated struct MeaningScores: Sendable {
     /// Any file's best segment, or nil for a file with no vectors.
     let best: @Sendable (Int64) -> Match?
 
-    static let none = MeaningScores(top: [], best: { _ in nil })
+    static let empty = MeaningScores(top: [], best: { _ in nil })
 
     /// Scores every row of `vectors` against `query` and puts them on this
     /// Query's scale.

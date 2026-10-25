@@ -72,6 +72,18 @@ _Avoid_: excerpt, moment, snippet, hit, match location
 The file opened inside the Panel at its Passage, with the matched words highlighted: a PDF at its page, text scrolled to the Passage, a recording playing from where the Passage starts. Shift+Space opens it for a File Result that has a Passage; anything else gets Quick Look.
 _Avoid_: own preview, inline preview, viewer, Quick Look
 
+**Kind**:
+What a file is, as a person would say it: a video, a photo, a screenshot, a PDF, a document, a note, a recording, code. Judged from the file itself, never from the Query.
+_Avoid_: type, file type, format, category, modality
+
+**Kind Word**:
+A word in a Query that asks for a Kind outright — "video", "photo", "screenshot", "billede", "optagelse". A Query with one lists that Kind first, its best guesses even when nothing else stands out, ahead of name matches of any other Kind. English and Danish alike. A screenshot is a picture: "photo", "image" and "billede" ask for photos and screenshots alike; "screenshot" asks for screenshots alone. "folder" and "mappe" ask for folders the same way.
+_Avoid_: filter, type word
+
+**Kind Hint**:
+A word that may name a Kind or may just be the topic — "notes", "film", "music", "voice". It lifts that Kind a little and never puts it first: "release notes" is not a request for notes.
+_Avoid_: weak kind word, soft filter
+
 **Mode**:
 What the Results Slab is currently listing, which determines its layout — a list for apps and files, a grid for emoji. Set by the Subject in play.
 _Avoid_: view, layout, kind

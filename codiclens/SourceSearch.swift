@@ -11,7 +11,10 @@ import Foundation
 /// Every Source scores on `fuzzyScore`'s scale, lower is better, and that is
 /// the whole of the cross-Source ranking: there is no priority between Sources
 /// (`GLOSSARY.md`, **Source**). Ties go files, then Clipboard, then Emoji, so the
-/// order is stable — a tie-break, not a priority.
+/// order is stable — a tie-break, not a priority. The settled pass's Kind
+/// block — the files of the Kind a Kind Word asks for — scores below zero
+/// (`FileHit.kindScore`), so it comes before every Clipboard Item and Emoji:
+/// the Query asked for that Kind. Below it they mix with the rest by score.
 nonisolated struct SourceSearch: Sendable {
     /// One row of the list, before it is a Subject.
     enum Hit: Sendable {

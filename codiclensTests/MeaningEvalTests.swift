@@ -62,7 +62,7 @@ struct MeaningEvalTests {
         var misses: [String] = []
         for test in cases {
             let vector = try await encoder.embedQuery(test.query, code: false)
-            let scores = opened ? vectors.snapshot().map { MeaningScores($0, query: vector) } ?? .none : .none
+            let scores = opened ? vectors.snapshot().map { MeaningScores($0, query: vector) } ?? .empty : .empty
             let fused = reader.fusedSearch(test.query, limit: 5, sources: sources, meaning: scores)
             let words = reader.search(test.query, limit: 5, sources: sources, passages: .lastWordPrefix)
             let expected = Set(test.expected.map { ($0 as NSString).expandingTildeInPath })

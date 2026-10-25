@@ -511,7 +511,10 @@ Owns four view models, one per search phase:
   Index), Clipboard Items (text ones, `ClipboardSearchVM.scored`) and Emoji
   (`EmojiSearchVM.scored`) — `SourceSearch` ranks it off the main actor on
   `fuzzyScore`'s scale, files up to 50, Clipboard and Emoji capped at three each,
-  no priority between Sources. It **stays on screen while the user types**: word
+  no priority between Sources. The one thing ahead of the rest is the settled
+  pass's Kind block, which scores below zero (`FileHit.kindScore`): with a Kind
+  Word ("video", "billede") the files of that Kind come before every Clipboard
+  Item and Emoji, which mix with the rest below it. It **stays on screen while the user types**: word
   matches are asked on every keystroke and replace it in place as they land, and
   once typing pauses (a 120ms Combine debounce) the settled pass asks
   `FileIndex.settledSearcher` once — the word search with the last word a prefix in
@@ -1064,9 +1067,13 @@ content-only hit scores `FileHit.contentScore` (120) plus its rank, below every 
 and above `folderOnlyScore` (200) — DigUp's 3:1 name weight, by band, since two FTS tables
 share no bm25. A file that matched by name keeps no Passage. **Not every word is required**
 (`requiredWords`): a folder word ("folder", "mappe": `MeaningRanking.folderWords`) never is,
-and a function word ("for", "the", "af"; not a kind word, not "file"/"fil") is not unless it
-is the last; with nothing else left, all are. A folder word only wins a folder a tie, never a
-filter or a list of folders. **A name the whole Query misses is scored on what its folders leave**:
+and a function word ("for", "the", "af", "me", "mig"; not a Kind Word, not "file"/"fil") is
+not unless it is the last on the keystroke, where it may be the start of a longer word ("for"
+of "format"); with nothing else left, all are. In the settled pass a function word last is a
+finished word, never a prefix, in names and Passages alike, so it is dropped like the others
+("image of me" requires "image"; "me" no longer finds "meeting"); alone, it is matched whole.
+On the keystroke a folder word wins a folder a tie and nothing more; the settled pass puts the
+folders first (see The settled search). **A name the whole Query misses is scored on what its folders leave**:
 "code data intensive systems" finds `Data Intensive Systems/code` at `fuzzyScore("code")` +
 `nameAfterFoldersPenalty` (2), a name match, where it had sunk to 200 below 14 files that say
 the words. The `FileHit.Passage` excerpt is
@@ -1274,30 +1281,50 @@ on its evals):
   deviation of all of them (floor 0.02); a modality with under 20 rows takes the overall
   average; later steps' rows are scored but left out of the averages and the deviation;
 - a file is a candidate if its best segment reaches z ≥ 2.0, or it has ≥ 50% of the Query's
-  words (stopwords and kind words out, English and Danish) in its Passages, name or folders (the
-  folders only beside a word of its own, so a folder-only match stays at 200) — the word
-  search's own content hits have all of them; an any-word query brings 100 more;
-- score `max(z, 0) + 2 × coverage^1.5`, +1 when the Query names the file's kind ("video",
-  "screenshot", "skærmbillede", "billede", "lyd", "pdf", "dokument"…); a **lookup** (every
-  word an ID or number: `K7Q2LM`, `#1234`) weighs meaning 0.5 and words 4.
-- The kind word is a soft boost, not a filter, except in a **kind-only Query** ("audio file",
-  "billeder", "music": every word a kind word or a stopword). That means nothing beyond the
-  kind, and per-modality centring gives "audio-ness" nothing, so no file of the kind came in
-  (none of 91 recordings for "audio file"). It brings in that kind's newest `limit` files in
-  the enabled Sources, packaged documents included, ahead of the other candidates, newest
-  first; a file with the Query's words still comes in by coverage, after them.
-- **Where it lands** on `fuzzyScore`'s scale: a name match keeps its 0–~110 and no Passage,
-  so it stays above every file found by meaning or kind; every other candidate — words,
-  meaning, both or a kind-only Query's kind — is ordered (that kind first, then the fused
-  score) into `contentScore + rank` (120…199), the band content matches had; a folder-only
-  match that is no candidate keeps 200.
+  words (stopwords, Kind Words and folder words out, English and Danish) in its Passages, name
+  or folders (the folders only beside a word of its own, so a folder-only match stays at 200) —
+  the word search's own content hits have all of them; an any-word query brings 100 more;
+- score `max(z, 0) + 2 × coverage^1.5`, +1 when a Kind Word or a Kind Hint names the file's
+  Kind (`liftedKinds`); a **lookup** (every word an ID or number: `K7Q2LM`, `#1234`) weighs
+  meaning 0.5 and words 4.
+- **A Kind Word puts its Kind first** (`GLOSSARY.md`; `MeaningRanking.kindWords`), in any
+  Query, English and Danish: video(s)/videoen/videoer; photo, picture, image, billede, foto
+  and their forms ask for photos **and** screenshots, screenshot/skærmbillede for screenshots
+  alone; pdf(s); recording, optagelse, audio, lyd, lydfil, podcast and their forms. Two of
+  them share one block. The block is the Kind's name matches, then the rest of the Kind: with
+  a topic ("video of me speaking", "billede af kontrakten") every candidate of the Kind by the
+  fused score, filled up to `kindGuesses` (10) with the Kind's best z below the gate — a Kind
+  Word is a request even when nothing stands out, and a text with every word of the Query
+  outscored the best video (row 16 for "video of me speaking"); the rest of the Kind is no
+  candidate. A **kind-only Query** (a Kind Word and nothing but "file"/"fil" and determiners:
+  "videos", "my videos", "video file", "billeder"; `isKindOnly`) means nothing beyond the
+  Kind, and per-modality centring gives "audio-ness" nothing, so none of 91 recordings came in
+  for "audio file": its rest is the Kind's newest in the enabled Sources, packaged documents
+  included, the block at most `kindOnlyFiles` (25). "image of me" and "video af mig der
+  taler" have a topic.
+- **A folder word with something else to look for** ("code folder for data intensive
+  systems", "video folder"; `asksForFolders`) makes the folders whose name or path match the
+  rest the block, by their words alone (folders have no vectors), and no Kind Word beside it
+  puts its Kind first. "folder" alone does nothing.
+- **A Kind Hint** (document, note, notat, paper, clip, klip, movie, film, song, sang, music,
+  musik, sound, voice, stemme and their forms; `kindHints`) is a word of the Query and only
+  lifts its Kind by the +1: "release notes" is not a request for notes.
+- **Where it lands** on `fuzzyScore`'s scale: the Kind block at `kindScore + rank` (−100 and
+  up, below zero), above every name match of another Kind and every Clipboard Item and Emoji;
+  a name match keeps its 0–~110 and no Passage; every other candidate — words, meaning or both
+  — is ordered by the fused score into `contentScore + rank` (120…199), the band content
+  matches had; a folder-only match that is no candidate keeps 200. So the list below the apps
+  is the asked Kind's name matches, the rest of the Kind, name matches of other Kinds, then
+  everything else.
 - A hit found by meaning carries `FileHit.meaning` (text, image, audio) and points at its
   best segment: the start of its text, its page, or its span in seconds (`Passage.start`,
   `end`; `subtitle` "at 14:02"); a picture found whole has no Passage, or borrows its OCR
   words. **Where the Query's words matched it keeps that Passage**, marks and all, so the
   row, the Card and the preview can mark them: pointing it at meaning's segment instead
-  left nearly every File Result unmarked once typing paused. Without meaning on, or before any vector, the settled search is the word search with
-  the prefix.
+  left nearly every File Result unmarked once typing paused. Without meaning on, or before any
+  vector, the settled search is the word search with the prefix and the Kind block where it
+  can be had without vectors: the Kind's name matches, files of it the words found, a kind-only
+  Query's newest and the folders; there are no best guesses.
 - It is cancellable: a cancelled Task, or a newer call started while it waited for the
   vector, returns `[]`.
 
@@ -1435,7 +1462,7 @@ User types query → Enter
 | `SQLite.swift` | A thin SQLite connection and statement wrapper |
 | `SourcesPage.swift` | The Sources page's rows (switch, counts, reading state), its add/remove/switch controls, and the Skip switches and patterns |
 | `SourcesSettingsView.swift` | The Sources tab in Settings, drawn from `SourcesPage` |
-| `MeaningSearch.swift` | `isSupported`, and `MeaningRanking`: the per-modality scale, the gates, the fusion, the Query's words (from DigUp) |
+| `MeaningSearch.swift` | `isSupported`, and `MeaningRanking`: the per-modality scale, the gates, the fusion (from DigUp), the Query's words, Kind Words, Kind Hints and folder words |
 | `MeaningSettings.swift` | Search by meaning's switch (on by default): download, then the pass; its status line |
 | `MeaningJobs.swift` | `MeaningPass` (steps, fingerprint), job and result values, and the writer's side: jobs, storing vectors, the fingerprint |
 | `MeaningReader.swift` | One step of a file to vectors: text, pictures, PDF pages as pictures, windows of sound, video frames; the cache first (`JobVectors`); a batch's texts together |

@@ -592,8 +592,11 @@ nonisolated struct FileHit: Hashable, Sendable {
     /// (`FileIndexReader.nameAfterFoldersPenalty`). A match on what the file
     /// says is `contentScore` and up, below every match on the name; a match
     /// on the folder alone, where neither the name nor the words have
-    /// anything to show for it, is `folderOnlyScore`.
-    let score: Int
+    /// anything to show for it, is `folderOnlyScore`. In the settled pass the
+    /// Kind a Kind Word asks for is `kindScore` and up, below zero, so it
+    /// sits above every other name match and every Clipboard Item and Emoji
+    /// (`FileIndexReader.fusedSearch`).
+    var score: Int
     /// Set when the file is here for what it says. A file whose name matched
     /// has none, whatever its words do; nor does a picture found by meaning,
     /// which matched whole.
@@ -604,6 +607,9 @@ nonisolated struct FileHit: Hashable, Sendable {
 
     static let contentScore = 120
     static let folderOnlyScore = 200
+    /// Where the Kind block starts: −100 up to −51 for the fifty a list
+    /// holds.
+    static let kindScore = -100
 
     var contentType: UTType {
         switch kind {
@@ -671,7 +677,8 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
         case wholeWords
         /// Once typing pauses: the last word as a prefix too, from
         /// `contentPrefixMinimum` letters, unless a space after it says it is
-        /// finished.
+        /// finished. A function word last ("image of me") is finished, in
+        /// names too, and not required (`requiredWords`).
         case lastWordPrefix
     }
 
@@ -683,17 +690,20 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
     ///
     /// A name is scored against the whole Query, and failing that against
     /// what its folders leave of it, so "code folder for data intensive
-    /// systems" finds `Data Intensive Systems/code` as a name match. A folder
-    /// word in the Query wins a folder a tie, and nothing more.
+    /// systems" finds `Data Intensive Systems/code` as a name match. Here a
+    /// folder word in the Query wins a folder a tie, and nothing more; the
+    /// settled pass puts the folders first (`fusedSearch`).
     func search(_ query: String, limit: Int, sources: [String], passages: PassageMatch = .wholeWords) -> [FileHit] {
         lock.withLock { searchLocked(query, limit: limit, sources: sources, passages: passages) }
     }
 
-    /// `search`, called with the lock held.
-    private func searchLocked(_ query: String, limit: Int, sources: [String], passages: PassageMatch) -> [FileHit] {
+    /// `search`, called with the lock held. `foldersFirst`: every folder that
+    /// matched ranks ahead of every file, so the limit keeps them.
+    private func searchLocked(_ query: String, limit: Int, sources: [String], passages: PassageMatch,
+                              foldersFirst: Bool = false) -> [FileHit] {
         let allWords = Self.words(query)
         guard !allWords.isEmpty, !sources.isEmpty, limit > 0 else { return [] }
-        let (words, endsOnLastWord) = Self.requiredWords(allWords)
+        let (words, endsOnLastWord) = Self.requiredWords(allWords, isSettled: passages == .lastWordPrefix)
         let sourceList = Self.jsonList(sources)
         let match = Self.matchExpression(words, prefixMinimum: endsOnLastWord ? 1 : .max)
         let isLastWordOpen = endsOnLastWord && passages == .lastWordPrefix && query.last?.isWhitespace != true
@@ -714,7 +724,9 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
                 }
             }
             collect(statements.ranked, match)
-            if allWords.count == 1 { collect(statements.unranked, Self.namePrefixExpression(words[0])) }
+            if allWords.count == 1 && endsOnLastWord {
+                collect(statements.unranked, Self.namePrefixExpression(words[0]))
+            }
 
             // Scored by name; a `URL` each only for the survivors, since one
             // for four hundred candidates was a third of a search. A folder's
@@ -746,10 +758,15 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
                 )
             }
 
-            // "…folder…" settles a tie for a folder: a nudge, never a filter.
+            // "…folder…" settles a tie for a folder: a nudge, never a filter,
+            // unless the folders are to come first.
             func nudge(_ candidate: Candidate) -> Int { asksForFolder && candidate.kind == .folder ? 0 : 1 }
+            func ahead(_ candidate: Candidate) -> Int { foldersFirst && candidate.kind == .folder ? 0 : 1 }
             return candidates
-                .sorted { ($0.value.score, nudge($0.value), $0.value.order) < ($1.value.score, nudge($1.value), $1.value.order) }
+                .sorted {
+                    (ahead($0.value), $0.value.score, nudge($0.value), $0.value.order)
+                        < (ahead($1.value), $1.value.score, nudge($1.value), $1.value.order)
+                }
                 .prefix(limit)
                 .map { path, candidate in
                     var hit = hit(path: path, kind: candidate.kind, score: candidate.score)
@@ -792,34 +809,48 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
     /// The settled pass's search: the word search with the last word a
     /// prefix, then fused with `meaning` as DigUp fuses them
     /// (`MeaningRanking`) — files that stand out by meaning join, files with
-    /// most of the Query's words rise, and the Query's kind word lifts its
-    /// kind. A Query of nothing but kind words and stopwords ("audio file",
-    /// "music") lists the newest `limit` files of that kind first, newest
-    /// first.
+    /// most of the Query's words rise, and a Kind Word or a Kind Hint lifts
+    /// its Kind — and the Kind a Kind Word asks for put first
+    /// (`MeaningRanking`, 4). With `meaning` nil (search by meaning off, or no
+    /// vectors yet) it is the word search, with the Kind first where it can
+    /// be without vectors: the Kind's best guesses need them.
     ///
     /// **The scale it lands on** is the word search's, lower is better, so
-    /// the list below the apps ranks it against Clipboard Items and Emoji as
-    /// before:
+    /// the list below the apps ranks it against Clipboard Items and Emoji
+    /// (`SourceSearch`):
     ///
+    /// - **The Kind block**, when a Kind Word asks for a Kind or a folder word
+    ///   for folders: the Kind's name matches in their order, then the rest of
+    ///   it — with a topic every candidate of the Kind by the fused score,
+    ///   filled up to `MeaningRanking.kindGuesses` with its best z below the
+    ///   gate; for a kind-only Query its newest, the whole block at most
+    ///   `MeaningRanking.kindOnlyFiles`; for folders, every folder the words
+    ///   found by name or path. At `kindScore + rank` (−100 and up), below
+    ///   zero, so above every other name match and every Clipboard Item and
+    ///   Emoji.
     /// - A file whose **name** matched keeps its `fuzzyScore` (0 to ~110) and
     ///   no Passage, as does one whose name answers what its folders leave of
     ///   the Query (`search`): a name match is still above every file found
     ///   by what it says or means.
     /// - Every other candidate — by its words (`contentScore` before), by
-    ///   meaning, by both, or by its kind alone — is ordered (a kind-only
-    ///   Query's kind first, then by the fused score) and placed at
+    ///   meaning or by both — is ordered by the fused score and placed at
     ///   `contentScore + rank` (120…199): the band content matches had, now
     ///   ordered by meaning and words together. Its words are counted in its
     ///   Passages, its name and its folders, the folders only beside at least
     ///   one word of its own.
     /// - A file found by its **folder** alone and by nothing else keeps
     ///   `folderOnlyScore` (200).
-    func fusedSearch(_ query: String, limit: Int, sources: [String], meaning: MeaningScores) -> [FileHit] {
+    func fusedSearch(_ query: String, limit: Int, sources: [String], meaning: MeaningScores?) -> [FileHit] {
         lock.withLock {
-            let wordHits = searchLocked(query, limit: limit, sources: sources, passages: .lastWordPrefix)
-            guard let db = connection(), !sources.isEmpty, limit > 0 else { return wordHits }
+            let asked = MeaningRanking.askedKinds(query)
+            let asksForFolders = MeaningRanking.asksForFolders(query)
+            let wordHits = searchLocked(query, limit: limit, sources: sources, passages: .lastWordPrefix,
+                                        foldersFirst: asksForFolders)
+            // Nothing to fuse and no Kind to put first: the word search as it is.
+            guard let db = connection(), !sources.isEmpty, limit > 0,
+                  meaning != nil || !asked.isEmpty || asksForFolders else { return wordHits }
             let terms = MeaningRanking.terms(query)
-            let hinted = MeaningRanking.kindHints(query)
+            let lifted = MeaningRanking.liftedKinds(query)
             let isKindOnly = MeaningRanking.isKindOnly(query)
             let isLastOpen = query.last?.isWhitespace != true
             let sourceList = Self.jsonList(sources)
@@ -827,58 +858,68 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
             // Every file in the running, by id: the word search's, the files
             // with any of the Query's words, and the files meaning found.
             var entries: [Int64: Fused] = [:]
+            var wordFiles: [(id: Int64, hit: FileHit)] = []
             for (order, hit) in wordHits.enumerated() {
                 var id: Int64?
                 try? db.query("SELECT id FROM files WHERE path = ?", [.text(hit.url.path)]) { id = $0.int(0) }
                 guard let id else { continue }
+                wordFiles.append((id, hit))
                 let isNameMatch = hit.passage == nil && hit.score < FileHit.folderOnlyScore
                 entries[id] = Fused(order: order, hit: hit, isNameMatch: isNameMatch,
                                     coverage: hit.passage != nil ? 1 : nil)
             }
-            if terms.count >= 2 {
-                let any = terms.enumerated().map { index, term in
-                    "\"\(term)\"" + (index == terms.count - 1 && isLastOpen && term.count >= Self.contentPrefixMinimum ? "*" : "")
-                }.joined(separator: " OR ")
-                try? db.query("""
-                    SELECT s.file, MIN(matched.rank) AS best FROM (
-                        SELECT passages.rowid AS id, bm25(passages) AS rank
-                        FROM passages JOIN segments s ON s.id = passages.rowid JOIN files f ON f.id = s.file
-                        WHERE passages MATCH ?1 AND f.source IN (SELECT value FROM json_each(?2))
-                        LIMIT \(Self.rankingCap)
-                    ) matched JOIN segments s ON s.id = matched.id
-                    GROUP BY s.file ORDER BY best LIMIT \(Self.anyWordFiles)
-                    """, [.text(any), .text(sourceList)]) { row in
-                    let id = row.int(0)
-                    if entries[id] == nil { entries[id] = Fused(order: Int.max) }
+            if let meaning {
+                if terms.count >= 2 {
+                    let any = terms.enumerated().map { index, term in
+                        "\"\(term)\"" + (index == terms.count - 1 && isLastOpen && term.count >= Self.contentPrefixMinimum ? "*" : "")
+                    }.joined(separator: " OR ")
+                    try? db.query("""
+                        SELECT s.file, MIN(matched.rank) AS best FROM (
+                            SELECT passages.rowid AS id, bm25(passages) AS rank
+                            FROM passages JOIN segments s ON s.id = passages.rowid JOIN files f ON f.id = s.file
+                            WHERE passages MATCH ?1 AND f.source IN (SELECT value FROM json_each(?2))
+                            LIMIT \(Self.rankingCap)
+                        ) matched JOIN segments s ON s.id = matched.id
+                        GROUP BY s.file ORDER BY best LIMIT \(Self.anyWordFiles)
+                        """, [.text(any), .text(sourceList)]) { row in
+                        let id = row.int(0)
+                        if entries[id] == nil { entries[id] = Fused(order: Int.max) }
+                    }
+                }
+                for match in meaning.top where entries[match.file] == nil {
+                    entries[match.file] = Fused(order: Int.max)
                 }
             }
-            for match in meaning.top where entries[match.file] == nil {
-                entries[match.file] = Fused(order: Int.max)
-            }
-            // A Query that is only a kind: that kind's newest files, which
-            // neither its words nor its meaning would bring.
+            // A Query that is only a Kind: its newest files, which neither
+            // its words nor its meaning would bring.
+            var newest: [Int64] = []
             if isKindOnly {
                 try? db.query("""
                     SELECT id FROM files WHERE content IN (SELECT value FROM json_each(?1))
                         AND source IN (SELECT value FROM json_each(?2))
                     ORDER BY mtime DESC LIMIT ?3
-                    """, [.text(Self.jsonList(hinted.map { String($0.rawValue) })), .text(sourceList),
-                          .int(Int64(limit))]) { row in
+                    """, [.text(Self.jsonList(asked.map { String($0.rawValue) })), .text(sourceList),
+                          .int(Int64(MeaningRanking.kindOnlyFiles))]) { row in
                     let id = row.int(0)
+                    newest.append(id)
                     if entries[id] == nil { entries[id] = Fused(order: Int.max) }
                 }
             }
 
             // Where each one is and what it is; a file meaning found outside
             // the enabled Sources drops out here.
-            var info: [Int64: (path: String, kind: FileIndexRow.Kind, content: FileContent?, mtime: Double)] = [:]
-            try? db.query("""
-                SELECT id, path, kind, content, mtime FROM files
-                WHERE id IN (SELECT value FROM json_each(?1)) AND source IN (SELECT value FROM json_each(?2))
-                """, [.text(Self.jsonList(entries.keys.map(String.init))), .text(sourceList)]) { row in
-                info[row.int(0)] = (row.text(1) ?? "", FileIndexRow.Kind(rawValue: row.text(2) ?? "") ?? .file,
-                                    row.isNull(3) ? nil : FileContent(rawValue: Int(row.int(3))), row.double(4))
+            var info: [Int64: FileInfo] = [:]
+            func lookUp(_ ids: [Int64]) {
+                try? db.query("""
+                    SELECT id, path, kind, content, mtime FROM files
+                    WHERE id IN (SELECT value FROM json_each(?1)) AND source IN (SELECT value FROM json_each(?2))
+                    """, [.text(Self.jsonList(ids.map(String.init))), .text(sourceList)]) { row in
+                    info[row.int(0)] = FileInfo(path: row.text(1) ?? "",
+                                                kind: FileIndexRow.Kind(rawValue: row.text(2) ?? "") ?? .file,
+                                                content: row.isNull(3) ? nil : FileContent(rawValue: Int(row.int(3))))
+                }
             }
+            lookUp(Array(entries.keys))
             entries = entries.filter { info[$0.key] != nil }
 
             // How many of the Query's words each has, in its Passages, its
@@ -919,54 +960,116 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
                 }
             }
 
-            let isLookup = MeaningRanking.isLookup(terms)
-            var fused: [(id: Int64, score: Double, order: Int, isAskedForAlone: Bool)] = []
-            for (id, entry) in entries where !entry.isNameMatch {
-                let z = meaning.best(id)?.z
-                let coverage = entry.coverage ?? 0
-                let isAskedFor = info[id]?.content.map(hinted.contains) ?? false
-                let isAskedForAlone = isAskedFor && isKindOnly
-                guard MeaningRanking.isCandidate(z: z, coverage: coverage, isAskedForAlone: isAskedForAlone) else {
-                    continue
-                }
-                fused.append((id, MeaningRanking.score(z: z, coverage: coverage, isKindAskedFor: isAskedFor,
-                                                       isLookup: isLookup), entry.order, isAskedForAlone))
+            // The Kind block opens with the word search's name matches of the
+            // Kind, in their order — every folder it found, when the Query
+            // asks for folders — and, for a kind-only Query, goes on with the
+            // Kind's newest.
+            func isAsked(_ id: Int64) -> Bool {
+                guard let file = info[id] else { return false }
+                return asksForFolders ? file.kind == .folder : file.content.map(asked.contains) ?? false
             }
-            // A kind-only Query's kind first, newest first; the rest by score.
-            fused.sort { a, b in
-                if a.isAskedForAlone != b.isAskedForAlone { return a.isAskedForAlone }
-                if a.isAskedForAlone, let aTime = info[a.id]?.mtime, let bTime = info[b.id]?.mtime, aTime != bTime {
-                    return aTime > bTime
-                }
-                return (a.score, -a.order, -a.id) > (b.score, -b.order, -b.id)
+            var opening: [Int64] = wordFiles.map(\.id).filter { id in
+                isAsked(id) && (asksForFolders || entries[id]?.isNameMatch == true)
             }
+            if isKindOnly {
+                opening += newest.filter { !opening.contains($0) && info[$0] != nil }
+                opening = Array(opening.prefix(MeaningRanking.kindOnlyFiles))
+            }
+            let opened = Set(opening)
 
-            var hits = wordHits.filter { hit in
-                // Name matches stay; a folder-only match stays unless it is
-                // fused below.
-                hit.passage == nil && !fused.contains { entries[$0.id]?.hit?.url == hit.url }
+            // The rest by the fused score; the asked Kind's candidates go in
+            // the block when the Query has a topic.
+            let isLookup = MeaningRanking.isLookup(terms)
+            let hasTopic = !asked.isEmpty && !isKindOnly
+            var ranked: [Ranked] = []
+            var kindRanked: [Ranked] = []
+            func rank(_ id: Int64, coverage: Double) -> Ranked {
+                Ranked(id: id, score: MeaningRanking.score(z: meaning?.best(id)?.z, coverage: coverage,
+                                                           isKindLifted: info[id]?.content.map(lifted.contains) ?? false,
+                                                           isLookup: isLookup),
+                       order: entries[id]?.order ?? Int.max)
             }
-            for (rank, candidate) in fused.prefix(limit).enumerated() {
-                guard let file = info[candidate.id], let entry = entries[candidate.id] else { continue }
-                var hit = self.hit(path: file.path, kind: file.kind,
-                                   score: FileHit.contentScore + min(rank, FileHit.folderOnlyScore - FileHit.contentScore - 1))
-                hit.passage = entry.hit?.passage
-                // Pointed at where the words matched, so the row, the Card and
-                // the preview can mark them; else at the best segment by
-                // meaning where it stands out. A picture found whole borrows
-                // the words of its OCR, which describe the same picture.
-                if let match = meaning.best(candidate.id), match.z >= MeaningRanking.zGate,
+            for (id, entry) in entries where !entry.isNameMatch && !opened.contains(id) {
+                let coverage = entry.coverage ?? 0
+                guard MeaningRanking.isCandidate(z: meaning?.best(id)?.z, coverage: coverage) else { continue }
+                if hasTopic && isAsked(id) {
+                    kindRanked.append(rank(id, coverage: coverage))
+                } else {
+                    ranked.append(rank(id, coverage: coverage))
+                }
+            }
+            // A Kind Word is a request even when nothing of the Kind stands
+            // out: its best guesses, the files of the Kind with the best z
+            // below the gate, fill the block up to `kindGuesses`.
+            let guesses = MeaningRanking.kindGuesses - opening.count - kindRanked.count
+            if hasTopic, guesses > 0, let meaning {
+                let taken = opened.union(kindRanked.map(\.id))
+                var best: [(id: Int64, z: Double)] = []
+                try? db.query("""
+                    SELECT id FROM files WHERE content IN (SELECT value FROM json_each(?1))
+                        AND source IN (SELECT value FROM json_each(?2)) AND vec_state != 'pending'
+                    """, [.text(Self.jsonList(asked.map { String($0.rawValue) })), .text(sourceList)]) { row in
+                    let id = row.int(0)
+                    guard !taken.contains(id), let match = meaning.best(id), match.z > -.infinity else { return }
+                    best.append((id, match.z))
+                }
+                let chosen = best.sorted { ($0.z, -$0.id) > ($1.z, -$1.id) }.prefix(guesses).map(\.id)
+                lookUp(chosen.filter { info[$0] == nil })
+                for id in chosen where info[id] != nil {
+                    kindRanked.append(rank(id, coverage: entries[id]?.coverage ?? 0))
+                }
+            }
+            func byScore(_ a: Ranked, _ b: Ranked) -> Bool { (a.score, -a.order, -a.id) > (b.score, -b.order, -b.id) }
+            ranked.sort(by: byScore)
+            kindRanked.sort(by: byScore)
+
+            // A Ranked file as a File Result: pointed at where the words
+            // matched, so the row, the Card and the preview can mark them;
+            // else at the best segment by meaning where it stands out. A
+            // picture found whole borrows the words of its OCR, which
+            // describe the same picture.
+            func fusedHit(_ id: Int64, score: Int) -> FileHit? {
+                guard let file = info[id] else { return nil }
+                var hit = self.hit(path: file.path, kind: file.kind, score: score)
+                hit.passage = entries[id]?.hit?.passage
+                if let match = meaning?.best(id), match.z >= MeaningRanking.zGate,
                    let modality = segmentModality(match.segment, db: db) {
                     hit.meaning = modality
                     if hit.passage?.matches.isEmpty ?? true {
                         hit.passage = meaningPassage(match.segment, db: db) ?? hit.passage
                     }
                 }
-                hits.append(hit)
+                return hit
             }
-            return Array(hits.enumerated()
+
+            var block: [FileHit] = []
+            for id in opening {
+                let score = FileHit.kindScore + min(block.count, -FileHit.kindScore - 1)
+                if var hit = entries[id]?.hit, entries[id]?.isNameMatch == true || asksForFolders {
+                    hit.score = score
+                    block.append(hit)
+                } else if let hit = fusedHit(id, score: score) {
+                    block.append(hit)
+                }
+            }
+            for candidate in kindRanked {
+                if let hit = fusedHit(candidate.id, score: FileHit.kindScore + min(block.count, -FileHit.kindScore - 1)) {
+                    block.append(hit)
+                }
+            }
+            // Name matches of the other Kinds keep their score, and a
+            // folder-only match stays unless it is ranked or in the block.
+            let placed = opened.union(kindRanked.map(\.id)).union(ranked.map(\.id))
+            var rest = wordFiles.filter { $0.hit.passage == nil && !placed.contains($0.id) }.map(\.hit)
+            for (rank, candidate) in ranked.prefix(limit).enumerated() {
+                if let hit = fusedHit(candidate.id,
+                                      score: FileHit.contentScore + min(rank, FileHit.folderOnlyScore - FileHit.contentScore - 1)) {
+                    rest.append(hit)
+                }
+            }
+            return Array((block + rest.enumerated()
                 .sorted { ($0.element.score, $0.offset) < ($1.element.score, $1.offset) }
-                .map(\.element)
+                .map(\.element))
                 .prefix(limit))
         }
     }
@@ -980,6 +1083,20 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
         var isNameMatch = false
         /// The share of the Query's words in the file; nil until measured.
         var coverage: Double?
+    }
+
+    private struct FileInfo {
+        let path: String
+        let kind: FileIndexRow.Kind
+        let content: FileContent?
+    }
+
+    /// A candidate by its fused score, higher is better; `order` is the
+    /// word search's, which breaks a tie.
+    private struct Ranked {
+        let id: Int64
+        let score: Double
+        let order: Int
     }
 
     /// Nil when the segment is gone: its file changed since the vectors were
@@ -1195,18 +1312,23 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
 
     /// The words of `words` a file must have: not a folder word ("folder",
     /// "mappe"), which asks for a kind of row rather than naming one, and not
-    /// a function word ("for", "the", "af"), which a name or a path seldom
-    /// has. The whole Query still scores the name, so a name with them ranks
-    /// as before. A function word that is the last is kept: it may be the
-    /// start of a longer word still being typed ("for" of "format"). All of
-    /// `words` when that would leave none. `endsOnLastWord` says whether the
-    /// last kept is the Query's last, the one that may be a prefix.
-    static func requiredWords(_ words: [String]) -> (words: [String], endsOnLastWord: Bool) {
+    /// a function word ("for", "the", "af", "me"), which a name or a path
+    /// seldom has. The whole Query still scores the name, so a name with them
+    /// ranks as before. On the keystroke a function word that is the last is
+    /// kept: it may be the start of a longer word still being typed ("for" of
+    /// "format"). Once typing pauses (`isSettled`) it is a finished word and
+    /// never a prefix — "me" does not find "meeting" — so it is dropped like
+    /// the others. All of `words` when that would leave none, a function word
+    /// last then whole. `endsOnLastWord` says whether the last kept is the
+    /// Query's last and may be a prefix.
+    static func requiredWords(_ words: [String], isSettled: Bool = false) -> (words: [String], endsOnLastWord: Bool) {
         let kept = words.enumerated().filter { index, word in
             !MeaningRanking.folderWords.contains(word)
-                && !(index < words.count - 1 && MeaningRanking.functionWords.contains(word))
+                && !((index < words.count - 1 || isSettled) && MeaningRanking.functionWords.contains(word))
         }
-        guard let last = kept.last else { return (words, true) }
+        guard let last = kept.last else {
+            return (words, !(isSettled && words.last.map(MeaningRanking.functionWords.contains) == true))
+        }
         return (kept.map(\.element), last.offset == words.count - 1)
     }
 

@@ -75,36 +75,42 @@ struct MeaningRankingTests {
         #expect(!MeaningRanking.isCandidate(z: nil, coverage: 0))
     }
 
-    /// A Query of nothing but kind words takes every file of its kind
-    /// brought in, whatever its meaning or words.
-    @Test func aFileOfTheKindAKindOnlyQueryAsksForIsACandidate() {
-        #expect(MeaningRanking.isCandidate(z: nil, coverage: 0, isAskedForAlone: true))
-        #expect(MeaningRanking.isCandidate(z: -1, coverage: 0, isAskedForAlone: true))
-        #expect(!MeaningRanking.isCandidate(z: 1.99, coverage: 0.49, isAskedForAlone: false))
+    /// A Kind Word and the file words and determiners beside it ask for
+    /// the Kind alone; any other word is a topic.
+    @Test func aQueryOfOnlyKindWordsHasNoTermsButAsksForTheKind() {
+        for query in ["audio file", "lydfil", "lydfiler", "optagelser", "screenshots", "billeder", "videoer", "podcasts"] {
+            #expect(MeaningRanking.terms(query).isEmpty, "\(query)")
+            #expect(!MeaningRanking.askedKinds(query).isEmpty, "\(query)")
+        }
+        #expect(MeaningRanking.askedKinds("audio file") == [.audio])
+        for query in ["video", "videos", "my videos", "video file", "billeder", "alle billeder", "a pdf", "screenshot pdf"] {
+            #expect(MeaningRanking.isKindOnly(query), "\(query): no topic")
+        }
+        for query in ["image of me", "video af mig der taler", "photo with dog", "jazz recording", "budget", "the file"] {
+            #expect(!MeaningRanking.isKindOnly(query), "\(query)")
+        }
+        #expect(MeaningRanking.terms("jazz song") == ["jazz", "song"], "\"song\" is a Kind Hint and a word")
     }
 
-    @Test func aQueryOfOnlyKindWordsHasNoTermsButAsksForTheKind() {
-        for query in ["audio file", "lydfil", "lydfiler", "sounds", "optagelser", "screenshots", "billeder", "videoer"] {
-            #expect(MeaningRanking.terms(query).isEmpty, "\(query)")
-            #expect(!MeaningRanking.kindHints(query).isEmpty, "\(query)")
+    /// A Kind Hint lifts its Kind and asks for nothing first.
+    @Test func aKindHintIsAWordThatOnlyLiftsItsKind() {
+        for query in ["release notes", "music", "my movies", "film om havet", "documents", "voice memo"] {
+            #expect(MeaningRanking.askedKinds(query).isEmpty, "\(query)")
+            #expect(!MeaningRanking.isKindOnly(query), "\(query)")
+            #expect(!MeaningRanking.liftedKinds(query).isEmpty, "\(query)")
         }
-        #expect(MeaningRanking.kindHints("audio file") == [.audio])
-        for query in ["audio file", "lydfiler", "music", "songs", "podcasts", "my movies"] {
-            #expect(MeaningRanking.isKindOnly(query), "\(query): a kind word is no topic")
-        }
-        #expect(!MeaningRanking.isKindOnly("jazz music"), "\"jazz\" is a topic")
-        #expect(!MeaningRanking.isKindOnly("budget"))
-        #expect(!MeaningRanking.isKindOnly("the file"), "stopwords alone name no kind")
-        #expect(MeaningRanking.terms("jazz song") == ["jazz", "song"], "\"song\" asks for a kind and is a word")
+        #expect(MeaningRanking.terms("release notes") == ["release", "notes"])
+        #expect(MeaningRanking.liftedKinds("release notes") == [.document, .text])
+        #expect(MeaningRanking.liftedKinds("video clip") == [.video])
     }
 
     @Test func theScoreWeighsMeaningWordsAndTheKindAsked() {
-        #expect(MeaningRanking.score(z: 3, coverage: 0, isKindAskedFor: false, isLookup: false) == 3)
-        #expect(MeaningRanking.score(z: -1, coverage: 1, isKindAskedFor: false, isLookup: false) == 2,
+        #expect(MeaningRanking.score(z: 3, coverage: 0, isKindLifted: false, isLookup: false) == 3)
+        #expect(MeaningRanking.score(z: -1, coverage: 1, isKindLifted: false, isLookup: false) == 2,
                 "a negative z adds nothing; all the words add the words' weight")
-        #expect(abs(MeaningRanking.score(z: 0, coverage: 0.5, isKindAskedFor: false, isLookup: false)
+        #expect(abs(MeaningRanking.score(z: 0, coverage: 0.5, isKindLifted: false, isLookup: false)
                     - 2 * pow(0.5, 1.5)) < 1e-12)
-        #expect(MeaningRanking.score(z: 3, coverage: 0, isKindAskedFor: true, isLookup: false) == 4)
+        #expect(MeaningRanking.score(z: 3, coverage: 0, isKindLifted: true, isLookup: false) == 4)
     }
 
     @Test func aLookupWeighsWordsDoubleAndMeaningHalf() {
@@ -113,14 +119,14 @@ struct MeaningRankingTests {
         #expect(MeaningRanking.isLookup(MeaningRanking.terms("order 4815162342")) == false, "\"order\" is a word")
         #expect(!MeaningRanking.isLookup(MeaningRanking.terms("123")), "three digits are too few")
         #expect(!MeaningRanking.isLookup(MeaningRanking.terms("smoothie opskrift")))
-        #expect(MeaningRanking.score(z: 4, coverage: 1, isKindAskedFor: false, isLookup: true) == 2 + 4)
+        #expect(MeaningRanking.score(z: 4, coverage: 1, isKindLifted: false, isLookup: true) == 2 + 4)
         // A strong meaning match beats the lone word in an ordinary search,
         // and loses to it in a lookup.
         let meaning = (z: 3.5, coverage: 0.0), word = (z: 0.5, coverage: 1.0)
-        #expect(MeaningRanking.score(z: meaning.z, coverage: meaning.coverage, isKindAskedFor: false, isLookup: false)
-                > MeaningRanking.score(z: word.z, coverage: word.coverage, isKindAskedFor: false, isLookup: false))
-        #expect(MeaningRanking.score(z: meaning.z, coverage: meaning.coverage, isKindAskedFor: false, isLookup: true)
-                < MeaningRanking.score(z: word.z, coverage: word.coverage, isKindAskedFor: false, isLookup: true))
+        #expect(MeaningRanking.score(z: meaning.z, coverage: meaning.coverage, isKindLifted: false, isLookup: false)
+                > MeaningRanking.score(z: word.z, coverage: word.coverage, isKindLifted: false, isLookup: false))
+        #expect(MeaningRanking.score(z: meaning.z, coverage: meaning.coverage, isKindLifted: false, isLookup: true)
+                < MeaningRanking.score(z: word.z, coverage: word.coverage, isKindLifted: false, isLookup: true))
     }
 
     @Test func theQuerysWordsLeaveOutStopwordsAndKindWords() {
@@ -129,14 +135,20 @@ struct MeaningRankingTests {
         #expect(MeaningRanking.terms("a b cd cd") == ["cd"])
     }
 
-    /// "folder" asks for a kind of row, as "video" asks for a kind of file:
-    /// no word to look for, and no Query of its own kind.
-    @Test func folderWordsAreStopwordsButNoKind() {
+    /// "folder" asks for folders, as "video" asks for a Kind: no word to
+    /// look for, and folders first once there is something else to look for.
+    @Test func aFolderWordAsksForFoldersBesideSomethingToLookFor() {
         #expect(MeaningRanking.terms("code folder for data intensive systems") == ["code", "data", "intensive", "systems"])
         #expect(MeaningRanking.terms("mappen med regnskabet") == ["regnskabet"])
-        for query in ["folder", "folders", "mappe", "mapper", "mappen", "my folders"] {
-            #expect(MeaningRanking.kindHints(query).isEmpty, "\(query)")
-            #expect(!MeaningRanking.isKindOnly(query), "\(query): no listing of folders")
+        for query in ["code folder", "mappen med regnskabet", "video folder", "folder for uni"] {
+            #expect(MeaningRanking.asksForFolders(query), "\(query)")
+        }
+        #expect(MeaningRanking.askedKinds("video folder").isEmpty, "folders named like video, not videos")
+        #expect(!MeaningRanking.isKindOnly("video folder"))
+        for query in ["folder", "folders", "mappe", "mapper", "mappen", "my folders", "the folder", "folder for"] {
+            #expect(!MeaningRanking.asksForFolders(query), "\(query): nothing to look for")
+            #expect(MeaningRanking.askedKinds(query).isEmpty, "\(query)")
+            #expect(!MeaningRanking.isKindOnly(query), "\(query)")
         }
     }
 
@@ -144,23 +156,37 @@ struct MeaningRankingTests {
         for word in ["for", "the", "of", "af", "med", "til"] {
             #expect(MeaningRanking.functionWords.contains(word), "\(word)")
         }
-        for word in ["file", "files", "fil", "filer", "pdf", "photo", "video", "billeder", "folder", "mappe"] {
+        for word in ["file", "files", "fil", "filer", "pdf", "photo", "video", "billeder", "folder", "mappe", "notes"] {
             #expect(!MeaningRanking.functionWords.contains(word), "\(word)")
         }
         #expect(MeaningRanking.functionWords.isSubset(of: MeaningRanking.stopwords))
     }
 
+    /// Danish pronouns hold a sentence together as "me" does: "video af mig
+    /// der taler" looks for "taler", not for "mig".
+    @Test func danishPronounsAreFunctionWords() {
+        for word in ["mig", "dig", "sig", "ham", "hende", "os", "jer", "dem"] {
+            #expect(MeaningRanking.functionWords.contains(word), "\(word)")
+            #expect(MeaningRanking.kindWords[word] == nil && MeaningRanking.kindHints[word] == nil, "\(word)")
+            #expect(!MeaningRanking.folderWords.contains(word), "\(word)")
+        }
+        #expect(MeaningRanking.terms("video af mig der taler") == ["taler"])
+        #expect(FileIndexReader.requiredWords(FileIndexReader.words("video af mig der taler")).words == ["video", "taler"])
+    }
+
     @Test func kindWordsAskForTheirKind() {
-        #expect(MeaningRanking.kindHints("video from the beach") == [.video])
-        #expect(MeaningRanking.kindHints("skærmbillede af fejlen") == [.screenshot])
-        #expect(MeaningRanking.kindHints("billede af hunden") == [.image])
-        #expect(MeaningRanking.kindHints("lyd fra mødet") == [.audio])
-        #expect(MeaningRanking.kindHints("pdf med kontrakten") == [.pdf])
-        #expect(MeaningRanking.kindHints("noter om budget") == [.document, .text])
-        #expect(MeaningRanking.kindHints("music from the party") == [.audio])
-        #expect(MeaningRanking.kindHints("optagelser fra mødet") == [.audio])
-        #expect(MeaningRanking.kindHints("movies") == [.video])
-        #expect(MeaningRanking.kindHints("budget 2024").isEmpty)
+        #expect(MeaningRanking.askedKinds("video from the beach") == [.video])
+        #expect(MeaningRanking.askedKinds("skærmbillede af fejlen") == [.screenshot])
+        #expect(MeaningRanking.askedKinds("billede af hunden") == [.image, .screenshot], "a screenshot is a picture")
+        #expect(MeaningRanking.askedKinds("photo of me") == [.image, .screenshot])
+        #expect(MeaningRanking.askedKinds("lyd fra mødet") == [.audio])
+        #expect(MeaningRanking.askedKinds("pdf med kontrakten") == [.pdf])
+        #expect(MeaningRanking.askedKinds("optagelser fra mødet") == [.audio])
+        #expect(MeaningRanking.askedKinds("video or photo of me") == [.video, .image, .screenshot])
+        #expect(MeaningRanking.askedKinds("noter om budget").isEmpty, "a Kind Hint")
+        #expect(MeaningRanking.askedKinds("music from the party").isEmpty, "a Kind Hint")
+        #expect(MeaningRanking.askedKinds("budget 2024").isEmpty)
+        #expect(MeaningRanking.liftedKinds("video of the music") == [.video, .audio])
     }
 
     // MARK: - Recordings and videos

@@ -176,7 +176,8 @@ final class FileIndex {
     /// the last word a prefix in Passages too, and — with search by meaning
     /// on and vectors to score — meaning fused in (`FileIndexReader.fusedSearch`,
     /// which documents where it lands on `fuzzyScore`'s scale). Without
-    /// meaning it is the word search alone.
+    /// meaning it is the word search, with the Kind a Kind Word asks for
+    /// first.
     ///
     /// Cancellable: a cancelled Task, or a newer call that started while
     /// this one waited for its Query's vector, makes it return `[]` at the
@@ -196,12 +197,12 @@ final class FileIndex {
               vectors.snapshot() != nil,
               let vector = try? await queryEncoder.embedQuery(query, code: false)
         else {
-            return isStale() ? [] : settledReader.search(query, limit: limit, sources: folders, passages: .lastWordPrefix)
+            return isStale() ? [] : settledReader.fusedSearch(query, limit: limit, sources: folders, meaning: nil)
         }
         guard !isStale() else { return [] }
         // Taken after the wait, so vectors that landed meanwhile count.
         guard let snapshot = vectors.snapshot() else {
-            return settledReader.search(query, limit: limit, sources: folders, passages: .lastWordPrefix)
+            return settledReader.fusedSearch(query, limit: limit, sources: folders, meaning: nil)
         }
         let scores = MeaningScores(snapshot, query: vector)
         guard !isStale() else { return [] }
