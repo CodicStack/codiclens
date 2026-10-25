@@ -699,9 +699,11 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
 
     /// `search`, called with the lock held. `foldersFirst`: the folders a
     /// folder word puts first (`leadingFolders`) rank ahead of everything
-    /// else, so the limit keeps them.
+    /// else, and `kindsFirst`: so do the files of the Kinds a Kind Word asks
+    /// for, so the limit keeps them — sixty notes that say "invoice" had
+    /// cut every PDF that does from "pdf invoice".
     private func searchLocked(_ query: String, limit: Int, sources: [String], passages: PassageMatch,
-                              foldersFirst: Bool = false) -> [FileHit] {
+                              foldersFirst: Bool = false, kindsFirst: Set<FileContent> = []) -> [FileHit] {
         let allWords = Self.words(query)
         guard !allWords.isEmpty, !sources.isEmpty, limit > 0 else { return [] }
         let (words, endsOnLastWord) = Self.requiredWords(allWords, isSettled: passages == .lastWordPrefix)
@@ -712,6 +714,12 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
         let foldedQuery = Self.fold(query)
         let foldedWords = words.map(Self.fold)
         let asksForFolder = allWords.contains(where: MeaningRanking.folderWords.contains)
+        // Once typing pauses the words the search requires may be fewer than
+        // the Query's (a Kind Word, "the"), and a name that answers them
+        // answers what was asked of a name: `invoice.pdf` for "pdf invoice".
+        let requiredQuery = passages == .lastWordPrefix && words.count < allWords.count
+            ? foldedWords.joined(separator: " ") : nil
+        let kindList = Self.jsonList(kindsFirst.map { String($0.rawValue) })
 
         do {
             guard let statements = prepared() else { return [] }
@@ -721,6 +729,7 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
                     let path = row.text(0) ?? ""
                     guard candidates[path] == nil else { return }
                     candidates[path] = Candidate(kind: FileIndexRow.Kind(rawValue: row.text(1) ?? "") ?? .file,
+                                                 content: row.isNull(2) ? nil : FileContent(rawValue: Int(row.int(2))),
                                                  score: 0, order: candidates.count)
                 }
             }
@@ -730,11 +739,14 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
             }
 
             // Scored by name; a `URL` each only for the survivors, since one
-            // for four hundred candidates was a third of a search. A folder's
-            // words are split only for a name the whole Query missed.
+            // for four hundred candidates was a third of a search. A name the
+            // whole Query missed is scored on the required words, a step
+            // below; a folder's words are split only for a name both missed.
             for path in Array(candidates.keys) {
                 let name = Self.fold((path as NSString).lastPathComponent)
                 candidates[path]?.score = fuzzyScore(name, foldedQuery)
+                    ?? requiredQuery.flatMap { fuzzyScore(name, $0) }
+                        .map { min($0 + Self.nameAfterFoldersPenalty, FileHit.contentScore - 1) }
                     ?? nameAfterFolders(name, path: path, words: foldedWords, of: allWords.count,
                                         isLastOpen: endsOnLastWord)
                     ?? FileHit.folderOnlyScore
@@ -745,13 +757,15 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
             // one bm25, and two tables cannot share one, so the name wins by
             // band instead.
             var rank = 0
-            try? statements.passages.run([.text(contentMatch), .text(sourceList), .int(Int64(limit))]) { row in
+            try? statements.passages.run([.text(contentMatch), .text(sourceList), .int(Int64(limit)),
+                                          .text(kindList)]) { row in
                 let path = row.text(0) ?? ""
                 let score = FileHit.contentScore + min(rank, FileHit.folderOnlyScore - FileHit.contentScore - 1)
                 rank += 1
                 if let existing = candidates[path], existing.score <= score { return }
                 candidates[path] = Candidate(
                     kind: FileIndexRow.Kind(rawValue: row.text(1) ?? "") ?? .file,
+                    content: row.isNull(6) ? nil : FileContent(rawValue: Int(row.int(6))),
                     score: score,
                     order: candidates[path]?.order ?? candidates.count,
                     segment: row.int(2),
@@ -766,11 +780,13 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
                 ? Self.leadingFolders(candidates.filter { $0.value.kind == .folder }.map(\.key), words: foldedWords,
                                       isLastOpen: endsOnLastWord)
                 : []
-            func ahead(_ path: String) -> Int { leading.contains(path) ? 0 : 1 }
+            func ahead(_ path: String, _ candidate: Candidate) -> Int {
+                leading.contains(path) || candidate.content.map(kindsFirst.contains) == true ? 0 : 1
+            }
             return candidates
                 .sorted {
-                    (ahead($0.key), $0.value.score, nudge($0.value), $0.value.order)
-                        < (ahead($1.key), $1.value.score, nudge($1.value), $1.value.order)
+                    (ahead($0.key, $0.value), $0.value.score, nudge($0.value), $0.value.order)
+                        < (ahead($1.key, $1.value), $1.value.score, nudge($1.value), $1.value.order)
                 }
                 .prefix(limit)
                 .map { path, candidate in
@@ -852,7 +868,7 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
             let asked = MeaningRanking.askedKinds(query)
             let asksForFolders = MeaningRanking.asksForFolders(query)
             let wordHits = searchLocked(query, limit: limit, sources: sources, passages: .lastWordPrefix,
-                                        foldersFirst: asksForFolders)
+                                        foldersFirst: asksForFolders, kindsFirst: asked)
             // Nothing to fuse and no Kind to put first: the word search as it is.
             guard let db = connection(), !sources.isEmpty, limit > 0,
                   meaning != nil || !asked.isEmpty || asksForFolders else { return wordHits }
@@ -1191,6 +1207,7 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
 
     private struct Candidate {
         let kind: FileIndexRow.Kind
+        var content: FileContent?
         var score: Int
         let order: Int
         var segment: Int64?
@@ -1487,7 +1504,7 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
         if let statements { return statements }
         guard let db = connection(),
               let ranked = try? db.prepare("""
-                SELECT f.path, f.kind FROM (
+                SELECT f.path, f.kind, f.content FROM (
                     SELECT names.rowid AS id, bm25(names, 3.0, 1.0) AS rank
                     FROM names JOIN files f ON f.id = names.rowid
                     WHERE names MATCH ?1 AND f.source IN (SELECT value FROM json_each(?2))
@@ -1496,20 +1513,22 @@ nonisolated final class FileIndexReader: @unchecked Sendable {
                 ORDER BY matched.rank LIMIT ?3
                 """),
               let unranked = try? db.prepare("""
-                SELECT f.path, f.kind FROM names JOIN files f ON f.id = names.rowid
+                SELECT f.path, f.kind, f.content FROM names JOIN files f ON f.id = names.rowid
                 WHERE names MATCH ?1 AND f.source IN (SELECT value FROM json_each(?2))
                 LIMIT ?3
                 """),
               // A file's best Passage: SQLite takes a bare column's value
-              // from the row MIN() chose.
+              // from the row MIN() chose. The Kinds in ?4 first (none on the
+              // keystroke), so the limit keeps them.
               let passages = try? db.prepare("""
-                SELECT f.path, f.kind, matched.id, s.kind, s.loc, MIN(matched.rank) AS best FROM (
+                SELECT f.path, f.kind, matched.id, s.kind, s.loc, MIN(matched.rank) AS best, f.content FROM (
                     SELECT passages.rowid AS id, bm25(passages) AS rank
                     FROM passages JOIN segments s ON s.id = passages.rowid JOIN files f ON f.id = s.file
                     WHERE passages MATCH ?1 AND f.source IN (SELECT value FROM json_each(?2))
                     LIMIT \(Self.rankingCap)
                 ) matched JOIN segments s ON s.id = matched.id JOIN files f ON f.id = s.file
-                GROUP BY s.file ORDER BY best LIMIT ?3
+                GROUP BY s.file
+                ORDER BY COALESCE(f.content IN (SELECT value FROM json_each(?4)), 0) DESC, best LIMIT ?3
                 """),
               let snippet = try? db.prepare("""
                 SELECT snippet(passages, 0, char(1), char(2), '…', \(Self.excerptWords))

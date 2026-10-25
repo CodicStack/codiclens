@@ -1075,9 +1075,13 @@ finished word, never a prefix, in names and Passages alike, so it is dropped lik
 there either, nor "file"/"fil" beside one: the Kind answers it ("pdf invoice" finds a receipt
 PDF that never says "pdf"; "screenshot of error" a screenshot whose OCR says "error"), unless
 nothing else is left ("image of me", "audio file") or a folder word makes it a word to find
-in folder names ("video folder"). On the keystroke a folder word wins a folder a tie and
-nothing more, and a Kind Word is required; the settled pass puts the folders first (see The
-settled search). **A name the whole Query misses is scored on what its folders leave**:
+in folder names ("video folder"). There a name the whole Query misses is scored on the
+required words, `nameAfterFoldersPenalty` below (`Broken Invoice/invoice.pdf` for "pdf
+invoice", whose folder had taken "invoice" and left the name only "pdf"), and the files of
+the asked Kind, by name or by Passage, rank ahead of the rest before the cut to the limit, so
+sixty notes that say "invoice" cannot push every PDF out. On the keystroke a folder word wins
+a folder a tie and nothing more, and a Kind Word is required; the settled pass puts the
+folders first (see The settled search). **A name the whole Query misses is scored on what its folders leave**:
 "code data intensive systems" finds `Data Intensive Systems/code` at `fuzzyScore("code")` +
 `nameAfterFoldersPenalty` (2), a name match, where it had sunk to 200 below 14 files that say
 the words. The `FileHit.Passage` excerpt is
