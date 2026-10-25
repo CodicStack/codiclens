@@ -938,4 +938,39 @@ struct MeaningIndexTests {
             #expect(hits.contains { $0.name == "video notes.md" }, "the files are not cut")
         }
     }
+
+    /// "pdf invoice" on the real index: `Broken Invoice/invoice.pdf` has no
+    /// words and no vectors, and its folder says "invoice". Its own name
+    /// answers the topic, so it is a name match on it and leads the block,
+    /// however many files say "invoice"; it fell to a folder-only match
+    /// below the 50-row cut once "pdf" was no longer required.
+    @Test func aNameOfTheKindThatAnswersTheTopicLeadsPastTheCut() async throws {
+        let f = try MeaningFixture()
+        try f.folder.makeFile("Source/Broken Invoice/invoice.pdf", contents: "not a pdf at all")
+        for index in 0..<60 { try f.make("Mail/m\(index).md", contents: "invoice invoice \(index)") }
+        try await f.index()
+        #expect(try f.count("SELECT COUNT(*) FROM segments s JOIN files f ON f.id = s.file WHERE f.path LIKE '%invoice.pdf'") == 0)
+
+        for hits in [f.search("pdf invoice"), f.reader.fusedSearch("pdf invoice", limit: 50, sources: [f.root], meaning: nil)] {
+            #expect(hits.first?.name == "invoice.pdf", "\(hits.prefix(3).map(\.name))")
+            #expect(hits.first.map { $0.score < 0 } == true)
+        }
+    }
+
+    /// A PDF that says the topic comes in however many other files say it
+    /// louder: the word search keeps the asked Kind's files ahead of its cut.
+    @Test func aFileOfTheKindThatSaysTheTopicIsNotLostToTheCut() async throws {
+        let f = try MeaningFixture()
+        try FileContentReaderTests.makePDF(at: f.path("Receipt-2851-2040.pdf"),
+                                           pages: [String(repeating: "Thank you for the consulting work this spring. ", count: 6)
+                                                   + "Invoice attached."])
+        for index in 0..<60 { try f.make("Mail/m\(index).md", contents: "invoice invoice invoice") }
+        try await f.index()
+
+        let hits = f.reader.fusedSearch("pdf invoice", limit: 50, sources: [f.root], meaning: nil)
+        #expect(hits.first?.name == "Receipt-2851-2040.pdf", "\(hits.prefix(3).map(\.name))")
+        #expect(hits.first.map { $0.score < 0 } == true)
+        #expect(f.reader.search("invoice", limit: 50, sources: [f.root]).allSatisfy { $0.name != "Receipt-2851-2040.pdf" },
+                "the keystroke's cut is as it was")
+    }
 }
