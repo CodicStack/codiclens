@@ -135,6 +135,10 @@ _Avoid_: history (Clipboard History means something else), favorites, frequently
 
 ### Behaviour
 
+**Setup**:
+The small window a fresh install opens with: take ⌘Space and ⌃⌘Space from macOS, allow the default folder Sources and choose how much of search by meaning to download, grant Paste, open at login. Every step can be skipped and Done always closes it. It returns on reopen until Done has been pressed once, then only from Settings.
+_Avoid_: onboarding, welcome screen, wizard, tour
+
 **Focus Handoff**:
 Returning macOS activation to the app that was frontmost before the Panel appeared, so a simulated paste lands in the right place.
 _Avoid_: focus restore, app switch
