@@ -1,9 +1,11 @@
 ---
-status: superseded
+status: superseded by 0016
 ---
 
 # Disabling the system emoji hotkey via private CoreGraphics API
 
+> **Revived by [ADR 0016](0016-codiclens-takes-both-system-shortcuts.md)** (2026-11-02): Setup now offers the takeover for ⌃⌘Space and ⌘Space, ticked. The note below records why it was removed the first time.
+>
 > **Superseded.** The takeover was built and then removed unused. Codiclens now
 > registers Ctrl+Cmd+Space with `RegisterEventHotKey` and nothing else: whoever
 > holds the shortcut at the OS level holds it. The private symbols, the
