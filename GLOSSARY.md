@@ -72,6 +72,10 @@ _Avoid_: excerpt, moment, snippet, hit, match location
 The file opened inside the Panel at its Passage, with the matched words highlighted: a PDF at its page, text scrolled to the Passage, a recording playing from where the Passage starts. Shift+Space opens it for a File Result that has a Passage; anything else gets Quick Look.
 _Avoid_: own preview, inline preview, viewer, Quick Look
 
+**Update Notice**:
+A small glass strip that says a newer Codiclens is waiting: "Codiclens 1.0.3 is available", or "Codiclens 1.0.3 is ready · Restart to update" once it has downloaded on its own. It sits under the Results Slab, or under the Card row when there is no Slab, and is never a Result. ⌘U or a click acts on it. It is the only way Codiclens tells the user about an update; no update window ever opens unless the user asked for it.
+_Avoid_: update banner, update row, badge, alert
+
 **Kind**:
 What a file is, as a person would say it: a video, a photo, a screenshot, a PDF, a document, a note, a recording, code. Judged from the file itself, never from the Query.
 _Avoid_: type, file type, format, category, modality
