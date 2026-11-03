@@ -2,23 +2,32 @@ import Foundation
 import Testing
 @testable import codiclens
 
-/// Setup over fakes: macOS's shortcut table, the login item and the
-/// Accessibility grant are never touched, and what Setup keeps lives in
-/// `ThrowawayDefaults`. A launch is a new `Setup` over the same defaults.
+/// Setup over fakes: macOS's shortcut table, the login item, the
+/// Accessibility grant and the folder prompts are never touched, and what
+/// Setup and the Sources keep lives in `ThrowawayDefaults`. A launch is a new
+/// `Setup` over the same defaults. The folders it offers are made-up paths
+/// standing in for Downloads, Documents and Desktop.
 @MainActor
 struct SetupTests {
     let defaults = ThrowawayDefaults()
     let hotKeys = FakeSymbolicHotKeys()
     let loginItem = FakeLoginItem()
     let accessibility = FakeAccessibility()
+    let folderAccess = FakeFolderAccess()
+    static let folders = ["/Users/test/Downloads", "/Users/test/Documents", "/Users/test/Desktop"]
 
     /// One launch's Setup, with the shortcut takeover it shares with
     /// Settings.
-    private func launch() -> (Setup, ShortcutTakeover, OpenAtLogin) {
+    private func launch(sources: SourceStore? = nil) -> (Setup, ShortcutTakeover, OpenAtLogin) {
         let takeover = ShortcutTakeover(hotKeys: hotKeys, defaults: defaults)
         let openAtLogin = OpenAtLogin(service: loginItem)
         let setup = Setup(
             shortcuts: ShortcutsRow(takeover: takeover),
+            folders: FoldersRow(
+                sources: sources ?? SourceStore(defaults: defaults),
+                folders: Self.folders,
+                isDenied: { [folderAccess] in folderAccess.denied.contains($0) }
+            ),
             paste: PasteRow(access: accessibility),
             login: LoginRow(openAtLogin: openAtLogin),
             defaults: defaults
@@ -180,6 +189,105 @@ struct SetupTests {
         #expect(!setup.shortcuts.canTakeEmoji)
     }
 
+    // MARK: - Folders
+
+    private var folderSources: [String] {
+        SourceStore(defaults: defaults).folders.compactMap(\.folderPath)
+    }
+
+    @Test func aFreshInstallHasNoFolderSourcesBeforeAllow() {
+        let (setup, _, _) = launch()
+        setup.begin()
+
+        #expect(!setup.folders.isAllowed)
+        #expect(setup.folders.names == ["Downloads", "Documents", "Desktop"])
+        #expect(folderSources.isEmpty)
+    }
+
+    /// Allow acts at once, like Grant, so macOS's three folder prompts arrive
+    /// while the row is in front of the user: the File Index hears of the new
+    /// Sources straight away and starts reading them.
+    @Test func allowAddsTheThreeFolderSourcesAtOnce() {
+        let sources = SourceStore(defaults: defaults)
+        var changes = 0
+        sources.onFoldersChange = { changes += 1 }
+        let (setup, _, _) = launch(sources: sources)
+        setup.begin()
+
+        setup.folders.allow()
+
+        #expect(setup.folders.isAllowed)
+        #expect(changes == 1)
+        #expect(folderSources == Self.folders, "before Done, and whether or not Done is pressed")
+        #expect(sources.folders.allSatisfy { $0.isEnabled })
+        #expect(setup.folders.deniedNames.isEmpty)
+    }
+
+    /// Skipping leaves no folder Sources, and the built-in ones work as ever.
+    @Test func skippingFoldersLeavesNoFolderSourcesAndTheBuiltInsOn() {
+        let (setup, _, _) = launch()
+        setup.begin()
+
+        setup.done()
+
+        let sources = SourceStore(defaults: defaults)
+        #expect(sources.folders.isEmpty)
+        #expect(sources.isEnabled(.applications))
+        #expect(sources.isEnabled(.clipboardHistory))
+        #expect(sources.isEnabled(.emoji))
+        let (nextLaunch, _, _) = launch()
+        nextLaunch.begin()
+        #expect(!nextLaunch.folders.isAllowed, "Show Setup… still offers Allow")
+    }
+
+    /// A folder macOS refused is named under the row, with the way to
+    /// Privacy & Security; one that is not a Source is never asked about.
+    @Test func aFolderMacOSDeniedIsNamedAfterAllow() {
+        folderAccess.denied = [Self.folders[2]]
+        let (setup, _, _) = launch()
+        setup.begin()
+        #expect(setup.folders.deniedNames.isEmpty, "nothing asked before Allow")
+
+        setup.folders.allow()
+
+        #expect(setup.folders.isAllowed)
+        #expect(setup.folders.deniedNames == ["Desktop"])
+        folderAccess.denied = []
+        #expect(setup.folders.deniedNames.isEmpty, "allowed in System Settings")
+    }
+
+    /// An install from before Setup reads the three folders already: the
+    /// row shows them allowed and Allow changes nothing.
+    @Test func anInstallThatAlreadyReadsTheFoldersShowsThemAllowed() {
+        let sources = SourceStore(defaults: defaults)
+        sources.addFolders(Self.folders.map { URL(fileURLWithPath: $0) })
+        var changes = 0
+        sources.onFoldersChange = { changes += 1 }
+        let (setup, _, _) = launch(sources: sources)
+        setup.begin()
+
+        #expect(setup.folders.isAllowed)
+        setup.folders.allow()
+        #expect(changes == 0)
+    }
+
+    /// One removed in Settings comes back with Allow; the others stay as
+    /// they are, switched off ones included.
+    @Test func allowAddsOnlyTheFoldersThatAreMissing() {
+        let sources = SourceStore(defaults: defaults)
+        sources.addFolders(Self.folders.map { URL(fileURLWithPath: $0) })
+        sources.removeFolder(Self.folders[0])
+        sources.setEnabled(false, for: "folder:" + Self.folders[1])
+        let (setup, _, _) = launch(sources: sources)
+        setup.begin()
+        #expect(!setup.folders.isAllowed)
+
+        setup.folders.allow()
+
+        #expect(Set(folderSources) == Set(Self.folders))
+        #expect(!sources.isEnabled(.folder(path: Self.folders[1])))
+    }
+
     // MARK: - Paste
 
     @Test func grantAsksMacOSAndTicksOnceGranted() {
@@ -263,6 +371,12 @@ final class FakeLoginItem: LoginItemService {
         guard !refuses else { throw CocoaError(.featureUnsupported) }
         isEnabled = enabled
     }
+}
+
+/// Which folders macOS refused. Nothing here asks macOS.
+@MainActor
+final class FakeFolderAccess {
+    var denied: Set<String> = []
 }
 
 @MainActor

@@ -179,7 +179,14 @@ struct SourcesSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            if let counts = row.counts {
+            if row.hasNoAccess {
+                Text("No access")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Link("Open Privacy & Security", destination: FolderAccess.privacySettings)
+                    .font(.callout)
+                    .help("Turn Codiclens on for this folder in Files and Folders")
+            } else if let counts = row.counts {
                 countsLabel(counts)
             }
             if row.isRemovable {

@@ -42,6 +42,8 @@ nonisolated final class FileIndexer: @unchecked Sendable {
         case wrote
         /// The contents backfill started or stopped (`FileContentScheduler`).
         case readingContents(isReading: Bool)
+        /// A crawl found macOS refusing `source`, or letting it be read.
+        case access(source: String, isDenied: Bool)
     }
 
     /// How many rows a crawl writes per transaction, and so how often counts
@@ -284,7 +286,14 @@ nonisolated final class FileIndexer: @unchecked Sendable {
 
     /// Reads a whole folder Source again. Once it has, the root is caught
     /// up, on the volume it is on.
+    ///
+    /// A root macOS refuses is left as it is: its rows, if it has any, stay,
+    /// and it is not caught up, so it is crawled again at the next launch, or
+    /// sooner if asked (`FileIndex.recheckAccess`).
     func crawl(_ root: String) throws {
+        let isDenied = FolderAccess.isDenied(root)
+        onProgress(.access(source: root, isDenied: isDenied))
+        guard !isDenied else { return }
         onProgress(.reading(source: root, isReading: true))
         defer { onProgress(.reading(source: root, isReading: false)) }
         // Every repo in it is listed again as the walk reaches it.

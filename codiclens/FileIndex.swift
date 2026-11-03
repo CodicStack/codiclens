@@ -55,6 +55,11 @@ final class FileIndex {
     private var crawlingFolders: Set<String> = []
     private var isReadingContents = false
 
+    /// Folder Sources macOS refused when the crawl came to them, by their
+    /// path in `SourceStore`. Nothing in them is read until it lets go
+    /// (`recheckAccess`).
+    private(set) var deniedFolders: Set<String> = []
+
     /// How far the meaning pass has got in the enabled folder Sources, and
     /// how many vectors a search scores.
     private(set) var meaningCounts = MeaningCounts()
@@ -245,6 +250,18 @@ final class FileIndex {
 
     // MARK: - Sources
 
+    /// Crawls again each folder Source macOS refused, if it now lets it be
+    /// read: the user may have turned Codiclens on in Privacy & Security.
+    /// One that is still refused stays as it is, without asking macOS again.
+    /// The app calls it whenever it comes to the front.
+    func recheckAccess() {
+        let denied = sources.folders.filter { source in
+            source.isEnabled && source.folderPath.map(deniedFolders.contains) == true
+        }
+        guard !denied.isEmpty else { return }
+        worker.recrawl(denied.compactMap(\.folderPath).map(FileIndexer.realPath))
+    }
+
     // MARK: - Search by meaning
 
     private func applyMeaning(_ isOn: Bool) {
@@ -265,6 +282,7 @@ final class FileIndex {
         searchableFolders.withLock { searchable in
             searchable = folders.filter(\.isEnabled).map { FileIndexer.realPath($0.path) }
         }
+        deniedFolders.formIntersection(folders.map(\.path))
         worker.apply(folders, rules: sources.fileIndexRules)
         refreshCounts()
     }
@@ -281,6 +299,14 @@ final class FileIndex {
             }
         case .readingContents(let isReading):
             DispatchQueue.main.async { [weak self] in self?.isReadingContents = isReading }
+        case .access(let source, let isDenied):
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let paths = sources.folders.compactMap(\.folderPath).filter { FileIndexer.realPath($0) == source }
+                for path in paths where deniedFolders.contains(path) != isDenied {
+                    if isDenied { deniedFolders.insert(path) } else { deniedFolders.remove(path) }
+                }
+            }
         case .wrote:
             refreshCounts()
         }
@@ -369,6 +395,23 @@ extension FileIndex {
                     contents?.setSources(indexer.watchedPaths)
                     contents?.resume()
                     meaning?.setSources(indexer.watchedPaths)
+                    meaning?.resume()
+                } catch {
+                    NSLog("File Index: %@", String(describing: error))
+                }
+            }
+        }
+
+        /// Crawls `roots` again, if they are still Sources, and reads what
+        /// the crawl found.
+        func recrawl(_ roots: [String]) {
+            queue.async { [self] in
+                guard let indexer else { return }
+                do {
+                    for root in roots where indexer.watchedPaths.contains(root) {
+                        try indexer.crawl(root)
+                    }
+                    contents?.resume()
                     meaning?.resume()
                 } catch {
                     NSLog("File Index: %@", String(describing: error))
