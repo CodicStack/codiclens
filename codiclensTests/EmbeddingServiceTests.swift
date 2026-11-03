@@ -68,6 +68,7 @@ struct EmbeddingServiceTests {
         var options = EmbeddingService.Options()
         options.models = URL(fileURLWithPath: "/tmp/models dir")
         options.textOnly = true
+        options.maxTokens = 512
         options.idleExit = 12.5
         let arguments = ["/Applications/codiclens.app/Contents/MacOS/codiclens"] + options.arguments
         #expect(EmbeddingService.isRequested(arguments))

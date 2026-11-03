@@ -90,6 +90,19 @@ nonisolated enum MeaningReader {
 
     private static func readFile(_ job: MeaningJob, with vectors: JobVectors) async throws -> MeaningResult {
         let url = URL(fileURLWithPath: job.path)
+        if job.isTextOnly {
+            switch job.content {
+            case .screenshot, .image, .audio, .video:
+                // Nothing to look at without the encoders: done, for now.
+                return MeaningResult(job: job, vecTo: 0)
+            case .pdf:
+                var result = MeaningResult(job: job, vecTo: Double(job.pages.upperBound))
+                result.vectors = try await texts(job, with: vectors)
+                return result
+            case .document, .text, .code:
+                break
+            }
+        }
         switch job.content {
         case .document, .text, .code:
             var result = MeaningResult(job: job, vecTo: job.texts.last.map { Double($0.segment) } ?? job.vecTo)
