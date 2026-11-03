@@ -8,6 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		38E0A1F12FB1000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 38E0A1F12FB1000000000002 /* Sparkle */; };
+		32A0C0DE2FB2000000000011 /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 32A0C0DE2FB2000000000001 /* LICENSE */; };
+		32A0C0DE2FB2000000000012 /* NOTICE in Resources */ = {isa = PBXBuildFile; fileRef = 32A0C0DE2FB2000000000002 /* NOTICE */; };
+		32A0C0DE2FB2000000000013 /* licenses in Resources */ = {isa = PBXBuildFile; fileRef = 32A0C0DE2FB2000000000003 /* licenses */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -23,6 +26,9 @@
 /* Begin PBXFileReference section */
 		383D3EEF2FAD061400B48984 /* codiclens.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = codiclens.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		383D3EFC2FAD061500B48984 /* codiclensTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = codiclensTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		32A0C0DE2FB2000000000001 /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
+		32A0C0DE2FB2000000000002 /* NOTICE */ = {isa = PBXFileReference; lastKnownFileType = text; path = NOTICE; sourceTree = "<group>"; };
+		32A0C0DE2FB2000000000003 /* licenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = licenses; path = docs/licenses; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -62,6 +68,9 @@
 			children = (
 				383D3EF12FAD061400B48984 /* codiclens */,
 				383D3EFF2FAD061500B48984 /* codiclensTests */,
+				32A0C0DE2FB2000000000001 /* LICENSE */,
+				32A0C0DE2FB2000000000002 /* NOTICE */,
+				32A0C0DE2FB2000000000003 /* licenses */,
 				383D3EF02FAD061400B48984 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -171,6 +180,9 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				32A0C0DE2FB2000000000011 /* LICENSE in Resources */,
+				32A0C0DE2FB2000000000012 /* NOTICE in Resources */,
+				32A0C0DE2FB2000000000013 /* licenses in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

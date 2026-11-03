@@ -1,4 +1,4 @@
-// Skip lists adapted from DigUp's Rules.swift (https://github.com/ARahim3/DigUp), MIT licence — see digup-license.txt.
+// Skip lists adapted from DigUp's Rules.swift (https://github.com/ARahim3/DigUp), MIT licence — see docs/licenses/digup/LICENSE.
 import Foundation
 
 /// What the File Index leaves out, in one place. The crawl and the FSEvents

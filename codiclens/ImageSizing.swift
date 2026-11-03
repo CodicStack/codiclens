@@ -1,4 +1,4 @@
-// Adapted from DigUp (https://github.com/ARahim3/DigUp, MIT; see digup-license.txt).
+// Adapted from DigUp (https://github.com/ARahim3/DigUp, MIT; see docs/licenses/digup/LICENSE). The bicubic resampling is Pillow's (MIT-CMU; see docs/licenses/pillow/LICENSE), via llama.cpp's mtmd.
 
 /// How the reference sizes an image for the vision encoder, so llama.cpp sees the same pixels.
 ///

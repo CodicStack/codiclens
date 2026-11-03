@@ -1,4 +1,4 @@
-// Adapted from DigUp (https://github.com/ARahim3/DigUp, MIT; see digup-license.txt).
+// Adapted from DigUp (https://github.com/ARahim3/DigUp, MIT; see docs/licenses/digup/LICENSE).
 
 import CoreGraphics
 import Foundation
@@ -66,18 +66,16 @@ nonisolated final class Embedder: EmbeddingBackend {
 
     /// Loads `text` on the GPU, and `media` — the image and audio encoders —
     /// when it is given. Without it the embedder is text-only: what a Query
-    /// needs, in a quarter of the memory.
-    init(text: URL, media mediaFile: URL?) throws {
+    /// and the Text choice need, in a quarter of the memory. An input longer
+    /// than `maxTokens` is cut.
+    init(text: URL, media mediaFile: URL?, maxTokens: Int) throws {
         _ = Self.backend
         var modelParams = llama_model_default_params()
         modelParams.n_gpu_layers = 999
         guard let model = llama_model_load_from_file(text.path, modelParams) else {
             throw EmbeddingError.cannotLoad(text.lastPathComponent)
         }
-        // One input has to fit one micro-batch: 2,048 tokens (the reference's
-        // cut) holds a 1,120-token image or the ~750 tokens of 30 seconds of
-        // audio. A Query is short, so the text-only encoder reserves less.
-        let maxTokens = mediaFile == nil ? 512 : 2048
+        // One input has to fit one micro-batch (`EmbeddingService.Options`).
         var params = llama_context_default_params()
         params.n_ctx = UInt32(maxTokens)
         params.n_batch = UInt32(maxTokens)
