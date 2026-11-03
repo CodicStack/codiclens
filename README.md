@@ -60,7 +60,7 @@ The unit tests never download a model, crawl your folders or take your shortcuts
 codiclens/           # The app (Swift, SwiftUI, AppKit)
 codiclensTests/      # Unit tests
 CLlama/              # Module map for the llama.cpp build
-Scripts/             # llama.cpp build, emoji index generator
+Scripts/             # llama.cpp build, emoji index generator, release script
 docs/adr/            # Architecture decision records
 AGENTS.md            # Architecture, rules and known issues
 GLOSSARY.md          # The words we use for things in the app

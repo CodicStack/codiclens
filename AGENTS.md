@@ -42,6 +42,27 @@ keyword-less or any variant cannot be filed under a base. `--unicode` and
 `--cldr` bump the versions; `--cache <dir>` reuses downloads. See
 `docs/adr/0005-bundled-emoji-dataset.md`.
 
+## Releasing
+
+`Scripts/release.sh` cuts a release on the maintainer's Mac (ADR 0015); the guide is
+`docs/RELEASING.md`. It needs the Developer ID identity, the `codiclens` notarytool profile
+and the Sparkle key, so an agent can only run its fixture test and, via sourcing, single steps:
+
+```bash
+Scripts/tests/release-notes.sh   # the changelog-to-notes step (Scripts/release-notes.swift)
+```
+
+- Sourcing `Scripts/release.sh` defines its guards and steps without running anything.
+- Everything goes under `build/release/vX.Y.Z/`, one marker per finished step in `.done/`; a
+  rerun skips marked steps. Its Xcode builds use `build/release/DerivedData` and Sparkle's
+  tools come from `build/release/SourcePackages/artifacts/sparkle/Sparkle/bin`.
+- The version (`MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`, both `X.Y.Z`) is passed to
+  the archive as build settings and written into the project only in the release commit, so a
+  dry run leaves git untouched. Exported `codiclens.app` is renamed to `Codiclens.app`, the
+  name installs have.
+- Notes live in `CHANGELOG.md` under `## Unreleased`; the release renames that section and
+  embeds the newest five in the appcast as `<section data-sparkle-version>` blocks.
+
 ## Project Structure
 
 ```
