@@ -1,10 +1,12 @@
 import SwiftUI
 
 struct SettingsView: View {
+    let setup: SetupController
+
     var body: some View {
         TabView {
             Tab("General", systemImage: "gearshape") {
-                GeneralSettingsView()
+                GeneralSettingsView(setup: setup)
             }
             Tab("Sources", systemImage: "folder") {
                 SourcesSettingsView()
@@ -15,12 +17,27 @@ struct SettingsView: View {
 }
 
 private struct GeneralSettingsView: View {
+    let setup: SetupController
     @AppStorage("appTheme") private var selectedTheme: String = AppTheme.system.rawValue
     @AppStorage(Motion.animationsEnabledKey) private var animationsEnabled: Bool = true
     @State private var isShowingAcknowledgements = false
 
     var body: some View {
         Form {
+            Section {
+                shortcutRows
+                Toggle("Open at login", isOn: Binding(
+                    get: { setup.openAtLogin.isOn },
+                    set: { setup.openAtLogin.setOn($0) }
+                ))
+            } header: {
+                Text("Startup and shortcuts")
+            } footer: {
+                Text("Quitting Codiclens gives ⌘Space and ⌃⌘Space back to macOS until it opens again.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section {
                 Picker("Theme", selection: $selectedTheme) {
                     ForEach(AppTheme.allCases, id: \.rawValue) { theme in
@@ -42,8 +59,6 @@ private struct GeneralSettingsView: View {
                 skinToneRow
             } header: {
                 Text("Emoji")
-            } footer: {
-                emojiHotKeyExplanation
             }
 
             Section {
@@ -65,6 +80,7 @@ private struct GeneralSettingsView: View {
             }
 
             Section {
+                Button("Show Setup…") { setup.show() }
                 Button("Acknowledgements…") { isShowingAcknowledgements = true }
                 Button("Quit Codiclens") { NSApp.terminate(nil) }
                     .keyboardShortcut("q")
@@ -72,19 +88,33 @@ private struct GeneralSettingsView: View {
         }
         .formStyle(.grouped)
         .sheet(isPresented: $isShowingAcknowledgements) { acknowledgementsSheet }
+        .onAppear { setup.openAtLogin.refresh() }
     }
 
-    // MARK: - Emoji hotkey
+    // MARK: - Shortcuts
 
-    /// ⌃⌘Space is registered unconditionally, but macOS ships owning it. The
-    /// footer says so, because a shortcut that silently does nothing is worse
-    /// than one the user knows they have to free up. No path is given for
-    /// freeing it: System Settings has no row for Emoji & Symbols — see
-    /// `docs/adr/0006-private-symbolic-hotkey-api.md`.
-    private var emojiHotKeyExplanation: some View {
-        Text("⌃⌘Space opens the emoji picker, and ⌘Space opens Codiclens. If macOS's own Emoji & Symbols window appears instead, the system still holds ⌃⌘Space and is consuming the keystroke before Codiclens sees it.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+    /// The same choices as Setup's Shortcuts row, put into effect at once:
+    /// off hands the shortcut back to macOS (ADR 0016). Where macOS kept
+    /// one, the row says so in Setup's words.
+    @ViewBuilder
+    private var shortcutRows: some View {
+        let takeover = setup.takeover
+        if takeover.isAvailable {
+            Toggle("Use ⌘Space for Codiclens (replaces Spotlight)", isOn: binding(for: .spotlight))
+            if takeover.isOn(.spotlight), takeover.hasFailed(.spotlight) { SpotlightFallbackNote() }
+            Toggle("Open emoji with ⌃⌘Space (replaces Emoji & Symbols)", isOn: binding(for: .emoji))
+            if takeover.isOn(.emoji), takeover.hasFailed(.emoji) { EmojiFallbackNote() }
+        } else {
+            SpotlightFallbackNote()
+            EmojiFallbackNote()
+        }
+    }
+
+    private func binding(for shortcut: SystemShortcut) -> Binding<Bool> {
+        Binding(
+            get: { setup.takeover.isOn(shortcut) },
+            set: { setup.takeover.setOn($0, for: shortcut) }
+        )
     }
 
     // MARK: - Skin tone

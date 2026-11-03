@@ -12,12 +12,11 @@ private enum HotKeyID {
 
 /// The keystrokes that summon Codiclens.
 ///
-/// Ctrl+Cmd+Space is macOS's own Emoji & Symbols shortcut out of the box. We
-/// register ours plainly and let the user decide: while the system shortcut is
-/// on, WindowServer eats the keystroke before it reaches us, and turning it off
-/// (System Settings → Keyboard → Keyboard Shortcuts) hands it over. We do not
-/// reach into the system's shortcut table to take it — see
-/// `docs/adr/0006-private-symbolic-hotkey-api.md`.
+/// macOS ships holding both, for Spotlight and Emoji & Symbols, and while it
+/// does WindowServer eats the keystroke before it reaches us. They are
+/// registered plainly either way; `ShortcutTakeover` makes macOS let go when
+/// the user chose that in Setup or Settings
+/// (`docs/adr/0016-codiclens-takes-both-system-shortcuts.md`).
 private enum HotKey {
     static let panel = (key: UInt32(kVK_Space), modifiers: UInt32(cmdKey))
     static let emoji = (key: UInt32(kVK_Space), modifiers: UInt32(controlKey | cmdKey))
@@ -36,6 +35,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     static let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
     var panelController: PanelController?
+
+    /// Setup, and the shortcut takeover and login item it shares with
+    /// Settings.
+    private var setupController: SetupController?
+
+    /// The launch offered Move to Applications and the copy is opening in
+    /// this one's place: nothing was started, so nothing is torn down.
+    private var isMovingToApplications = false
 
     /// Clipboard History's recorder. Owned here rather than by the `App` value
     /// so that starting it and stopping it sit on the same object.
@@ -66,7 +73,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Index, no clipboard recorder, only the request loop.
         if EmbeddingService.isRequested() { return EmbeddingService.start() }
         guard !Self.isTestHost else { return }
-        panelController = PanelController(lastActiveApp: lastActiveApp)
+        // Before anything starts: a copy about to be replaced by the one in
+        // /Applications must not crawl, record or take shortcuts.
+        if MoveToApplications.offerIfNeeded() {
+            isMovingToApplications = true
+            return
+        }
+        let setupController = SetupController()
+        self.setupController = setupController
+        // Whatever an OS update, a restart or a crash left behind: the
+        // shortcuts the user gave Codiclens are taken again.
+        setupController.takeover.takeAtLaunch()
+        panelController = PanelController(lastActiveApp: lastActiveApp, setup: setupController)
         // Off-thread, so neither launch nor the first Emoji Mode waits on the
         // 226 KB dataset being decoded.
         EmojiIndex.prewarm()
@@ -92,6 +110,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.pendingIncoming = nil
             receive(pendingIncoming)
         }
+
+        if setupController.setup.showsAtLaunch {
+            setupController.show()
+        }
+    }
+
+    /// Opening the app while it runs, from Finder, Launchpad or Spotlight.
+    /// It always opens the Panel, which is the way in for a user who kept
+    /// ⌘Space for Spotlight; Setup opens under it until Done has been pressed
+    /// once.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard !Self.isTestHost, !EmbeddingService.isRequested(), let setupController else { return false }
+        // Setup first: the Panel hides when it stops being key, so it has to
+        // be the last window to take the keyboard.
+        if setupController.setup.opensOnReopen {
+            setupController.show()
+        }
+        panelController?.showPanel()
+        return false
     }
 
     /// Everything the app holds outside its own memory, released in one place.
@@ -101,7 +138,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// handler, the hotkeys, both FSEvents streams and the pasteboard timer all
     /// outlive the decision to quit.
     func applicationWillTerminate(_ notification: Notification) {
-        guard !Self.isTestHost, !EmbeddingService.isRequested() else { return }
+        guard !Self.isTestHost, !EmbeddingService.isRequested(), !isMovingToApplications else { return }
+        // Spotlight and Emoji & Symbols go back to macOS whenever Codiclens
+        // is not running to answer them.
+        setupController?.takeover.handBack()
+        setupController?.tearDown()
         unregisterHotKeys()
         lastActiveApp.stop()
         pasteboardWatcher?.stop()
