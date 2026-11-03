@@ -60,6 +60,19 @@ struct UpdaterTests {
         #expect(updater.state == .none)
     }
 
+    /// A ready update stays until it is installed or the session ends. Once
+    /// the app holds the install-now block Sparkle stops running update
+    /// cycles, so nothing else would ever say it again, and it still installs
+    /// on quit: the dialog being in front does not make that untrue.
+    @Test func theUserSeeingTheDialogLeavesAReadyUpdate() {
+        let updater = FakeUpdater()
+        updater.send(.readyToInstall(version: "1.0.3"))
+
+        updater.send(.userAttended)
+
+        #expect(updater.state == .ready(version: "1.0.3"))
+    }
+
     @Test func skippingClearsItUntilANewerVersionIsFound() {
         let updater = FakeUpdater()
         updater.send(.scheduledUpdateFound(version: "1.0.3", isDownloaded: false))

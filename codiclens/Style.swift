@@ -56,6 +56,10 @@ enum Style {
     /// A Result row or grid cell.
     static let resultRadius: CGFloat = 10
 
+    /// The Update Notice's strip. Lower than the Slab's, in proportion to a
+    /// strip one line tall.
+    static let noticeRadius: CGFloat = 12
+
     static let padding: CGFloat = 12
     static let gap: CGFloat = 12
 
@@ -216,6 +220,10 @@ enum Style {
 
     static var cardShape: RoundedRectangle {
         RoundedRectangle(cornerRadius: cardRadius, style: .continuous)
+    }
+
+    static var noticeShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: noticeRadius, style: .continuous)
     }
 
     /// A Card's picture, which fills the Card edge to edge.
@@ -508,6 +516,14 @@ extension View {
     /// One Result row or grid cell in the Results Slab.
     func resultSurface(selected: Bool) -> some View {
         modifier(ResultSurface(selected: selected))
+    }
+
+    /// The Update Notice: its own strip of bare native glass, untinted and
+    /// unclipped, with no shadow of its own, as a Card is
+    /// (`docs/adr/0009-cards-are-bare-glass.md`). It is never a Result, so it
+    /// is never the flat Result tier.
+    func noticeSurface() -> some View {
+        glassEffect(Style.cardGlass, in: Style.noticeShape)
     }
 
     /// A small capsule for text that annotates rather than names: keyboard
