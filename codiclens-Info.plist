@@ -69,8 +69,8 @@
 	<!--
 	Sparkle (SparkleUpdater.swift). The feed and the key come from build
 	settings so a local test feed can be built without editing this file.
-	SPARKLE_PUBLIC_ED_KEY is a PLACEHOLDER (32 zero bytes) until the real
-	key is generated (#20): a build with it checks, but rejects every update.
+	SPARKLE_PUBLIC_ED_KEY matches the signing key for login Keychain
+	account codiclens (#20). Only the public key belongs in the project.
 	No SUEnable*Service keys: Codiclens is not sandboxed.
 	-->
 	<key>SUFeedURL</key>
