@@ -920,6 +920,20 @@ runs it on its own `UserDefaults` suite. A row being read — crawled, or with c
 unread while the backfill runs — shows the Loading Ring with "Reading" beside it, never a
 `ProgressView`.
 
+**No folder Source until Allow.** A new install has no folder Sources: Setup's "Search your
+files" row (`FoldersRow`) offers Downloads, Documents and Desktop, and Allow adds them at
+once, so macOS's three folder prompts come while that row is on screen. A skip leaves none;
+apps, Clipboard History and Emoji work regardless. An install from before Setup asked
+(`SourceStore.isFromBeforeSetup`: Setup finished, or a `FileIndex.sqlite` on disk) keeps the
+three, and `SetupController` writes the folder list down before the File Index starts, so a
+new install's empty list survives the database its first launch creates. A folder macOS
+refused (`FolderAccess.isDenied`, checked by `FileIndexer.crawl` before the walk) is
+reported as `.access`, kept in `FileIndex.deniedFolders`, never marked caught up, and shows
+"No access" with an "Open Privacy & Security" link in place of its counts (and under the
+Setup row). Each time the app comes to the front `FileIndex.recheckAccess` crawls the
+refused ones that are readable now. Tests stand a folder with no permissions in for a
+refusal (`FolderAccessTests`); nothing asks macOS.
+
 Under Folders, **Skip** is what the File Index leaves out inside the folder Sources, all
 user-set and kept by `SourceStore` beside the Sources: a checkbox per
 `FileIndexRules.SkipGroup` (on = skipped; Caches, node_modules and build output, App bundles
@@ -1427,7 +1441,7 @@ User types query → Enter
 | `codiclensApp.swift` | @main entry, AppDelegate adaptor |
 | `AppDelegate.swift` | Hotkey registration, QLPreviewPanel responder, Open With (`application(_:open:)`) and the Service's registration, and `isTestHost`: the test host starts nothing |
 | `Incoming.swift` | How an Incoming Subject gets in: `Incoming` read off a Service's pasteboard, `IncomingService` (the "Open in Codiclens" provider), and `LastActiveApp`, the app it came from |
-| `Setup.swift` | Setup's model: its rows (`SetupRow`: Shortcuts, Paste, Open at login; Folders and Meaning slot in), Done, and when it shows (launch, reopen until Done) |
+| `Setup.swift` | Setup's model: its rows (`SetupRow`: Shortcuts, Folders, Paste, Open at login; Meaning slots in), Done, and when it shows (launch, reopen until Done) |
 | `SetupView.swift` / `SetupWindow.swift` | Setup's window, and `SetupController`, which wires it to the real Mac for Setup and Settings → General |
 | `SystemShortcuts.swift` | `ShortcutTakeover`: ⌘Space and ⌃⌘Space through the private symbolic hotkey call (ADR 0016), behind `SymbolicHotKeys` |
 | `LoginItem.swift` / `AccessibilityAccess.swift` | Open at login (`SMAppService.mainApp`) and the Accessibility grant, each behind a protocol so `SetupTests` runs over fakes |
@@ -1474,7 +1488,7 @@ User types query → Enter
 | `LoadingRing.swift` | The app's own spinner, in place of a system `ProgressView` |
 | `AppIndex.swift` | The app Index: background scan, atomic swap, lazy icons |
 | `AppDirectoryWatcher.swift` | FSEvents watch over the application directories |
-| `Source.swift` | `Source` and `SourceStore`: the Sources, their switches and the folder list, in `UserDefaults` |
+| `Source.swift` | `Source` and `SourceStore`: the Sources, their switches and the folder list, in `UserDefaults`; `FolderAccess`, whether macOS refuses a folder |
 | `FileIndex.swift` | The File Index: started at launch, `search` on the keystroke and `searchSettled` (words and meaning) from any thread, counts and reading state for Settings, Low Power Mode, search by meaning's wiring |
 | `FileIndexStore.swift` | The File Index's SQLite schema, writer (incl. the `meta` catch-up bookkeeping and content jobs) and thread-safe reader (`FileHit`, its Passage, `fusedSearch`) |
 | `FileContent.swift` | What a file has to read (`FileContent`, in reading order), chunking, and the job/result values |

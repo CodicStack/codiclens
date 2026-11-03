@@ -131,6 +131,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
+    /// Back to the front, from System Settings perhaps: a folder macOS
+    /// refused may be allowed now.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard !Self.isTestHost, !EmbeddingService.isRequested(), setupController != nil else { return }
+        FileIndex.shared.recheckAccess()
+    }
+
     /// Everything the app holds outside its own memory, released in one place.
     ///
     /// A background accessory app has no window to close and no document to
