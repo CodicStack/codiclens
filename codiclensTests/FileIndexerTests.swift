@@ -571,7 +571,7 @@ struct FileIndexerTests {
             switch progress {
             case .wrote: wrote += 1
             case .reading(_, let isReading): reading.append(isReading)
-            case .readingContents: break
+            case .readingContents, .access: break
             }
         })
 

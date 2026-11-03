@@ -1,4 +1,4 @@
-// Prompts and image budgets adapted from DigUp (https://github.com/ARahim3/DigUp, MIT; see digup-license.txt).
+// Prompts and image budgets adapted from DigUp (https://github.com/ARahim3/DigUp, MIT; see docs/licenses/digup/LICENSE).
 
 import Accelerate
 import Foundation

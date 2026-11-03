@@ -1,24 +1,49 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import codiclens
 
-/// Setup over fakes: macOS's shortcut table, the login item and the
-/// Accessibility grant are never touched, and what Setup keeps lives in
-/// `ThrowawayDefaults`. A launch is a new `Setup` over the same defaults.
+/// Setup over fakes: macOS's shortcut table, the login item, the
+/// Accessibility grant and the folder prompts are never touched, the meaning
+/// model "downloads" from memory into a temporary folder, and what Setup and
+/// the Sources keep lives in `ThrowawayDefaults`. A launch is a new `Setup`
+/// over the same defaults. The folders it offers are made-up paths standing
+/// in for Downloads, Documents and Desktop.
 @MainActor
 struct SetupTests {
     let defaults = ThrowawayDefaults()
     let hotKeys = FakeSymbolicHotKeys()
     let loginItem = FakeLoginItem()
     let accessibility = FakeAccessibility()
+    let folderAccess = FakeFolderAccess()
+    static let folders = ["/Users/test/Downloads", "/Users/test/Documents", "/Users/test/Desktop"]
+    let models = Models()
+    var isMeaningSupported = true
+
+    /// Search by meaning's model folder, gone with the test.
+    final class Models {
+        let folder = try! TemporaryFolder()
+        let downloader = StubDownloader()
+        var requested: [String] { downloader.requested.withLock { $0 } }
+        deinit { folder.remove() }
+    }
 
     /// One launch's Setup, with the shortcut takeover it shares with
     /// Settings.
-    private func launch() -> (Setup, ShortcutTakeover, OpenAtLogin) {
+    private func launch(sources: SourceStore? = nil) -> (Setup, ShortcutTakeover, OpenAtLogin) {
         let takeover = ShortcutTakeover(hotKeys: hotKeys, defaults: defaults)
         let openAtLogin = OpenAtLogin(service: loginItem)
+        let files = ModelFiles(folder: models.folder.url, files: StubDownloader.files, downloader: models.downloader)
+        let meaning = MeaningSettings(files: files, choice: .defaults(defaults, files: files),
+                                      isSupported: isMeaningSupported)
         let setup = Setup(
             shortcuts: ShortcutsRow(takeover: takeover),
+            folders: FoldersRow(
+                sources: sources ?? SourceStore(defaults: defaults),
+                folders: Self.folders,
+                isDenied: { [folderAccess] in folderAccess.denied.contains($0) }
+            ),
+            meaning: MeaningChoiceRow(meaning: meaning),
             paste: PasteRow(access: accessibility),
             login: LoginRow(openAtLogin: openAtLogin),
             defaults: defaults
@@ -36,9 +61,12 @@ struct SetupTests {
         #expect(setup.shortcuts.takesSpotlight)
         #expect(setup.shortcuts.takesEmoji)
         #expect(setup.login.opensAtLogin)
+        #expect(setup.meaning.mode == .full, "text, images and audio preselected")
+        #expect(setup.meaning.isAvailable)
         #expect(hotKeys.calls.isEmpty, "nothing is taken before Done")
         #expect(loginItem.requests.isEmpty)
         #expect(accessibility.prompts == 0)
+        #expect(models.requested.isEmpty, "nothing downloads before Done")
     }
 
     @Test func doneAppliesTheTickedRowsAndSetupIsFinished() {
@@ -74,16 +102,19 @@ struct SetupTests {
 
     /// Closing the window is a skip: nothing applied, and Setup is back at
     /// the next reopen and the next launch, ticked as it was the first time.
-    @Test func skippingAppliesNothingAndSetupReturnsOnReopenAndAtLaunch() {
+    @Test func skippingAppliesNothingAndSetupReturnsOnReopenAndAtLaunch() async {
         let (setup, takeover, _) = launch()
         setup.begin()
         setup.shortcuts.takesSpotlight = false
         setup.login.opensAtLogin = false
 
+        setup.meaning.mode = .text
+
         // The window closes without Done.
         #expect(setup.opensOnReopen)
         #expect(hotKeys.calls.isEmpty)
         #expect(loginItem.requests.isEmpty)
+        #expect(models.requested.isEmpty)
 
         let (nextLaunch, nextTakeover, _) = launch()
         nextTakeover.takeAtLaunch()
@@ -92,8 +123,11 @@ struct SetupTests {
         #expect(nextLaunch.opensOnReopen)
         #expect(nextLaunch.shortcuts.takesSpotlight)
         #expect(nextLaunch.login.opensAtLogin)
+        #expect(nextLaunch.meaning.mode == .full)
         #expect(hotKeys.calls.isEmpty, "a launch before Done takes nothing")
         #expect(!takeover.isOn(.spotlight))
+        await nextLaunch.meaning.meaning.startAndWait()
+        #expect(models.requested.isEmpty, "a launch before Done downloads nothing")
     }
 
     /// Show Setup… after Done shows what is in force, not the first run's
@@ -115,6 +149,79 @@ struct SetupTests {
         setup.done()
         #expect(hotKeys.calls.isEmpty)
         #expect(!loginItem.isEnabled)
+    }
+
+    // MARK: - Search by meaning
+
+    /// Done is what starts the download, of what was chosen and no more.
+    @Test func doneDownloadsTheChosenMeaning() async {
+        let (setup, _, _) = launch()
+        setup.begin()
+        setup.meaning.mode = .text
+        #expect(models.requested.isEmpty)
+
+        setup.done()
+        await setup.meaning.meaning.startAndWait()
+
+        #expect(models.requested == ["a.gguf"], "Text needs the text model alone")
+        #expect(setup.meaning.meaning.mode == .text)
+        let (nextLaunch, _, _) = launch()
+        nextLaunch.begin()
+        #expect(nextLaunch.meaning.mode == .text, "Show Setup… starts from the choice in force")
+    }
+
+    @Test func doneWithTheDefaultDownloadsEverything() async {
+        let (setup, _, _) = launch()
+        setup.begin()
+
+        setup.done()
+        await setup.meaning.meaning.startAndWait()
+
+        #expect(models.requested == ["a.gguf", "b.gguf"])
+        #expect(setup.meaning.meaning.status != .off)
+    }
+
+    @Test func choosingOffDownloadsNothing() async {
+        let (setup, _, _) = launch()
+        setup.begin()
+        setup.meaning.mode = .off
+
+        setup.done()
+        await setup.meaning.meaning.startAndWait()
+
+        #expect(models.requested.isEmpty)
+        setup.begin()
+        #expect(setup.meaning.mode == .off)
+    }
+
+    /// An install from before Setup with the model downloaded: Setup offers
+    /// what it has, and its Done downloads nothing again.
+    @Test func anInstallWithTheModelIsOfferedWhatItHas() async throws {
+        for file in StubDownloader.files {
+            try StubDownloader.contents[file.name]!.write(to: models.folder.url.appendingPathComponent(file.name))
+        }
+        let (setup, _, _) = launch()
+        setup.begin()
+        #expect(setup.meaning.mode == .full)
+
+        setup.done()
+        await setup.meaning.meaning.startAndWait()
+
+        #expect(models.requested.isEmpty)
+    }
+
+    @Test func onIntelTheChoiceIsOffAndDoneDownloadsNothing() async {
+        var tests = self
+        tests.isMeaningSupported = false
+        let (setup, _, _) = tests.launch()
+        setup.begin()
+        #expect(!setup.meaning.isAvailable)
+        #expect(setup.meaning.mode == .off)
+
+        setup.done()
+        await setup.meaning.meaning.startAndWait()
+
+        #expect(models.requested.isEmpty)
     }
 
     // MARK: - Shortcuts at launch and quit
@@ -178,6 +285,105 @@ struct SetupTests {
 
         #expect(setup.shortcuts.showsSpotlightFallback)
         #expect(!setup.shortcuts.canTakeEmoji)
+    }
+
+    // MARK: - Folders
+
+    private var folderSources: [String] {
+        SourceStore(defaults: defaults).folders.compactMap(\.folderPath)
+    }
+
+    @Test func aFreshInstallHasNoFolderSourcesBeforeAllow() {
+        let (setup, _, _) = launch()
+        setup.begin()
+
+        #expect(!setup.folders.isAllowed)
+        #expect(setup.folders.names == ["Downloads", "Documents", "Desktop"])
+        #expect(folderSources.isEmpty)
+    }
+
+    /// Allow acts at once, like Grant, so macOS's three folder prompts arrive
+    /// while the row is in front of the user: the File Index hears of the new
+    /// Sources straight away and starts reading them.
+    @Test func allowAddsTheThreeFolderSourcesAtOnce() {
+        let sources = SourceStore(defaults: defaults)
+        var changes = 0
+        sources.onFoldersChange = { changes += 1 }
+        let (setup, _, _) = launch(sources: sources)
+        setup.begin()
+
+        setup.folders.allow()
+
+        #expect(setup.folders.isAllowed)
+        #expect(changes == 1)
+        #expect(folderSources == Self.folders, "before Done, and whether or not Done is pressed")
+        #expect(sources.folders.allSatisfy { $0.isEnabled })
+        #expect(setup.folders.deniedNames.isEmpty)
+    }
+
+    /// Skipping leaves no folder Sources, and the built-in ones work as ever.
+    @Test func skippingFoldersLeavesNoFolderSourcesAndTheBuiltInsOn() {
+        let (setup, _, _) = launch()
+        setup.begin()
+
+        setup.done()
+
+        let sources = SourceStore(defaults: defaults)
+        #expect(sources.folders.isEmpty)
+        #expect(sources.isEnabled(.applications))
+        #expect(sources.isEnabled(.clipboardHistory))
+        #expect(sources.isEnabled(.emoji))
+        let (nextLaunch, _, _) = launch()
+        nextLaunch.begin()
+        #expect(!nextLaunch.folders.isAllowed, "Show Setup… still offers Allow")
+    }
+
+    /// A folder macOS refused is named under the row, with the way to
+    /// Privacy & Security; one that is not a Source is never asked about.
+    @Test func aFolderMacOSDeniedIsNamedAfterAllow() {
+        folderAccess.denied = [Self.folders[2]]
+        let (setup, _, _) = launch()
+        setup.begin()
+        #expect(setup.folders.deniedNames.isEmpty, "nothing asked before Allow")
+
+        setup.folders.allow()
+
+        #expect(setup.folders.isAllowed)
+        #expect(setup.folders.deniedNames == ["Desktop"])
+        folderAccess.denied = []
+        #expect(setup.folders.deniedNames.isEmpty, "allowed in System Settings")
+    }
+
+    /// An install from before Setup reads the three folders already: the
+    /// row shows them allowed and Allow changes nothing.
+    @Test func anInstallThatAlreadyReadsTheFoldersShowsThemAllowed() {
+        let sources = SourceStore(defaults: defaults)
+        sources.addFolders(Self.folders.map { URL(fileURLWithPath: $0) })
+        var changes = 0
+        sources.onFoldersChange = { changes += 1 }
+        let (setup, _, _) = launch(sources: sources)
+        setup.begin()
+
+        #expect(setup.folders.isAllowed)
+        setup.folders.allow()
+        #expect(changes == 0)
+    }
+
+    /// One removed in Settings comes back with Allow; the others stay as
+    /// they are, switched off ones included.
+    @Test func allowAddsOnlyTheFoldersThatAreMissing() {
+        let sources = SourceStore(defaults: defaults)
+        sources.addFolders(Self.folders.map { URL(fileURLWithPath: $0) })
+        sources.removeFolder(Self.folders[0])
+        sources.setEnabled(false, for: "folder:" + Self.folders[1])
+        let (setup, _, _) = launch(sources: sources)
+        setup.begin()
+        #expect(!setup.folders.isAllowed)
+
+        setup.folders.allow()
+
+        #expect(Set(folderSources) == Set(Self.folders))
+        #expect(!sources.isEnabled(.folder(path: Self.folders[1])))
     }
 
     // MARK: - Paste
@@ -263,6 +469,12 @@ final class FakeLoginItem: LoginItemService {
         guard !refuses else { throw CocoaError(.featureUnsupported) }
         isEnabled = enabled
     }
+}
+
+/// Which folders macOS refused. Nothing here asks macOS.
+@MainActor
+final class FakeFolderAccess {
+    var denied: Set<String> = []
 }
 
 @MainActor

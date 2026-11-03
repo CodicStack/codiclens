@@ -1,5 +1,5 @@
 // Schema and name/folder search text adapted from DigUp's IndexStore.swift (https://github.com/ARahim3/DigUp),
-// MIT licence — see digup-license.txt.
+// MIT licence — see docs/licenses/digup/LICENSE.
 import Foundation
 import UniformTypeIdentifiers
 
