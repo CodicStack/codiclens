@@ -5,6 +5,7 @@ enum BuiltInType: CaseIterable {
     case settings
     case clipboard
     case emoji
+    case checkForUpdates
 }
 
 enum SubjectKind {
@@ -56,6 +57,8 @@ struct Subject: Identifiable {
             return "Clipboard History"
         case .builtIn(.emoji):
             return "Emoji"
+        case .builtIn(.checkForUpdates):
+            return "Codiclens"
         case .emoji(let emoji):
             return emoji.string
         default:

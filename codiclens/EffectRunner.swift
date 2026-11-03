@@ -81,6 +81,8 @@ final class SystemEffectRunner: EffectRunner {
     var onPasteAndHide: ((@escaping () -> Void) -> Void)?
     var onQuickLook: ((QuickLookContext) -> Void)?
     var onShowSettings: (() -> Void)?
+    /// The updater, asked for a check, the waiting update or installing it.
+    var onUpdateRequest: ((UpdateRequest) -> Void)?
     var onSavePanel: ((Data, String, UTType) -> Void)?
 
     /// Where the OCR Text goes.
@@ -175,6 +177,9 @@ final class SystemEffectRunner: EffectRunner {
 
         case .showSettings:
             onShowSettings?()
+
+        case .update(let request):
+            onUpdateRequest?(request)
 
         case .savePanel(let data, let fileName, let contentType):
             onSavePanel?(data, fileName, contentType)

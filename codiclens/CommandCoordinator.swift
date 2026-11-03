@@ -1614,6 +1614,8 @@ class CommandCoordinator {
             return [.paste(.text(emoji.string))]
         case .builtIn(.settings):
             return [.hide, .showSettings]
+        case .builtIn(.checkForUpdates):
+            return [.hide, .update(.check)]
         case .builtIn(.clipboard), .builtIn(.emoji):
             return []
         }
@@ -1836,6 +1838,9 @@ class CommandCoordinator {
 
         case .openSettings:
             return [.hide, .showSettings]
+
+        case .checkForUpdates:
+            return [.hide, .update(.check)]
 
         case .service:
             return []
