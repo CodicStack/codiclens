@@ -60,6 +60,7 @@ struct SetupView: View {
 
 // MARK: - Rows
 
+/// Two checkboxes, as ADR 0016 has them, not the grouped Form's switches.
 private struct ShortcutsRowView: View {
     @Bindable var row: ShortcutsRow
 
@@ -68,9 +69,11 @@ private struct ShortcutsRowView: View {
             SpotlightFallbackNote()
         } else {
             Toggle("Use ⌘Space for Codiclens (replaces Spotlight)", isOn: $row.takesSpotlight)
+                .toggleStyle(.checkbox)
         }
         if row.canTakeEmoji {
             Toggle("Open emoji with ⌃⌘Space (replaces Emoji & Symbols)", isOn: $row.takesEmoji)
+                .toggleStyle(.checkbox)
             if row.emojiFailed { EmojiFallbackNote() }
         } else {
             EmojiFallbackNote()
