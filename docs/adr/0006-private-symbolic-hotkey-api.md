@@ -27,7 +27,7 @@ This is recorded because calling private API is the kind of thing a future reade
 
 1. **There is no System Settings row for "Show Emoji & Symbols."** The Keyboard settings pane's own definition file — `DefaultShortcutsTable.xml` inside `KeyboardSettings.appex` — enumerates every category and row the UI can render, and no row exists for the Character Palette anywhere in it. Spotlight has a checkbox the user can clear; the emoji picker does not. Advice of the form "go disable it in Keyboard Shortcuts" is a dead end, and at least one competitor's documentation gives exactly that wrong instruction.
 2. **`RegisterEventHotKey` gives us nothing to detect the conflict with.** A compiled probe registering Ctrl+Cmd+Space while the system hotkey was live returned `OSStatus 0` — not `eventHotKeyExistsErr`. Registration silently succeeds and WindowServer consumes the keystroke before our handler runs. Checking the return code would report success while the feature is dead.
-3. **This is what shipping launchers do.** Static inspection of the installed Raycast binary shows it dynamically imports `CGSIsSymbolicHotKeyEnabled`, `CGSSetSymbolicHotKeyEnabled`, and `CGSGetSymbolicHotKeyValue`, and exposes the behaviour as a setup toggle for both Spotlight and the emoji picker.
+3. **This is what shipping launchers do.** Raycast offers the same toggle for Spotlight and the emoji picker in its setup.
 
 Apple's archived documentation lists ⌃⌘Space as "Apple reserved."
 
