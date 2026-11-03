@@ -104,11 +104,7 @@ struct SourcesSettingsView: View {
     private func meaningSection(_ row: MeaningRow) -> some View {
         Section {
             HStack(spacing: 8) {
-                Picker(selection: Binding(get: { row.mode }, set: { page.setMeaningMode($0) })) {
-                    ForEach(MeaningMode.allCases, id: \.self) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                } label: {
+                MeaningModePicker(selection: Binding(get: { row.mode }, set: { page.setMeaningMode($0) })) {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Search by meaning")
                         Text(row.statusText)
@@ -191,7 +187,7 @@ struct SourcesSettingsView: View {
                 Text("No access")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                Link("Open Privacy & Security", destination: FolderAccess.privacySettings)
+                PrivacySettingsLink()
                     .font(.callout)
                     .help("Turn Codiclens on for this folder in Files and Folders")
             } else if let counts = row.counts {

@@ -947,10 +947,11 @@ unread while the backfill runs — shows the Loading Ring with "Reading" beside 
 **No folder Source until Allow.** A new install has no folder Sources: Setup's "Search your
 files" row (`FoldersRow`) offers Downloads, Documents and Desktop, and Allow adds them at
 once, so macOS's three folder prompts come while that row is on screen. A skip leaves none;
-apps, Clipboard History and Emoji work regardless. An install from before Setup asked
-(`SourceStore.isFromBeforeSetup`: Setup finished, or a `FileIndex.sqlite` on disk) keeps the
-three, and `SetupController` writes the folder list down before the File Index starts, so a
-new install's empty list survives the database its first launch creates. A folder macOS
+apps, Clipboard History and Emoji work regardless. `SourceStore` reads only the folder list
+it has written down. An install from before Setup asked kept no list and read the three;
+`SourcesMigration`, run once at launch before anything reads the Sources, writes the list
+down: the three when a `FileIndex.sqlite` is on disk, empty otherwise, so a new install's
+empty list survives the database its first launch creates. A folder macOS
 refused (`FolderAccess.isDenied`, checked by `FileIndexer.crawl` before the walk) is
 reported as `.access`, kept in `FileIndex.deniedFolders`, never marked caught up, and shows
 "No access" with an "Open Privacy & Security" link in place of its counts (and under the
@@ -1248,8 +1249,8 @@ from DigUp (MIT, `docs/licenses/digup/LICENSE`); each such file says so in its f
 **The meaning pass** (`MeaningScheduler`, on the File Index queue beside the contents pass,
 the same shape). Everything with a `FileContent` gets vectors, in the helper (the full model,
 ~1 GB while it works, gone after its 60 s idle exit; `.utility` QoS). **The Text choice**
-(`enable(textOnly: true)`, `MeaningJob.isTextOnly`) embeds the text alone in the
-`textIndexing` helper: pictures, recordings and videos are done with nothing and a PDF's
+(`enable(.text)`, `MeaningJob.mode`) embeds the text alone in the `textIndexing` helper
+(`MeaningEmbedders`, the one place a choice picks its helper): pictures, recordings and videos are done with nothing and a PDF's
 pages without words are passed. It runs under its own fingerprint
 (`MeaningPass.textOnlyFingerprint`), so going to or from it drops the vectors and embeds
 again, the text's straight from the vector cache, the rest with the encoders:
@@ -1556,7 +1557,7 @@ User types query → Enter
 | `codiclensApp.swift` | @main entry, AppDelegate adaptor |
 | `AppDelegate.swift` | Hotkey registration, QLPreviewPanel responder, Open With (`application(_:open:)`) and the Service's registration, and `isTestHost`: the test host starts nothing |
 | `Incoming.swift` | How an Incoming Subject gets in: `Incoming` read off a Service's pasteboard, `IncomingService` (the "Open in Codiclens" provider), and `LastActiveApp`, the app it came from |
-| `Setup.swift` | Setup's model: its rows (`SetupRow`: Shortcuts, Folders, Meaning, Paste, Open at login), Done, and when it shows (launch, reopen until Done) |
+| `Setup.swift` | Setup's model: its rows (`SetupRow`: Shortcuts, Folders, Meaning, Paste, Open at login), Done, and when it shows (the first launch ever, reopen until Done) |
 | `SetupView.swift` / `SetupWindow.swift` | Setup's window, and `SetupController`, which wires it to the real Mac for Setup and Settings → General |
 | `SystemShortcuts.swift` | `ShortcutTakeover`: ⌘Space and ⌃⌘Space through the private symbolic hotkey call (ADR 0016), behind `SymbolicHotKeys` |
 | `LoginItem.swift` / `AccessibilityAccess.swift` | Open at login (`SMAppService.mainApp`) and the Accessibility grant, each behind a protocol so `SetupTests` runs over fakes |
@@ -1704,7 +1705,7 @@ Real, unfixed, none urgent.
   hit-test rule are covered by `PanelLayoutTests`; the show/hide *window* sequence is
   not covered by anything.
 
-### Four deliberate exceptions to the no-timing-hacks rule
+### Six deliberate exceptions to the no-timing-hacks rule
 
 All are device, API or lifecycle constraints, not fixes. Do not "clean them up".
 
@@ -1725,3 +1726,13 @@ All are device, API or lifecycle constraints, not fixes. Do not "clean them up".
   once a day (24 h, 12 h tolerance, background QoS). It is maintenance the system times
   around battery, heat and load, not a wait for anything: whether it may prune is decided
   by the index's state, and until it is caught up the run defers.
+- `MoveToApplications.relaunch` hands a `/bin/sh` loop the copy's launch: it polls
+  `kill -0 <pid>` with `sleep 0.2` until this process has exited, then (ejecting the DMG
+  first) opens the copy. Nothing outlives the quitting process to be told it has gone, and
+  the copy must not start while this one still holds the File Index. The poll is the wait
+  for an exit, not a delay standing in for one.
+- Setup's Paste row (`PasteRowView`) re-checks the Accessibility grant on a 1 s `Timer`
+  while the window is up, besides on `didBecomeActiveNotification`. macOS posts nothing
+  when the grant changes, and the user may grant it in System Settings while Setup stays
+  in the background, so asking is the only way the tick can follow. It lives and dies with
+  the window.

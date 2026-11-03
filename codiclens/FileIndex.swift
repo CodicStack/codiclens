@@ -63,6 +63,12 @@ final class FileIndex {
     /// (`recheckAccess`).
     private(set) var deniedFolders: Set<String> = []
 
+    /// Whether macOS refused the folder Source at `path`: what Setup's
+    /// Folders row and the Sources page ask.
+    func isDenied(_ path: String) -> Bool {
+        deniedFolders.contains(path)
+    }
+
     /// How far the meaning pass has got in the enabled folder Sources, and
     /// how many vectors a search scores.
     private(set) var meaningCounts = MeaningCounts()
@@ -118,8 +124,8 @@ final class FileIndex {
         self.settledReader = FileIndexReader(url: databaseURL)
         self.vectors = MeaningVectors(databaseURL: databaseURL)
         self.queryEncoder = queryEncoder
-        self.worker = Worker(databaseURL: databaseURL, vectors: vectors, embedder: indexEmbedder,
-                             textOnlyEmbedder: textIndexEmbedder)
+        self.worker = Worker(databaseURL: databaseURL, vectors: vectors,
+                             embedders: MeaningEmbedders(full: indexEmbedder, text: textIndexEmbedder))
         meaning.apply = { [weak self] mode in self?.applyMeaning(mode) }
         meaning.removeVectors = { [weak self] in self?.worker.removeMeaning() }
         meaning.progress = { [weak self] in
@@ -366,8 +372,7 @@ extension FileIndex {
 
         private let databaseURL: URL
         private let vectors: MeaningVectors
-        private let embedder: any MeaningEmbedder & EmbeddingShutdown
-        private let textOnlyEmbedder: any MeaningEmbedder & EmbeddingShutdown
+        private let embedders: MeaningEmbedders
         private var indexer: FileIndexer?
         private var contents: FileContentScheduler?
         private var meaning: MeaningScheduler?
@@ -380,14 +385,10 @@ extension FileIndex {
         /// Already noted this session that the vector files are behind.
         private var isVectorFileStale = false
 
-        init(
-            databaseURL: URL, vectors: MeaningVectors, embedder: any MeaningEmbedder & EmbeddingShutdown,
-            textOnlyEmbedder: any MeaningEmbedder & EmbeddingShutdown
-        ) {
+        init(databaseURL: URL, vectors: MeaningVectors, embedders: MeaningEmbedders) {
             self.databaseURL = databaseURL
             self.vectors = vectors
-            self.embedder = embedder
-            self.textOnlyEmbedder = textOnlyEmbedder
+            self.embedders = embedders
         }
 
         /// Brings the index in line with the folder Sources and the skip
@@ -445,7 +446,7 @@ extension FileIndex {
         /// full speed at once, for the rest of a batch that is out.
         func setPanelOpen(_ isPanelOpen: Bool) {
             if isPanelOpen {
-                let embedders = [embedder, textOnlyEmbedder]
+                let embedders = embedders.all
                 Task { for embedder in embedders { await embedder.setFullSpeed(false) } }
             }
             queue.async { [self] in
@@ -466,7 +467,7 @@ extension FileIndex {
                 guard let meaning else { return }
                 if before != .off, before != mode {
                     meaning.disable()
-                    let embedder = before == .text ? textOnlyEmbedder : self.embedder
+                    let embedder = embedders.embedder(for: before)
                     Task { await embedder.shutdown() }
                 }
                 if mode != .off { enableMeaning(meaning) }
@@ -520,7 +521,7 @@ extension FileIndex {
         private func enableMeaning(_ meaning: MeaningScheduler) {
             do {
                 isVectorFileStale = false
-                try meaning.enable(textOnly: meaningMode == .text)
+                try meaning.enable(meaningMode)
                 meaning.resume()
             } catch {
                 NSLog("File Index meaning: %@", String(describing: error))
@@ -551,7 +552,7 @@ extension FileIndex {
                 vectors: vectors,
                 cache: cache,
                 queue: queue,
-                embed: MeaningScheduler.embedAll(full: embedder, textOnly: textOnlyEmbedder, cache: cache),
+                embed: MeaningScheduler.embedAll(embedders, cache: cache),
                 machine: .system,
                 onProgress: { [weak self] progress in self?.onProgress?(progress) }
             )
