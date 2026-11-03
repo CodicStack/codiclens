@@ -17,7 +17,8 @@ import Foundation
 ///
 /// Arguments after the flag:
 ///   `--models <folder>`  where the GGUF files are (default `ModelFiles.defaultFolder`)
-///   `--text-only`        the text model alone: the query encoder
+///   `--text-only`        the text model alone: the query encoder, or the Text choice's indexer
+///   `--max-tokens <n>`   the longest input, in tokens (default 2048; the query encoder's 512)
 ///   `--idle-exit <s>`    seconds without a request, outside a hold, before it exits
 nonisolated enum EmbeddingService {
     static let flag = "--embedding-service"
@@ -25,6 +26,10 @@ nonisolated enum EmbeddingService {
     struct Options: Equatable {
         var models = ModelFiles.defaultFolder
         var textOnly = false
+        /// One input has to fit: 2,048 tokens (the reference's cut) holds a
+        /// 1,120-token image, the ~750 tokens of 30 seconds of audio and a
+        /// Passage of 4,000 characters.
+        var maxTokens = 2048
         var idleExit: TimeInterval = 60
 
         init() {}
@@ -35,6 +40,7 @@ nonisolated enum EmbeddingService {
                 switch argument {
                 case "--models": if let path = rest.popFirst() { models = URL(fileURLWithPath: path) }
                 case "--text-only": textOnly = true
+                case "--max-tokens": if let tokens = rest.popFirst().flatMap(Int.init), tokens > 1 { maxTokens = tokens }
                 case "--idle-exit": if let seconds = rest.popFirst().flatMap(TimeInterval.init) { idleExit = seconds }
                 default: break
                 }
@@ -42,7 +48,8 @@ nonisolated enum EmbeddingService {
         }
 
         var arguments: [String] {
-            [EmbeddingService.flag, "--models", models.path, "--idle-exit", String(idleExit)]
+            [EmbeddingService.flag, "--models", models.path, "--idle-exit", String(idleExit),
+             "--max-tokens", String(maxTokens)]
                 + (textOnly ? ["--text-only"] : [])
         }
     }
@@ -105,7 +112,7 @@ nonisolated enum EmbeddingService {
             }
             media = file
         }
-        return try Embedder(text: text, media: media)
+        return try Embedder(text: text, media: media, maxTokens: options.maxTokens)
         #else
         throw EmbeddingError.unsupported
         #endif
