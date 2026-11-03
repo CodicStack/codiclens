@@ -325,7 +325,7 @@ struct MeaningIndexTests {
     @Test func textOnlyEmbedsPassagesAndPassesPicturesAndSoundByThenTheEncodersAddThem() async throws {
         let f = try MeaningFixture()
         f.meaning.disable()
-        try f.meaning.enable(textOnly: true)
+        try f.meaning.enable(.text)
         let full = String(repeating: "The lease runs a year and the rent is paid monthly. ", count: 6)
         try FileContentReaderTests.makePDF(at: f.path("lease.pdf"), pages: [full, "Scan", full])
         try f.make("note.md", contents: "budget")
