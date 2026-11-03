@@ -1249,8 +1249,8 @@ from DigUp (MIT, `docs/licenses/digup/LICENSE`); each such file says so in its f
 **The meaning pass** (`MeaningScheduler`, on the File Index queue beside the contents pass,
 the same shape). Everything with a `FileContent` gets vectors, in the helper (the full model,
 ~1 GB while it works, gone after its 60 s idle exit; `.utility` QoS). **The Text choice**
-(`enable(textOnly: true)`, `MeaningJob.isTextOnly`) embeds the text alone in the
-`textIndexing` helper: pictures, recordings and videos are done with nothing and a PDF's
+(`enable(.text)`, `MeaningJob.mode`) embeds the text alone in the `textIndexing` helper
+(`MeaningEmbedders`, the one place a choice picks its helper): pictures, recordings and videos are done with nothing and a PDF's
 pages without words are passed. It runs under its own fingerprint
 (`MeaningPass.textOnlyFingerprint`), so going to or from it drops the vectors and embeds
 again, the text's straight from the vector cache, the rest with the encoders:
