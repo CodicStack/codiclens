@@ -18,7 +18,8 @@ final class PanelPresentation {
     var hitRegions = PanelHitRegions()
 }
 
-/// Everything inside the one Panel: the Card row, a real gap, the Results Slab.
+/// Everything inside the one Panel: the Card row, a real gap, the Results Slab,
+/// and the Update Notice a gap under it while an update is waiting.
 ///
 /// There is deliberately **no Slab behind the Cards**. Each Card is its own
 /// top-level surface floating over the desktop, which is why `Style.cardSurface`
@@ -57,6 +58,7 @@ struct PanelView: View {
                 } else {
                     resultsSlab
                 }
+                updateNotice
             }
         }
         .frame(
@@ -77,6 +79,10 @@ struct PanelView: View {
             // hit region has to be surrendered explicitly or clicks keep landing
             // on a surface that is no longer there.
             if !shows { presentation.hitRegions.results = .zero }
+        }
+        // The same for the Update Notice, when the update goes.
+        .onChange(of: coordinator.updateNotice == nil) { _, gone in
+            if gone { presentation.hitRegions.notice = .zero }
         }
         .onChange(of: hasNoMatch) { _, noMatch in
             guard noMatch else { return }
@@ -170,6 +176,33 @@ struct PanelView: View {
                 presentation.hitRegions.results = frame
             }
             .transition(.scale(scale: 0.97, anchor: .top).combined(with: .opacity))
+    }
+
+    // MARK: - The Update Notice
+
+    /// The strip, a gap under whatever is last in the column: the Results
+    /// Slab, the preview, or the Card row. Being in the same column is what
+    /// moves it with the Slab — a Slab arriving or leaving animates the column
+    /// on `Motion.resize`, so the strip rides the same curve to its new place.
+    /// Its own arrival and its text hard-cut: an update turning up is
+    /// information, and the user did not cause it.
+    ///
+    /// Its frame is a hit region of its own, so a click on it acts rather
+    /// than dismissing.
+    @ViewBuilder
+    private var updateNotice: some View {
+        if let notice = coordinator.updateNotice {
+            UpdateNoticeView(notice: notice) { coordinator.actOnUpdateNotice() }
+                .frame(width: PanelLayout.updateNoticeWidth(
+                    cardCount: coordinator.cardCount,
+                    underPreview: coordinator.passagePreview != nil
+                ))
+                .onGeometryChange(for: CGRect.self) { proxy in
+                    proxy.frame(in: .named(PanelLayout.coordinateSpace))
+                } action: { frame in
+                    presentation.hitRegions.notice = frame
+                }
+        }
     }
 
     /// Whether a Slab is showing: the Results Slab, or the preview in its

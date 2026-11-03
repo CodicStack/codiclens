@@ -57,6 +57,7 @@ class PanelController {
         effectRunner = runner
         coordinator = CommandCoordinator(
             runner: runner,
+            updater: updater,
             history: .shared,
             emojiVM: EmojiSearchVM(recents: .shared, preferences: .shared),
             index: .shared,
