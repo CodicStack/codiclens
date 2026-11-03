@@ -44,7 +44,43 @@ struct PanelLayoutTests {
         #expect(
             PanelLayout.contentHeight
                 == PanelLayout.cardHeight + Style.gap + PanelLayout.maxResultsHeight
+                    + Style.gap + PanelLayout.updateNoticeHeight
         )
+    }
+
+    // MARK: - The Update Notice
+
+    /// The Panel is never resized, so the strip's room is reserved up front:
+    /// 680pt tall before the Update Notice, and exactly the gap plus the strip
+    /// taller since.
+    @Test func thePanelGrowsByExactlyTheGapPlusTheUpdateNotice() {
+        #expect(PanelLayout.updateNoticeHeight > 0)
+        #expect(PanelLayout.panelHeight == 680 + Style.gap + PanelLayout.updateNoticeHeight)
+    }
+
+    /// As wide as what it sits under: the Results Slab's width (or the width
+    /// the Slab would have, under the Card row alone), or the preview's.
+    @Test func theUpdateNoticeIsAsWideAsWhatItSitsUnder() {
+        #expect(PanelLayout.updateNoticeWidth(cardCount: 1, underPreview: false) == 304)
+        #expect(PanelLayout.updateNoticeWidth(cardCount: 2, underPreview: false) == 424)
+        #expect(PanelLayout.updateNoticeWidth(cardCount: 3, underPreview: false) == 636)
+        #expect(PanelLayout.updateNoticeWidth(cardCount: 1, underPreview: true) == 636)
+        for count in 1...PanelLayout.maxCardCount {
+            for preview in [false, true] {
+                #expect(
+                    PanelLayout.updateNoticeWidth(cardCount: count, underPreview: preview)
+                        <= PanelLayout.contentWidth
+                )
+            }
+        }
+    }
+
+    /// The lowest the strip ever sits, under the tallest Slab, is still inside
+    /// the margin.
+    @Test func theUpdateNoticeFitsUnderTheTallestSlab() {
+        let bottom = PanelLayout.cardHeight + Style.gap + PanelLayout.maxResultsHeight
+            + Style.gap + PanelLayout.updateNoticeHeight
+        #expect(bottom <= PanelLayout.contentHeight)
     }
 
     /// The Slab is the calmer surface, and a lone Card is too narrow to hold
@@ -70,7 +106,8 @@ struct PanelLayoutTests {
     @Test func theCardRowSitsUnderTheTopMargin() {
         #expect(
             PanelLayout.cardRowBottomInset
-                == Style.gap + PanelLayout.maxResultsHeight + PanelLayout.margin
+                == Style.gap + PanelLayout.maxResultsHeight
+                    + Style.gap + PanelLayout.updateNoticeHeight + PanelLayout.margin
         )
     }
 
@@ -336,6 +373,66 @@ struct PanelLayoutTests {
             + PanelLayout.maxResultsHeight - 2
         #expect(short.results.maxY < reservedBottom)
         #expect(accepts(topLeft: CGPoint(x: short.results.midX, y: reservedBottom), short) == false)
+    }
+
+    // MARK: - Clicks around the Update Notice
+
+    /// The strip a gap under `above`, as wide as the Slab under one Card.
+    private func notice(under above: CGRect) -> CGRect {
+        let width = PanelLayout.updateNoticeWidth(cardCount: 1, underPreview: false)
+        return CGRect(
+            x: (PanelLayout.panelWidth - width) / 2, y: above.maxY + Style.gap,
+            width: width, height: PanelLayout.updateNoticeHeight
+        )
+    }
+
+    @Test func aClickOnTheUpdateNoticeUnderTheSlabLandsOnThePanel() {
+        var layout = regions
+        layout.notice = notice(under: layout.results)
+
+        #expect(accepts(topLeft: CGPoint(x: layout.notice.midX, y: layout.notice.midY), layout))
+    }
+
+    @Test func aClickBetweenTheSlabAndTheUpdateNoticeIsOutside() {
+        var layout = regions
+        layout.notice = notice(under: layout.results)
+
+        let gapMiddle = CGPoint(x: layout.results.midX, y: layout.results.maxY + Style.gap / 2)
+        #expect(accepts(topLeft: gapMiddle, layout) == false)
+        #expect(
+            accepts(topLeft: CGPoint(x: layout.notice.midX, y: layout.notice.maxY + 8), layout) == false,
+            "below the strip is reserved space, not the Panel"
+        )
+        #expect(
+            accepts(topLeft: CGPoint(x: layout.notice.minX - 8, y: layout.notice.midY), layout) == false,
+            "beside the strip is outside too"
+        )
+    }
+
+    /// No Slab: the strip sits a gap under the Card row, where the Slab
+    /// would have started.
+    @Test func aClickOnTheUpdateNoticeUnderTheCardRowLandsOnThePanel() {
+        var layout = regions
+        layout.results = .zero
+        layout.notice = notice(under: layout.cards)
+
+        #expect(accepts(topLeft: CGPoint(x: layout.notice.midX, y: layout.notice.midY), layout))
+        let gapMiddle = CGPoint(x: layout.cards.midX, y: layout.cards.maxY + Style.gap / 2)
+        #expect(accepts(topLeft: gapMiddle, layout) == false)
+        #expect(
+            accepts(topLeft: CGPoint(x: layout.notice.midX, y: layout.notice.maxY + 8), layout) == false
+        )
+    }
+
+    /// The strip surrenders its region when the update goes, like the Slab.
+    @Test func aClickWhereAGoneUpdateNoticeUsedToBeIsOutside() {
+        var layout = regions
+        layout.notice = notice(under: layout.results)
+        let wasAt = CGPoint(x: layout.notice.midX, y: layout.notice.midY)
+
+        layout.notice = .zero
+
+        #expect(accepts(topLeft: wasAt, layout) == false)
     }
 
     @Test func anEmptyLayoutAcceptsNothing() {

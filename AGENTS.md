@@ -805,7 +805,8 @@ Each Card carries a `KeyHintChip` in its bottom-trailing corner while it has the
 keyboard, and only where its action has an obvious key.
 
 ### PanelView / ResultsListView — the Panel's contents
-`PanelView` is the Card row, a real gap, and the Results Slab. The Slab animates in
+`PanelView` is the Card row, a real gap, the Results Slab, and the Update Notice a gap
+under it while an update is waiting (see Updates). The Slab animates in
 when there are Results and out when there are not, with `Motion.resize` — except in
 Emoji Mode, where the grid is never empty and the Slab is unconditional. A
 display-only Query field is pinned along its bottom, because the Subject Card shows
@@ -1136,7 +1137,10 @@ install the ready update now). It is `@Observable`, so a view reading it redraws
   scheduled update, at launch too. "Will handle showing update" (only when Sparkle left it to
   us) is `.scheduledUpdateFound`, which makes the update available, or ready when already
   downloaded; "did receive user attention" and "will finish update session" clear it. A check
-  the user asked for is shown by Sparkle and raises nothing.
+  the user asked for is shown by Sparkle and raises nothing. **User attention leaves a *ready*
+  update in place**: answering "will install on quit" with true stops Sparkle running update
+  cycles, so nothing would say it again, and it still installs on quit. Only the session
+  finishing (or the install) clears a ready one.
 - "Will install update on quit" (automatic downloads) is `.readyToInstall`: the delegate
   answers true and keeps Sparkle's immediate-install block, which `.installReadyUpdate` runs
   to restart straight into it. It installs on quit either way, through normal termination.
@@ -1151,6 +1155,16 @@ install the ready update now). It is `@Observable`, so a view reading it redraws
   **`SPARKLE_PUBLIC_ED_KEY` is a placeholder (32 zero bytes)** until the real key exists
   (#20); such a build checks but rejects every update. The release script must refuse it.
 - Not started in Debug: a dev build never checks, and Check Now stays disabled.
+- **The Update Notice** (`UpdateNoticeView`, text from `UpdateNotice(state)`): its own strip
+  of bare glass (`noticeSurface()`, like a Card), a gap under the Results Slab, the preview or
+  the Card row, as wide as what it sits under (`PanelLayout.updateNoticeWidth`), with a "⌘U"
+  `KeyHintChip`. It sits in the Panel's one column, so a Slab arriving or leaving carries it on
+  `Motion.resize`; its arrival and text hard-cut. The Panel reserves `Style.gap +
+  PanelLayout.updateNoticeHeight` for it always; its frame is `hitRegions.notice`.
+  `CommandCoordinator.actOnUpdateNotice()` (⌘U in `CardContainerView`, or a click) is
+  `[.hide, .update(.showWaitingUpdate)]` when available, `[.hide, .update(.installReadyUpdate)]`
+  when ready, and nothing with no update, in every Phase. The coordinator is handed the
+  `Updater` (`FakeUpdater` by default in `CommandCoordinator.isolated`) and only reads it.
 - **Check for Updates** is a Built-in (`BuiltInType.checkForUpdates`, one Action, "Check").
   Enter is `[.hide, .update(.check)]`; `SystemEffectRunner.onUpdateRequest` hands the request
   to the updater. Its name never changes.
