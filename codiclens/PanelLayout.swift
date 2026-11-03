@@ -5,7 +5,8 @@ import CoreGraphics
 /// There is exactly one Panel — see `docs/adr/0001-single-panel-two-slabs.md` —
 /// sized once to its maximum extent and never resized. Everything the user sees
 /// is drawn inside it as SwiftUI: a row of Cards at the top, a real gap, then
-/// the Results Slab, and the Update Notice a gap under it. Both Slabs change size inside a window that does not.
+/// the Results Slab, and the Update Notice a gap under it. The Slab changes size,
+/// and the Update Notice comes and goes, inside a window that does not.
 ///
 /// **Most of the Panel is empty space, and that is the point.** A `.shadow()` on
 /// a view that fills its window is clipped by the window bounds and renders as a
