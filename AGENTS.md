@@ -1174,8 +1174,8 @@ install the ready update now). It is `@Observable`, so a view reading it redraws
   newest release's appcast), `SUPublicEDKey` from `SPARKLE_PUBLIC_ED_KEY`, a signed feed and
   verification before extraction, automatic checks on with no second-launch prompt, every
   24 h, automatic downloads off. No `SUEnable*Service` keys: not sandboxed.
-  **`SPARKLE_PUBLIC_ED_KEY` is a placeholder (32 zero bytes)** until the real key exists
-  (#20); such a build checks but rejects every update. The release script must refuse it.
+  `SPARKLE_PUBLIC_ED_KEY` is the public key for login Keychain account `codiclens`
+  (#20). The release script refuses a placeholder or a key that does not match that account.
 - Not started in Debug: a dev build never checks, and Check Now stays disabled.
 - **The Update Notice** (`UpdateNoticeView`, text from `UpdateNotice(state)`): its own strip
   of bare glass (`noticeSurface()`, like a Card), a gap under the Results Slab, the preview or
