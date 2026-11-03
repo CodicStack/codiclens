@@ -16,9 +16,6 @@ final class SetupController {
     init(meaning: MeaningSettings, defaults: UserDefaults = .standard) {
         takeover = ShortcutTakeover(hotKeys: PrivateSymbolicHotKeys(), defaults: defaults)
         openAtLogin = OpenAtLogin(service: MainAppLoginItem())
-        // Before the File Index starts and creates its database: a new
-        // install's empty folder list is kept from then on.
-        SourceStore.shared.rememberFolders()
         setup = Setup(
             shortcuts: ShortcutsRow(takeover: takeover),
             folders: FoldersRow(sources: .shared, isDenied: { FileIndex.shared.deniedFolders.contains($0) }),

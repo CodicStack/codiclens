@@ -83,6 +83,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             isMovingToApplications = true
             return
         }
+        // Before anything reads the Sources and before the File Index
+        // creates its database.
+        SourcesMigration.migrate()
         let setupController = SetupController(meaning: FileIndex.shared.meaning)
         self.setupController = setupController
         // Whatever an OS update, a restart or a crash left behind: the

@@ -6,7 +6,7 @@ import Testing
 /// `UserDefaults` suite and counts handed in by the test.
 @MainActor
 struct SourcesPageTests {
-    private let store = SourceStore(defaults: ThrowawayDefaults(), isFromBeforeSetup: true)
+    private let store = SourceStore.withDefaultFolders(defaults: ThrowawayDefaults())
     private let downloads = NSHomeDirectory() + "/Downloads"
 
     private func page(

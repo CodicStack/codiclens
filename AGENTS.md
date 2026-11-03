@@ -947,10 +947,11 @@ unread while the backfill runs — shows the Loading Ring with "Reading" beside 
 **No folder Source until Allow.** A new install has no folder Sources: Setup's "Search your
 files" row (`FoldersRow`) offers Downloads, Documents and Desktop, and Allow adds them at
 once, so macOS's three folder prompts come while that row is on screen. A skip leaves none;
-apps, Clipboard History and Emoji work regardless. An install from before Setup asked
-(`SourceStore.isFromBeforeSetup`: Setup finished, or a `FileIndex.sqlite` on disk) keeps the
-three, and `SetupController` writes the folder list down before the File Index starts, so a
-new install's empty list survives the database its first launch creates. A folder macOS
+apps, Clipboard History and Emoji work regardless. `SourceStore` reads only the folder list
+it has written down. An install from before Setup asked kept no list and read the three;
+`SourcesMigration`, run once at launch before anything reads the Sources, writes the list
+down: the three when a `FileIndex.sqlite` is on disk, empty otherwise, so a new install's
+empty list survives the database its first launch creates. A folder macOS
 refused (`FolderAccess.isDenied`, checked by `FileIndexer.crawl` before the walk) is
 reported as `.access`, kept in `FileIndex.deniedFolders`, never marked caught up, and shows
 "No access" with an "Open Privacy & Security" link in place of its counts (and under the
