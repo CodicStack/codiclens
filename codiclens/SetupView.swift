@@ -68,11 +68,11 @@ private struct ShortcutsRowView: View {
         if row.showsSpotlightFallback {
             SpotlightFallbackNote()
         } else {
-            Toggle("Use ⌘Space for Codiclens (replaces Spotlight)", isOn: $row.takesSpotlight)
+            Toggle(SystemShortcut.spotlight.choiceTitle, isOn: $row.takesSpotlight)
                 .toggleStyle(.checkbox)
         }
         if row.canTakeEmoji {
-            Toggle("Open emoji with ⌃⌘Space (replaces Emoji & Symbols)", isOn: $row.takesEmoji)
+            Toggle(SystemShortcut.emoji.choiceTitle, isOn: $row.takesEmoji)
                 .toggleStyle(.checkbox)
             if row.emojiFailed { EmojiFallbackNote() }
         } else {
@@ -106,11 +106,7 @@ private struct MeaningChoiceRowView: View {
     @Bindable var row: MeaningChoiceRow
 
     var body: some View {
-        Picker(selection: $row.mode) {
-            ForEach(MeaningMode.allCases, id: \.self) { mode in
-                Text(mode.title).tag(mode)
-            }
-        } label: {
+        MeaningModePicker(selection: $row.mode) {
             Text("Find files by what they say, show or sound like")
             if !row.isAvailable {
                 Text(MeaningSettings.Status.unavailable.text)
@@ -183,7 +179,34 @@ struct NoFolderAccessNote: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("No access to \(ListFormatter.localizedString(byJoining: names)). Turn Codiclens on for it in Files and Folders.")
                 .fixedSize(horizontal: false, vertical: true)
-            Link("Open Privacy & Security", destination: FolderAccess.privacySettings)
+            PrivacySettingsLink()
+        }
+    }
+}
+
+/// "Open Privacy & Security", to Files and Folders: under Setup's Folders
+/// row and on a refused folder's row in Settings → Sources.
+struct PrivacySettingsLink: View {
+    var body: some View {
+        Link("Open Privacy & Security", destination: FolderAccess.privacySettings)
+    }
+}
+
+// MARK: - Search by meaning's choice
+
+/// Off, Text, or Text, images and audio: Setup's Meaning row and the
+/// Sources page's, each with its own label and style.
+struct MeaningModePicker<Label: View>: View {
+    @Binding var selection: MeaningMode
+    @ViewBuilder let label: () -> Label
+
+    var body: some View {
+        Picker(selection: $selection) {
+            ForEach(MeaningMode.allCases, id: \.self) { mode in
+                Text(mode.title).tag(mode)
+            }
+        } label: {
+            label()
         }
     }
 }
