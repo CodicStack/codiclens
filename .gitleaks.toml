@@ -1,0 +1,12 @@
+title = "Codiclens secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Sparkle public verification key, matched to its Xcode build setting only"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''^codiclens\.xcodeproj/project\.pbxproj$''']
+regexes = ['''^\s*SPARKLE_PUBLIC_ED_KEY = "PYpr7tzX6a/R9PwweJULIl5xOQ1Eqq6IriUvHxGmHF4=";\s*$''']
