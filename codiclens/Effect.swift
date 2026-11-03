@@ -95,6 +95,10 @@ enum Effect {
     case openInPreview(URL)
     case quickLook(QuickLookContext)
     case showSettings
+    /// Ask the updater for something: a check, the waiting update's dialog,
+    /// or installing the ready update now. Always after `.hide`, so Sparkle's
+    /// dialog never opens over the Panel. See `Updater`.
+    case update(UpdateRequest)
     case savePanel(data: Data, fileName: String, contentType: UTType)
 }
 
@@ -116,6 +120,8 @@ extension Effect: Equatable {
         case let (.hideApplication(a), .hideApplication(b)):
             a == b
         case let (.copy(a), .copy(b)):
+            a == b
+        case let (.update(a), .update(b)):
             a == b
         case let (.paste(a), .paste(b)):
             a == b
