@@ -75,16 +75,16 @@ nonisolated struct SourceCounts: Equatable, Sendable {
 /// There is no priority between Sources: ranking is the search's business.
 @Observable
 final class SourceStore {
-    static let shared = SourceStore(isFromBeforeSetup: isFromBeforeSetup())
+    static let shared = SourceStore()
 
     /// The folders Setup offers with Allow, and that an install from before
-    /// Setup has always read.
+    /// Setup has always read (`SourcesMigration`).
     static let defaultFolders: [String] = {
         let home = NSHomeDirectory()
         return [home + "/Downloads", home + "/Documents", home + "/Desktop"]
     }()
 
-    private static let foldersKey = "codiclens.sources.folders"
+    fileprivate static let foldersKey = "codiclens.sources.folders"
     private static let disabledKey = "codiclens.sources.disabled"
     private static let skippedKey = "codiclens.sources.skipped"
     private static let skipPatternsKey = "codiclens.sources.skipPatterns"
@@ -106,15 +106,12 @@ final class SourceStore {
     /// Called after a skip switch or pattern changes. The File Index listens.
     var onRulesChange: (() -> Void)?
 
-    /// - Parameters:
-    ///   - defaults: where the Sources live. Tests pass their own.
-    ///   - isFromBeforeSetup: the install read the default folders before
-    ///     Setup asked about them, and goes on reading them. Only looked at
-    ///     while no folder Sources have been written down: otherwise a new
-    ///     install has none until Allow in Setup.
-    init(defaults: UserDefaults = .standard, isFromBeforeSetup: Bool = false) {
+    /// - Parameter defaults: where the Sources live. Tests pass their own.
+    ///   No folder Sources until some are added: a new install has none
+    ///   until Allow in Setup.
+    init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        let folders = defaults.stringArray(forKey: Self.foldersKey) ?? (isFromBeforeSetup ? Self.defaultFolders : [])
+        let folders = defaults.stringArray(forKey: Self.foldersKey) ?? []
         let disabled = Set(defaults.stringArray(forKey: Self.disabledKey) ?? [])
         let kinds: [Source.Kind] = [.applications, .clipboardHistory, .emoji, .builtIns]
             + folders.map { .folder(path: $0) }
@@ -131,27 +128,8 @@ final class SourceStore {
         )
     }
 
-    /// Whether this Mac's install is older than Setup's question about
-    /// folders: Setup was finished, or a File Index is on disk. Only asked
-    /// while no folder Sources have been written down (`rememberFolders`).
-    static func isFromBeforeSetup(
-        defaults: UserDefaults = .standard,
-        fileIndex: URL = FileIndex.defaultDatabaseURL
-    ) -> Bool {
-        defaults.object(forKey: Setup.finishedKey) as? Bool == true
-            || FileManager.default.fileExists(atPath: fileIndex.path)
-    }
-
     var folders: [Source] {
         sources.filter { $0.folderPath != nil }
-    }
-
-    /// Writes the folder Sources down as they are, before the File Index
-    /// starts. A new install's empty list has to outlive the File Index its
-    /// first launch creates, or the next launch would find it and take the
-    /// install for one from before Setup.
-    func rememberFolders() {
-        save()
     }
 
     func isEnabled(_ kind: Source.Kind) -> Bool {
@@ -239,5 +217,22 @@ final class SourceStore {
     private func save() {
         defaults.set(folders.compactMap(\.folderPath), forKey: Self.foldersKey)
         defaults.set(sources.filter { !$0.isEnabled }.map(\.id), forKey: Self.disabledKey)
+    }
+}
+
+/// The one-time move of an install from before Setup to a folder list
+/// written down (AGENTS.md › Rules: always migrate). Such an install read
+/// Downloads, Documents and Desktop with no list kept, and goes on reading
+/// them; a new install reads none until Allow. Runs at launch, before
+/// anything reads the Sources or the File Index creates its database.
+enum SourcesMigration {
+    /// Writes the folder list down if it never was: the three default
+    /// folders when a File Index is on disk, none otherwise. The empty list
+    /// is written too, so the File Index a new install's first launch
+    /// creates does not make the next launch take it for an old one.
+    static func migrate(defaults: UserDefaults = .standard, fileIndex: URL = FileIndex.defaultDatabaseURL) {
+        guard defaults.object(forKey: SourceStore.foldersKey) == nil else { return }
+        let isFromBeforeSetup = FileManager.default.fileExists(atPath: fileIndex.path)
+        defaults.set(isFromBeforeSetup ? SourceStore.defaultFolders : [], forKey: SourceStore.foldersKey)
     }
 }

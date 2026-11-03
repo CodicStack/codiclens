@@ -123,3 +123,13 @@ final class HeldSearchSchedule: SearchSchedule {
         await runSearches()
     }
 }
+
+extension SourceStore {
+    /// A store with Downloads, Documents and Desktop as folder Sources, as
+    /// after Allow in Setup or an install from before it.
+    static func withDefaultFolders(defaults: UserDefaults) -> SourceStore {
+        let store = SourceStore(defaults: defaults)
+        store.addFolders(defaultFolders.map { URL(fileURLWithPath: $0, isDirectory: true) })
+        return store
+    }
+}
