@@ -1705,7 +1705,7 @@ Real, unfixed, none urgent.
   hit-test rule are covered by `PanelLayoutTests`; the show/hide *window* sequence is
   not covered by anything.
 
-### Four deliberate exceptions to the no-timing-hacks rule
+### Six deliberate exceptions to the no-timing-hacks rule
 
 All are device, API or lifecycle constraints, not fixes. Do not "clean them up".
 
@@ -1726,3 +1726,13 @@ All are device, API or lifecycle constraints, not fixes. Do not "clean them up".
   once a day (24 h, 12 h tolerance, background QoS). It is maintenance the system times
   around battery, heat and load, not a wait for anything: whether it may prune is decided
   by the index's state, and until it is caught up the run defers.
+- `MoveToApplications.relaunch` hands a `/bin/sh` loop the copy's launch: it polls
+  `kill -0 <pid>` with `sleep 0.2` until this process has exited, then (ejecting the DMG
+  first) opens the copy. Nothing outlives the quitting process to be told it has gone, and
+  the copy must not start while this one still holds the File Index. The poll is the wait
+  for an exit, not a delay standing in for one.
+- Setup's Paste row (`PasteRowView`) re-checks the Accessibility grant on a 1 s `Timer`
+  while the window is up, besides on `didBecomeActiveNotification`. macOS posts nothing
+  when the grant changes, and the user may grant it in System Settings while Setup stays
+  in the background, so asking is the only way the tick can follow. It lives and dies with
+  the window.
