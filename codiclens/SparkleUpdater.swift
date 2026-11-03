@@ -172,6 +172,8 @@ private final class SparkleDelegate: NSObject, SPUUpdaterDelegate, SPUStandardUs
         MainActor.assumeIsolated { onEvent?(event) }
     }
 
+    /// Clears an available update; a ready one stays (see
+    /// `UpdateState.applying(_:)`).
     nonisolated func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
         MainActor.assumeIsolated { onEvent?(.userAttended) }
     }

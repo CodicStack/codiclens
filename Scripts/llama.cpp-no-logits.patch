@@ -1,4 +1,4 @@
-# Adapted from DigUp (https://github.com/ARahim3/DigUp, MIT; see codiclens/digup-license.txt).
+# Adapted from DigUp (https://github.com/ARahim3/DigUp, MIT; see docs/licenses/digup/LICENSE).
 # Applied by Scripts/build-llama.sh: an embedding context reserves no logits it never produces.
 diff --git a/src/llama-context.cpp b/src/llama-context.cpp
 index ff2ea46..511d6a4 100644

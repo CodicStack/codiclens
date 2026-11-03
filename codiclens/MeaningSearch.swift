@@ -1,5 +1,5 @@
 // The fusion of meaning and words, the per-modality scale, the lookup and kind-word rules and the stopwords are
-// adapted from DigUp's Searcher.swift (https://github.com/ARahim3/DigUp), MIT licence — see digup-license.txt.
+// adapted from DigUp's Searcher.swift (https://github.com/ARahim3/DigUp), MIT licence — see docs/licenses/digup/LICENSE.
 import Accelerate
 import Foundation
 import Metal

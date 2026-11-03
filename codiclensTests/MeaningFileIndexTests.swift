@@ -3,9 +3,9 @@ import Synchronization
 import Testing
 @testable import codiclens
 
-/// The File Index with search by meaning switched on, as the app runs it: its
-/// own queue, the switch, the backfill, `searchSettled`, and off. Over
-/// `KeywordEmbedder` for both helpers and a temporary Source.
+/// The File Index with search by meaning chosen, as the app runs it: its
+/// own queue, the choice, the backfill, `searchSettled`, and off. Over
+/// `KeywordEmbedder` for every helper and a temporary Source.
 @MainActor
 @Suite(.timeLimit(.minutes(1)))
 struct MeaningFileIndexTests {
@@ -13,13 +13,16 @@ struct MeaningFileIndexTests {
         let folder: TemporaryFolder
         let index: FileIndex
         let indexing = KeywordEmbedder()
+        /// The indexing helper of the Text choice: the text model alone.
+        let textIndexing = KeywordEmbedder()
         let query: any QueryEncoder
 
-        init(query: (any QueryEncoder)? = nil, isOn: Bool = true) throws {
+        /// The model files of `mode` are already there.
+        init(query: (any QueryEncoder)? = nil, mode: MeaningMode = .full) throws {
             folder = try TemporaryFolder()
             try folder.makeFolder("Source")
             try folder.makeFolder("models")
-            for file in StubDownloader.files {
+            for file in mode == .text ? [StubDownloader.files[0]] : StubDownloader.files {
                 try StubDownloader.contents[file.name]!.write(to: folder.url.appendingPathComponent("models/\(file.name)"))
             }
             let defaults = ThrowawayDefaults()
@@ -31,9 +34,10 @@ struct MeaningFileIndexTests {
             index = FileIndex(
                 databaseURL: folder.url.appendingPathComponent("FileIndex.sqlite"),
                 sources: SourceStore(defaults: defaults),
-                meaning: MeaningSettings(files: files, switch: MeaningSettings.Switch(isOn: isOn, save: { _ in }),
+                meaning: MeaningSettings(files: files, choice: MeaningSettings.Choice(mode: mode, save: { _ in }),
                                          isSupported: true),
                 indexEmbedder: indexing,
+                textIndexEmbedder: textIndexing,
                 queryEncoder: query
             )
         }
@@ -63,12 +67,50 @@ struct MeaningFileIndexTests {
         #expect(picture.first?.name == "seaside.png")
         #expect(picture.first?.meaning == .image)
 
-        index.meaning.setEnabled(false)
+        index.meaning.setMode(.off)
         let words = await index.searchSettled("beach")
         #expect(words.isEmpty, "off: the word search alone")
         #expect(index.meaningCounts == MeaningCounts())
         // Told on the File Index's queue, after the switch.
         while setup.indexing.shutdowns.withLock({ $0 }) == 0 { await Task.yield() }
+    }
+
+    /// The Text choice: text found by meaning through the text-only
+    /// indexing helper, pictures counted as read with nothing to look at.
+    /// Adding the encoders later gives the pictures their vectors, and the
+    /// text's come from the vector cache rather than the helper.
+    @Test func theTextChoiceEmbedsTextAloneAndTheEncodersAddPicturesLater() async throws {
+        let setup = try Setup(mode: .text)
+        let index = setup.index
+        defer { index.stop() }
+        try setup.folder.makeFile("Source/notes.md", contents: "Blend banana and berries for the smoothie.")
+        try TestMedia.picture(at: setup.folder.path("Source/seaside.png"))
+        // Enough first steps to set a Query's scale.
+        for number in 0..<24 { try setup.folder.makeFile("Source/n\(number).md", contents: "ordinary text \(number)") }
+
+        index.start()
+        await waitUntil(index) { index.meaningCounts.files == 26 && index.meaningCounts.embedded == 26 }
+        #expect(index.meaningCounts.vectors == 25)
+        #expect(index.meaning.status == .ready(index.meaningCounts))
+        #expect(setup.indexing.requests.withLock { $0 }.isEmpty, "the full helper is never started")
+        #expect(setup.textIndexing.requests.withLock { $0 }.allSatisfy { $0.hasPrefix("text ") })
+        let found = await index.searchSettled("smoothie opskrift")
+        #expect(found.first?.name == "notes.md")
+        #expect(found.first?.meaning == .text)
+        #expect(await index.searchSettled("beach").allSatisfy { $0.meaning != .image })
+
+        index.meaning.setMode(.full)
+        await waitUntil(index) { index.meaningCounts.vectors == 26 && index.meaningCounts.embedded == 26 }
+
+        let picture = await index.searchSettled("beach")
+        #expect(picture.first?.name == "seaside.png")
+        #expect(picture.first?.meaning == .image)
+        #expect((await index.searchSettled("smoothie")).first?.name == "notes.md")
+        let asked = setup.indexing.requests.withLock { $0 }
+        #expect(asked.contains { $0.hasPrefix("image seaside.png") })
+        #expect(!asked.contains { $0.hasPrefix("text ") }, "the text's vectors came from the cache")
+        // The text-only helper is told to go once the full one takes over.
+        while setup.textIndexing.shutdowns.withLock({ $0 }) == 0 { await Task.yield() }
     }
 
     @Test func aNewerSettledSearchWinsOverOneStillWaitingForItsVector() async throws {
@@ -99,7 +141,7 @@ struct MeaningFileIndexTests {
     /// the last word a prefix, so the pause changes none of the rows the
     /// keystroke put there.
     @Test func switchedOffTheSettledPassListsWhatTheKeystrokeDid() async throws {
-        let setup = try Setup(isOn: false)
+        let setup = try Setup(mode: .off)
         let index = setup.index
         defer { index.stop() }
         try setup.folder.makeFile("Source/notes.md", contents: "The invoice for March is paid.")

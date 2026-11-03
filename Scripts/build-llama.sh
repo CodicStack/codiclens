@@ -1,5 +1,5 @@
 #!/bin/bash
-# Adapted from DigUp (https://github.com/ARahim3/DigUp, MIT; see codiclens/digup-license.txt).
+# Adapted from DigUp (https://github.com/ARahim3/DigUp, MIT; see docs/licenses/digup/LICENSE).
 #
 # Builds llama.cpp (MIT), the runtime search by meaning embeds with, for arm64 with Metal: the pinned tag below plus
 # Scripts/llama.cpp-no-logits.patch, as static libraries combined into Vendor/llama/lib/libllamacpp.a, with the headers

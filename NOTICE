@@ -1,0 +1,41 @@
+Codiclens
+Copyright 2026 Emil Lykke Grann
+
+This product includes software developed as part of the Codiclens project:
+https://github.com/CodicStack/codiclens
+
+Search by meaning runs on llama.cpp and ggml (release b11567), Copyright (c)
+2023-2026 The ggml authors, under the MIT License. It is built from source with
+Scripts/llama.cpp-no-logits.patch applied and linked statically. Its license, and
+the notices of the third-party code compiled into it (llamafile, YaRN, xxHash,
+rotate-bits, Pillow's resampling and others), are distributed in
+licenses/llama-cpp (docs/licenses/llama-cpp in the source distribution).
+
+Parts of the File Index and of search by meaning are adapted from DigUp,
+Copyright (c) 2026 Abdur Rahim, under the MIT License; each such file says so in
+its first line. Its license is distributed in licenses/digup
+(docs/licenses/digup in source).
+
+Image resizing for search by meaning follows Pillow's bicubic resampling, from
+the Python Imaging Library, Copyright 1997-2011 by Secret Labs AB, Copyright
+1995-2011 by Fredrik Lundh and contributors, and Pillow, Copyright 2010 by
+Jeffrey 'Alex' Clark and contributors, under the MIT-CMU License. Its license is
+distributed in licenses/pillow (docs/licenses/pillow in source).
+
+In-app updates use Sparkle, Copyright (c) 2006-2013 Andy Matuschak and others,
+under the MIT License, with parts under BSD, MIT and zlib licenses. Its license
+is distributed in licenses/sparkle (docs/licenses/sparkle in source).
+
+The emoji data is generated from Unicode Emoji 17.0 and the Unicode Common Locale
+Data Repository (CLDR) 48, Copyright 1991-2025 Unicode, Inc., under the Unicode
+License v3. Its notice is distributed in emoji-data-license.txt
+(codiclens/emoji-data-license.txt in source). Unicode is a registered trademark
+of Unicode, Inc. in the U.S. and other countries.
+
+Optional search by meaning downloads EmbeddingGemma 2 by Google DeepMind
+(google/embeddinggemma-2), as converted to GGUF by ggml-org
+(ggml-org/embeddinggemma-2-GGUF, revision
+bfcd298762cc34d0357ece5ebdd31791a3a374d8), from Hugging Face. It is not
+included in Codiclens. It is licensed under the Apache License 2.0; see
+https://huggingface.co/google/embeddinggemma-2 and licenses/embeddinggemma-2
+(docs/licenses/embeddinggemma-2 in source).

@@ -63,6 +63,7 @@ extension CommandCoordinator {
     /// the File Index's own does with search by meaning off.
     static func isolated(
         runner: EffectRunner? = nil,
+        updater: (any Updater)? = nil,
         history: ClipboardHistory? = nil,
         emojiVM: EmojiSearchVM? = nil,
         index: AppIndex? = nil,
@@ -73,6 +74,7 @@ extension CommandCoordinator {
     ) -> CommandCoordinator {
         CommandCoordinator(
             runner: runner ?? RecordingEffectRunner(),
+            updater: updater ?? FakeUpdater(),
             history: history ?? ClipboardHistory(store: InMemoryClipboardStore()),
             emojiVM: emojiVM ?? throwawayEmojiVM(),
             index: index ?? inertAppIndex,

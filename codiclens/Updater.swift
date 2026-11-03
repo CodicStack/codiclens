@@ -24,7 +24,7 @@ enum UpdateEvent: Equatable {
     /// An automatic download finished and will install when Codiclens quits.
     case readyToInstall(version: String)
     /// The user has the update in front of them: they brought the dialog up,
-    /// or chose in it.
+    /// or chose in it. Clears an available update, not a ready one.
     case userAttended
     /// The update session ended: skipped, put off, failed or dismissed.
     case sessionFinished
@@ -51,8 +51,35 @@ extension UpdateState {
             isDownloaded ? .ready(version: version) : .available(version: version)
         case .readyToInstall(let version):
             .ready(version: version)
-        case .userAttended, .sessionFinished:
+        case .userAttended:
+            // A ready update holds Sparkle's install-now block, and answering
+            // "will install on quit" with true stops Sparkle running update
+            // cycles: nothing would ever say it is ready again. It still
+            // installs on quit, so "Restart to update" stays true until it
+            // does or the session ends.
+            if case .ready = self { self } else { .none }
+        case .sessionFinished:
             .none
+        }
+    }
+}
+
+/// What the Update Notice says, or nil when there is nothing to say. Only the
+/// newest version is ever named.
+struct UpdateNotice: Equatable {
+    let text: String
+
+    /// The key that acts on it, in its corner.
+    static let keyHint = "⌘U"
+
+    init?(_ state: UpdateState) {
+        switch state {
+        case .none:
+            return nil
+        case .available(let version):
+            text = "Codiclens \(version) is available"
+        case .ready(let version):
+            text = "Codiclens \(version) is ready · Restart to update"
         }
     }
 }

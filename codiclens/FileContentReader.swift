@@ -1,5 +1,5 @@
 // HTML stripping, the PDF page threshold and the step sizes adapted from DigUp's Extractors.swift and Model.swift
-// (https://github.com/ARahim3/DigUp), MIT licence — see digup-license.txt.
+// (https://github.com/ARahim3/DigUp), MIT licence — see docs/licenses/digup/LICENSE.
 import AppKit
 import Compression
 import PDFKit
