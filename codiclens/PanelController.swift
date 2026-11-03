@@ -29,6 +29,9 @@ class PanelController {
     /// Where an Incoming Subject came from, when Codiclens has already been
     /// activated by the time it arrives.
     private let lastActiveApp: LastActiveApp
+    /// Setup, for the Shortcuts, Open at login and Show Setup… rows in
+    /// Settings → General.
+    private let setup: SetupController
     /// Search by meaning's query encoder, held while the Panel is up.
     private let queryEncoder = QueryEncoderHold.fileIndex
     private var isTornDown = false
@@ -44,8 +47,9 @@ class PanelController {
     /// whether it is still the current one before it orders the window out.
     private var showGeneration = 0
 
-    init(lastActiveApp: LastActiveApp) {
+    init(lastActiveApp: LastActiveApp, setup: SetupController) {
         self.lastActiveApp = lastActiveApp
+        self.setup = setup
         let runner = SystemEffectRunner(pasteboard: .general)
         effectRunner = runner
         coordinator = CommandCoordinator(
@@ -501,7 +505,8 @@ class PanelController {
             )
             window.isReleasedWhenClosed = false
             window.title = "Codiclens Settings"
-            window.contentView = NSHostingView(rootView: ThemeWrapper { SettingsView() })
+            let setup = setup
+            window.contentView = NSHostingView(rootView: ThemeWrapper { SettingsView(setup: setup) })
             window.center()
             settingsWindow = window
         }
