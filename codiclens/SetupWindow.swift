@@ -1,9 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// The app's Setup over the real Mac: macOS's shortcut table, search by
-/// meaning's choice, the app's login item and the Accessibility grant, and
-/// the window that shows it.
+/// The app's Setup over the real Mac: macOS's shortcut table, the folder
+/// Sources, search by meaning's choice, the app's login item and the
+/// Accessibility grant, and the window that shows it.
 /// Made once, by `AppDelegate`, after the test-host check: nothing a test
 /// runs reaches these.
 final class SetupController {
@@ -16,8 +16,12 @@ final class SetupController {
     init(meaning: MeaningSettings, defaults: UserDefaults = .standard) {
         takeover = ShortcutTakeover(hotKeys: PrivateSymbolicHotKeys(), defaults: defaults)
         openAtLogin = OpenAtLogin(service: MainAppLoginItem())
+        // Before the File Index starts and creates its database: a new
+        // install's empty folder list is kept from then on.
+        SourceStore.shared.rememberFolders()
         setup = Setup(
             shortcuts: ShortcutsRow(takeover: takeover),
+            folders: FoldersRow(sources: .shared, isDenied: { FileIndex.shared.deniedFolders.contains($0) }),
             meaning: MeaningChoiceRow(meaning: meaning),
             paste: PasteRow(access: SystemAccessibility()),
             login: LoginRow(openAtLogin: openAtLogin),
