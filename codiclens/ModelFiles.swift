@@ -1,4 +1,4 @@
-// The pinned files and their checks are DigUp's (https://github.com/ARahim3/DigUp, MIT; see digup-license.txt).
+// The pinned files and their checks are DigUp's (https://github.com/ARahim3/DigUp, MIT; see docs/licenses/digup/LICENSE).
 
 import CryptoKit
 import Foundation

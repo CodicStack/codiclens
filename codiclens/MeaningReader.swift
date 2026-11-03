@@ -1,5 +1,5 @@
 // Audio windows, video keyframes with their average hash, and the PDF page rendering follow DigUp's
-// MediaExtractors.swift and Indexer.swift (https://github.com/ARahim3/DigUp), MIT licence — see digup-license.txt.
+// MediaExtractors.swift and Indexer.swift (https://github.com/ARahim3/DigUp), MIT licence — see docs/licenses/digup/LICENSE.
 import AVFoundation
 import CoreGraphics
 import Foundation

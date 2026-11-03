@@ -1,6 +1,5 @@
-Parts of the File Index (SQLite.swift, FileIndexStore.swift, FileIndexRules.swift, FileContent.swift,
-FileContentReader.swift) are adapted from DigUp,
-https://github.com/ARahim3/DigUp, under the following licence.
+Parts of Codiclens are adapted from DigUp, https://github.com/ARahim3/DigUp;
+each such file says so in its first line. DigUp is under the following license.
 
 MIT License
 

@@ -1,4 +1,4 @@
-// The helper's shape follows DigUp's `digup worker` (https://github.com/ARahim3/DigUp, MIT; see digup-license.txt).
+// The helper's shape follows DigUp's `digup worker` (https://github.com/ARahim3/DigUp, MIT; see docs/licenses/digup/LICENSE).
 
 import CoreGraphics
 import Foundation
