@@ -63,6 +63,12 @@ final class FileIndex {
     /// (`recheckAccess`).
     private(set) var deniedFolders: Set<String> = []
 
+    /// Whether macOS refused the folder Source at `path`: what Setup's
+    /// Folders row and the Sources page ask.
+    func isDenied(_ path: String) -> Bool {
+        deniedFolders.contains(path)
+    }
+
     /// How far the meaning pass has got in the enabled folder Sources, and
     /// how many vectors a search scores.
     private(set) var meaningCounts = MeaningCounts()

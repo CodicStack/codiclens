@@ -18,7 +18,7 @@ final class SetupController {
         openAtLogin = OpenAtLogin(service: MainAppLoginItem())
         setup = Setup(
             shortcuts: ShortcutsRow(takeover: takeover),
-            folders: FoldersRow(sources: .shared, isDenied: { FileIndex.shared.deniedFolders.contains($0) }),
+            folders: FoldersRow(sources: .shared, isDenied: FileIndex.shared.isDenied),
             meaning: MeaningChoiceRow(meaning: meaning),
             paste: PasteRow(access: SystemAccessibility()),
             login: LoginRow(openAtLogin: openAtLogin),
