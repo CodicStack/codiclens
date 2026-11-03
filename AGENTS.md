@@ -909,8 +909,8 @@ has no reliable page API.
 
 ### Settings — General and Sources
 `SettingsView` is two tabs. **General** is appearance, Emoji, the App Index refresh, Updates
-(see Updates below) and the Acknowledgements sheet, which shows every bundled licence (`emoji-data-license.txt`,
-`digup-license.txt`; both are resources through the synchronised group). **Sources**
+(see Updates below) and the Acknowledgements sheet (`AcknowledgementsView`), which lists
+`Acknowledgements.all` and shows each entry's bundled notice (see Licensing below). **Sources**
 (`SourcesSettingsView`) lists every Source (`GLOSSARY.md`) with one switch and two counts,
 indexed and total, and nothing else: there is no priority between Sources. For a folder,
 total is every row and indexed the rows whose contents are read (or that have none to read),
@@ -1150,7 +1150,7 @@ EmbeddingGemma 2 (`google/embeddinggemma-2`, Apache 2.0) on llama.cpp with Metal
 L2-normalized vectors, stored as float16 (`EmbeddingVector`). **Compute in bf16/fp32 only,
 never fp16** — its activations overflow. Wired into the File Index and its settled search
 (below), and the Panel calls both (see "What the Panel calls"). Adapted in parts
-from DigUp (MIT, `digup-license.txt`); each such file says so in its first line.
+from DigUp (MIT, `docs/licenses/digup/LICENSE`); each such file says so in its first line.
 
 - **Apple silicon only.** `MeaningSearch.isSupported` (arm64 and a Metal device) is the
   one gate; on Intel the feature is unavailable and nothing downloads.
@@ -1432,6 +1432,29 @@ cosine over **300k** vectors 5.2 ms, with the scale and each file's best 6.8 ms 
 was masks and `vDSP`; Debug 39 ms); the fusion's SQL 3–23 ms (most for several common words:
 "how to retry with backoff"). The real-model test finds all six of its files first.
 
+### Licensing — LICENSE, NOTICE and the bundled notices
+Codiclens is Apache-2.0 (`LICENSE`); `NOTICE` is attribution only. Every third-party notice
+the app owes (license audit, map issue #5) ships in the bundle and is listed by
+`Acknowledgements.all` (`Acknowledgements.swift`), which Settings shows:
+
+- `LICENSE` and `NOTICE` (repository root) are file references in the app's Resources
+  phase; `docs/licenses/` is a **folder reference** that lands as `Resources/licenses/`,
+  subfolders kept (a synchronised group would flatten the two `LICENSE`s into one). Adding a
+  file under `docs/licenses/` needs no project edit; adding a folder there needs a new
+  `Acknowledgement`.
+- `docs/licenses/llama-cpp/` is llama.cpp's `LICENSE` and `THIRD-PARTY.txt`, the notices of
+  the code `Scripts/build-llama.sh` compiles in (llamafile, YaRN, the BPE tokenizer's
+  ggllm.cpp credit, Pillow resampling, xxHash, rotate-bits, sha1/sha256, stb_image,
+  miniaudio, subprocess.h), copied from `Vendor/llama.cpp` at the pinned tag. Sparkle's
+  `LICENSE` is its SwiftPM checkout's, all sections. `emoji-data-license.txt` stays
+  generated in `codiclens/`. EmbeddingGemma 2 gets a credit only: it is downloaded, not
+  bundled.
+- **A bump updates them in the same commit.** llama.cpp: the tag in NOTICE, both files in
+  `docs/licenses/llama-cpp/` (re-run the audit's vendor check: the vendor list moves).
+  Sparkle: `docs/licenses/sparkle/LICENSE`. `AcknowledgementsTests` catches a stale llama
+  tag in NOTICE and a bundled llama.cpp or Sparkle licence that differs from the checkout
+  it was built from (those two tests run only where the checkouts are).
+
 ## Data Flow: Paste
 
 ```
@@ -1472,6 +1495,7 @@ User types query → Enter
 | `LoginItem.swift` / `AccessibilityAccess.swift` | Open at login (`SMAppService.mainApp`) and the Accessibility grant, each behind a protocol so `SetupTests` runs over fakes |
 | `MoveToApplications.swift` | The launch alert that moves a copy outside /Applications there (Release only) |
 | `codiclens-Info.plist` | Merged into the generated Info.plist: the Open With document types, the Service, and Sparkle's keys |
+| `Acknowledgements.swift` / `AcknowledgementsView.swift` | Every bundled notice (`Acknowledgements.all`) and the Settings sheet that shows them (see Licensing) |
 | `Updater.swift` | The `Updater` seam: `UpdateState` (none / available / ready, newest version only), `UpdateEvent` and the one rule that applies them, `UpdateRequest`, the Settings line |
 | `SparkleUpdater.swift` | The only file that imports Sparkle: the standard updater controller and its delegates, translated into `UpdateEvent`s |
 | `PanelController.swift` | The one window: show/hide, focus lifecycle, observers, hit test |

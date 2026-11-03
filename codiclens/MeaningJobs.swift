@@ -1,5 +1,5 @@
 // The step sizes and image budgets follow DigUp's IndexOptions (https://github.com/ARahim3/DigUp), MIT licence —
-// see digup-license.txt.
+// see docs/licenses/digup/LICENSE.
 import Foundation
 
 /// How the meaning pass walks a file, and what its vectors were made with.

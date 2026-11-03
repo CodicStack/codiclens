@@ -1,5 +1,5 @@
 // Block-wise float16 scoring adapted from DigUp's Searcher.score and VectorStorage
-// (https://github.com/ARahim3/DigUp), MIT licence — see digup-license.txt.
+// (https://github.com/ARahim3/DigUp), MIT licence — see docs/licenses/digup/LICENSE.
 import Accelerate
 import Foundation
 

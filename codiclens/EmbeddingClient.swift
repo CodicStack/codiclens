@@ -1,5 +1,5 @@
 // The query encoder's lifecycle follows DigUp's `Engine`
-// (https://github.com/ARahim3/DigUp, MIT; see digup-license.txt).
+// (https://github.com/ARahim3/DigUp, MIT; see docs/licenses/digup/LICENSE).
 
 import Foundation
 
