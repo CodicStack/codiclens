@@ -6,8 +6,9 @@ import Foundation
 /// Meaning (#26), Paste, Open at login. Every row is optional and Done always
 /// closes the window. A row holds the user's choice while the window is up
 /// (`begin`) and puts it into effect on Done (`done`), so closing the window
-/// is a skip that changes nothing. Paste is the exception: its Grant acts at
-/// once, because macOS asks the question.
+/// is a skip that changes nothing; search by meaning's download starts on
+/// Done and never before. Paste is the exception: its Grant acts at once,
+/// because macOS asks the question.
 ///
 /// Setup shows at launch and on every reopen until Done has been pressed
 /// once, then only from "Show Setup…" in Settings → General. It never nags
@@ -15,6 +16,7 @@ import Foundation
 @Observable
 final class Setup {
     let shortcuts: ShortcutsRow
+    let meaning: MeaningChoiceRow
     let paste: PasteRow
     let login: LoginRow
     private(set) var isFinished: Bool
@@ -22,8 +24,9 @@ final class Setup {
     @ObservationIgnored private let defaults: UserDefaults
     static let finishedKey = "codiclens.setup.finished"
 
-    init(shortcuts: ShortcutsRow, paste: PasteRow, login: LoginRow, defaults: UserDefaults) {
+    init(shortcuts: ShortcutsRow, meaning: MeaningChoiceRow, paste: PasteRow, login: LoginRow, defaults: UserDefaults) {
         self.shortcuts = shortcuts
+        self.meaning = meaning
         self.paste = paste
         self.login = login
         self.defaults = defaults
@@ -32,7 +35,7 @@ final class Setup {
 
     /// Every row, in the window's order. A new row goes in here and in
     /// `SetupView`.
-    private var rows: [any SetupRow] { [shortcuts, paste, login] }
+    private var rows: [any SetupRow] { [shortcuts, meaning, paste, login] }
 
     /// Whether the launch opens Setup.
     var showsAtLaunch: Bool { !isFinished }
@@ -104,6 +107,30 @@ final class ShortcutsRow: SetupRow {
     private func apply(_ chosen: Bool, to shortcut: SystemShortcut) {
         guard chosen != takeover.isOn(shortcut) else { return }
         takeover.setOn(chosen, for: shortcut)
+    }
+}
+
+/// "Search by meaning": Off, Text (310 MB), or Text, images and audio
+/// (865 MB), preselected the first time unless the user already chose. Done
+/// starts the download of what was chosen (`MeaningSettings`).
+@Observable
+final class MeaningChoiceRow: SetupRow {
+    let meaning: MeaningSettings
+    var mode = MeaningMode.full
+
+    init(meaning: MeaningSettings) {
+        self.meaning = meaning
+    }
+
+    /// False on a Mac without Apple silicon: the choice shows off, disabled.
+    var isAvailable: Bool { meaning.isSupported }
+
+    func begin(firstRun: Bool) {
+        mode = firstRun ? meaning.suggested : meaning.mode
+    }
+
+    func done() {
+        meaning.setMode(mode)
     }
 }
 
