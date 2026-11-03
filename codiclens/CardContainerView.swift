@@ -142,6 +142,12 @@ struct CardContainerView: View {
                 coordinator.toggleTextSubjectEdit()
                 return .handled
             }
+            // The Update Notice, in every Phase. With no update it does
+            // nothing, and is still taken so it never reaches the field.
+            if press.modifiers.contains(.command) && press.characters == "u" {
+                coordinator.actOnUpdateNotice()
+                return .handled
+            }
             if press.modifiers.contains(.command) &&
                 (press.key == .delete || press.characters == "\u{7F}" || press.characters == "\u{8}") {
                 // On a Clipboard Item this deletes it from Clipboard History, as
