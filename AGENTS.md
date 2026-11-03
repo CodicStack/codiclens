@@ -930,7 +930,7 @@ is a cache. "node_modules and build output" is installed dependencies
 `.docusaurus`, `.dart_tool`, `.terraform`, `.wrangler`, `.cxx`) and `build`/`dist`/`out`/
 `target`/`_build` beside a project marker. **Git worktrees** skips a folder whose `.git` is a
 *file* whose `gitdir:` names `…/worktrees/<name>` (`Entry.isLinkedWorktree`): the same repo
-again, file for file — on this Mac `repodo-project` held eighteen of them, ~224k rows. The
+again, file for file — one repo held eighteen of them, ~224k rows. The
 main checkout (`.git` a folder) is left to the Repos switch, a submodule (`gitdir:` naming
 `modules`) is not a worktree, and a worktree that is itself a Source is read.
 
