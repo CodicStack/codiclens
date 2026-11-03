@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		38E0A1F12FB1000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 38E0A1F12FB1000000000002 /* Sparkle */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		383D3EFD2FAD061500B48984 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -39,6 +43,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				38E0A1F12FB1000000000001 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -90,6 +95,7 @@
 			);
 			name = codiclens;
 			packageProductDependencies = (
+				38E0A1F12FB1000000000002 /* Sparkle */,
 			);
 			productName = codiclens;
 			productReference = 383D3EEF2FAD061400B48984 /* codiclens.app */;
@@ -146,6 +152,9 @@
 			);
 			mainGroup = 383D3EE62FAD061400B48984;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				38E0A1F12FB1000000000003 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 383D3EF02FAD061400B48984 /* Products */;
 			projectDirPath = "";
@@ -371,6 +380,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.codiclens.debug;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
+				SPARKLE_FEED_URL = "https://codiclens.codicstack.com/appcast.xml";
+				SPARKLE_PUBLIC_ED_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -426,6 +437,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.codiclens;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
+				SPARKLE_FEED_URL = "https://codiclens.codicstack.com/appcast.xml";
+				SPARKLE_PUBLIC_ED_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -509,6 +522,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		38E0A1F12FB1000000000003 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.10.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		38E0A1F12FB1000000000002 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 38E0A1F12FB1000000000003 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 383D3EE72FAD061400B48984 /* Project object */;
 }

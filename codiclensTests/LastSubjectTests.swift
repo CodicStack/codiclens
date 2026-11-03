@@ -139,7 +139,7 @@ struct LastSubjectTests {
 
         #expect(coordinator.standingSubject == nil)
         #expect(coordinator.currentSearchText == "c")
-        #expect(coordinator.subjectVM.results.map(\.displayName) == ["Clipboard"])
+        #expect(coordinator.subjectVM.results.map(\.displayName) == ["Clipboard", "Check for Updates"])
     }
 
     @Test func aDeletedClipboardItemIsNoLastSubject() throws {
