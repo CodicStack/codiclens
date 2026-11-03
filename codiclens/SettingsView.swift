@@ -91,7 +91,9 @@ private struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .sheet(isPresented: $isShowingAcknowledgements) { acknowledgementsSheet }
+        .sheet(isPresented: $isShowingAcknowledgements) {
+            AcknowledgementsView { isShowingAcknowledgements = false }
+        }
         .onAppear { setup.openAtLogin.refresh() }
     }
 
@@ -169,47 +171,5 @@ private struct GeneralSettingsView: View {
     private func preview(_ tone: SkinTone) -> String {
         guard let modifier = tone.modifier else { return "👍" }
         return "👍" + String(Character(modifier))
-    }
-
-    // MARK: - Acknowledgements
-
-    /// Third-party material the app ships, each with the licence it came
-    /// under. Both files are bundled resources.
-    private var acknowledgements: [(title: String, text: String)] {
-        [
-            ("Emoji Data", EmojiIndex.licenseText() ?? "The bundled emoji data is missing its licence file."),
-            ("DigUp", Self.bundledText("digup-license") ?? "The DigUp licence file is missing from the app.")
-        ]
-    }
-
-    private static func bundledText(_ resource: String) -> String? {
-        guard let url = Bundle.main.url(forResource: resource, withExtension: "txt") else { return nil }
-        return try? String(contentsOf: url, encoding: .utf8)
-    }
-
-    private var acknowledgementsSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Acknowledgements").font(.headline)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(acknowledgements, id: \.title) { acknowledgement in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(acknowledgement.title).font(.subheadline.weight(.semibold))
-                            Text(acknowledgement.text)
-                                .font(.system(.caption, design: .monospaced))
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            HStack {
-                Spacer()
-                Button("Done") { isShowingAcknowledgements = false }
-                    .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(20)
-        .frame(width: 520, height: 420)
     }
 }
