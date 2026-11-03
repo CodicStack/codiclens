@@ -15,6 +15,15 @@ enum SystemShortcut: CaseIterable, Hashable {
         }
     }
 
+    /// The choice's words, in Setup and in Settings → General. No em
+    /// dashes: the user's copy.
+    var choiceTitle: String {
+        switch self {
+        case .spotlight: "Use ⌘Space for Codiclens (replaces Spotlight)"
+        case .emoji: "Open emoji with ⌃⌘Space (replaces Emoji & Symbols)"
+        }
+    }
+
     /// Where the user's choice is kept. Absent until Setup's Done or a
     /// Settings toggle: a fresh install takes nothing.
     var defaultsKey: String {

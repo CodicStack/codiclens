@@ -106,9 +106,9 @@ private struct GeneralSettingsView: View {
     private var shortcutRows: some View {
         let takeover = setup.takeover
         if takeover.isAvailable {
-            Toggle("Use ⌘Space for Codiclens (replaces Spotlight)", isOn: binding(for: .spotlight))
+            Toggle(SystemShortcut.spotlight.choiceTitle, isOn: binding(for: .spotlight))
             if takeover.isOn(.spotlight), takeover.hasFailed(.spotlight) { SpotlightFallbackNote() }
-            Toggle("Open emoji with ⌃⌘Space (replaces Emoji & Symbols)", isOn: binding(for: .emoji))
+            Toggle(SystemShortcut.emoji.choiceTitle, isOn: binding(for: .emoji))
             if takeover.isOn(.emoji), takeover.hasFailed(.emoji) { EmojiFallbackNote() }
         } else {
             SpotlightFallbackNote()
