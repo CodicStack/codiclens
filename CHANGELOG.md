@@ -4,6 +4,8 @@ What changed in each release of Codiclens. Notes for the next release go under U
 
 ## Unreleased
 
+## 1.0.1 (2026-11-03)
+
 - Maintenance release to verify signed updates from v1.0.0. App behavior is unchanged.
 
 ## 1.0.0 (2026-11-03)
