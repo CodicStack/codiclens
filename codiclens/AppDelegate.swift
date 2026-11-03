@@ -40,6 +40,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Settings.
     private var setupController: SetupController?
 
+    /// Sparkle, behind the `Updater` seam. Made after Move to Applications,
+    /// so a copy about to be replaced never checks.
+    private var updater: SparkleUpdater?
+
     /// The launch offered Move to Applications and the copy is opening in
     /// this one's place: nothing was started, so nothing is torn down.
     private var isMovingToApplications = false
@@ -84,7 +88,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Whatever an OS update, a restart or a crash left behind: the
         // shortcuts the user gave Codiclens are taken again.
         setupController.takeover.takeAtLaunch()
-        panelController = PanelController(lastActiveApp: lastActiveApp, setup: setupController)
+        let updater = SparkleUpdater()
+        self.updater = updater
+        panelController = PanelController(lastActiveApp: lastActiveApp, setup: setupController, updater: updater)
         // Off-thread, so neither launch nor the first Emoji Mode waits on the
         // 226 KB dataset being decoded.
         EmojiIndex.prewarm()
