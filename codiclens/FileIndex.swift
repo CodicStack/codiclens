@@ -20,12 +20,15 @@ import Synchronization
 /// being here.
 @Observable
 final class FileIndex {
-    static let shared = FileIndex(
-        databaseURL: FileIndex.defaultDatabaseURL,
-        sources: .shared,
-        meaning: MeaningSettings(files: ModelFiles(), switch: .defaults(.standard)),
-        prune: NSBackgroundActivityScheduler.vectorCachePrune()
-    )
+    static let shared: FileIndex = {
+        let files = ModelFiles()
+        return FileIndex(
+            databaseURL: FileIndex.defaultDatabaseURL,
+            sources: .shared,
+            meaning: MeaningSettings(files: files, choice: .defaults(.standard, files: files)),
+            prune: NSBackgroundActivityScheduler.vectorCachePrune()
+        )
+    }()
 
     /// `~/Library/Application Support/codiclens/FileIndex.sqlite`.
     static var defaultDatabaseURL: URL {
@@ -35,7 +38,7 @@ final class FileIndex {
     }
 
     let sources: SourceStore
-    /// Search by meaning's switch and status, for the Sources page.
+    /// Search by meaning's choice and status, for the Sources page and Setup.
     let meaning: MeaningSettings
 
     /// How much of each folder Source is in the index, keyed by its path in
@@ -54,6 +57,11 @@ final class FileIndex {
 
     private var crawlingFolders: Set<String> = []
     private var isReadingContents = false
+
+    /// Folder Sources macOS refused when the crawl came to them, by their
+    /// path in `SourceStore`. Nothing in them is read until it lets go
+    /// (`recheckAccess`).
+    private(set) var deniedFolders: Set<String> = []
 
     /// How far the meaning pass has got in the enabled folder Sources, and
     /// how many vectors a search scores.
@@ -87,17 +95,20 @@ final class FileIndex {
     @ObservationIgnored private(set) var isStarted = false
 
     /// - Parameters:
-    ///   - meaning: search by meaning's switch. A test's is off unless it
+    ///   - meaning: search by meaning's choice. A test's is off unless it
     ///     hands in one that is not; nothing downloads or embeds without it.
-    ///   - indexEmbedder, queryEncoder: the two helpers; tests pass their own.
+    ///   - indexEmbedder, textIndexEmbedder, queryEncoder: the helpers that
+    ///     index with the encoders and without them (the Text choice), and
+    ///     the query encoder; tests pass their own.
     ///   - prune: what runs the vector cache's daily prune from `start()`.
     ///     None unless handed one: the app's is the system's scheduler.
     init(
         databaseURL: URL,
         sources: SourceStore,
-        meaning: MeaningSettings = MeaningSettings(files: ModelFiles(), switch: .off),
-        indexEmbedder: any MeaningEmbedder & EmbeddingShutdown = EmbeddingClient.helper(textOnly: false, idleExit: 60),
-        queryEncoder: any QueryEncoder = EmbeddingClient.helper(textOnly: true, idleExit: 60),
+        meaning: MeaningSettings = MeaningSettings(files: ModelFiles(), choice: .off),
+        indexEmbedder: any MeaningEmbedder & EmbeddingShutdown = EmbeddingClient.helper(.indexing, idleExit: 60),
+        textIndexEmbedder: any MeaningEmbedder & EmbeddingShutdown = EmbeddingClient.helper(.textIndexing, idleExit: 60),
+        queryEncoder: any QueryEncoder = EmbeddingClient.helper(.queries, idleExit: 60),
         prune: (any BackgroundSchedule)? = nil
     ) {
         self.sources = sources
@@ -107,8 +118,9 @@ final class FileIndex {
         self.settledReader = FileIndexReader(url: databaseURL)
         self.vectors = MeaningVectors(databaseURL: databaseURL)
         self.queryEncoder = queryEncoder
-        self.worker = Worker(databaseURL: databaseURL, vectors: vectors, embedder: indexEmbedder)
-        meaning.apply = { [weak self] isOn in self?.applyMeaning(isOn) }
+        self.worker = Worker(databaseURL: databaseURL, vectors: vectors, embedder: indexEmbedder,
+                             textOnlyEmbedder: textIndexEmbedder)
+        meaning.apply = { [weak self] mode in self?.applyMeaning(mode) }
         meaning.removeVectors = { [weak self] in self?.worker.removeMeaning() }
         meaning.progress = { [weak self] in
             MeaningSettings.Progress(counts: self?.meaningCounts ?? MeaningCounts(), isLowPower: self?.isLowPower ?? false)
@@ -245,12 +257,24 @@ final class FileIndex {
 
     // MARK: - Sources
 
+    /// Crawls again each folder Source macOS refused, if it now lets it be
+    /// read: the user may have turned Codiclens on in Privacy & Security.
+    /// One that is still refused stays as it is, without asking macOS again.
+    /// The app calls it whenever it comes to the front.
+    func recheckAccess() {
+        let denied = sources.folders.filter { source in
+            source.isEnabled && source.folderPath.map(deniedFolders.contains) == true
+        }
+        guard !denied.isEmpty else { return }
+        worker.recrawl(denied.compactMap(\.folderPath).map(FileIndexer.realPath))
+    }
+
     // MARK: - Search by meaning
 
-    private func applyMeaning(_ isOn: Bool) {
-        isMeaningApplied.withLock { $0 = isOn }
-        worker.setMeaning(isOn)
-        if !isOn {
+    private func applyMeaning(_ mode: MeaningMode) {
+        isMeaningApplied.withLock { $0 = mode != .off }
+        worker.setMeaning(mode)
+        if mode == .off {
             let encoder = queryEncoder
             Task { await encoder.shutdown() }
             meaningCounts = MeaningCounts()
@@ -265,6 +289,7 @@ final class FileIndex {
         searchableFolders.withLock { searchable in
             searchable = folders.filter(\.isEnabled).map { FileIndexer.realPath($0.path) }
         }
+        deniedFolders.formIntersection(folders.map(\.path))
         worker.apply(folders, rules: sources.fileIndexRules)
         refreshCounts()
     }
@@ -281,6 +306,14 @@ final class FileIndex {
             }
         case .readingContents(let isReading):
             DispatchQueue.main.async { [weak self] in self?.isReadingContents = isReading }
+        case .access(let source, let isDenied):
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let paths = sources.folders.compactMap(\.folderPath).filter { FileIndexer.realPath($0) == source }
+                for path in paths where deniedFolders.contains(path) != isDenied {
+                    if isDenied { deniedFolders.insert(path) } else { deniedFolders.remove(path) }
+                }
+            }
         case .wrote:
             refreshCounts()
         }
@@ -334,6 +367,7 @@ extension FileIndex {
         private let databaseURL: URL
         private let vectors: MeaningVectors
         private let embedder: any MeaningEmbedder & EmbeddingShutdown
+        private let textOnlyEmbedder: any MeaningEmbedder & EmbeddingShutdown
         private var indexer: FileIndexer?
         private var contents: FileContentScheduler?
         private var meaning: MeaningScheduler?
@@ -342,14 +376,18 @@ extension FileIndex {
         private var isPanelOpen = false
         private var writer: FileIndexWriter?
         private var cache: VectorCache?
-        private var isMeaningOn = false
+        private var meaningMode = MeaningMode.off
         /// Already noted this session that the vector files are behind.
         private var isVectorFileStale = false
 
-        init(databaseURL: URL, vectors: MeaningVectors, embedder: any MeaningEmbedder & EmbeddingShutdown) {
+        init(
+            databaseURL: URL, vectors: MeaningVectors, embedder: any MeaningEmbedder & EmbeddingShutdown,
+            textOnlyEmbedder: any MeaningEmbedder & EmbeddingShutdown
+        ) {
             self.databaseURL = databaseURL
             self.vectors = vectors
             self.embedder = embedder
+            self.textOnlyEmbedder = textOnlyEmbedder
         }
 
         /// Brings the index in line with the folder Sources and the skip
@@ -376,6 +414,23 @@ extension FileIndex {
             }
         }
 
+        /// Crawls `roots` again, if they are still Sources, and reads what
+        /// the crawl found.
+        func recrawl(_ roots: [String]) {
+            queue.async { [self] in
+                guard let indexer else { return }
+                do {
+                    for root in roots where indexer.watchedPaths.contains(root) {
+                        try indexer.crawl(root)
+                    }
+                    contents?.resume()
+                    meaning?.resume()
+                } catch {
+                    NSLog("File Index: %@", String(describing: error))
+                }
+            }
+        }
+
         func setLowPower(_ isLowPower: Bool) {
             queue.async { [self] in
                 self.isLowPower = isLowPower
@@ -390,8 +445,8 @@ extension FileIndex {
         /// full speed at once, for the rest of a batch that is out.
         func setPanelOpen(_ isPanelOpen: Bool) {
             if isPanelOpen {
-                let embedder = self.embedder
-                Task { await embedder.setFullSpeed(false) }
+                let embedders = [embedder, textOnlyEmbedder]
+                Task { for embedder in embedders { await embedder.setFullSpeed(false) } }
             }
             queue.async { [self] in
                 self.isPanelOpen = isPanelOpen
@@ -399,20 +454,22 @@ extension FileIndex {
             }
         }
 
-        /// Search by meaning on: the vectors adopted and opened, and the
-        /// backfill under way. Off: no more embedding, the vectors' memory
-        /// given back and the indexing helper told to go.
-        func setMeaning(_ isOn: Bool) {
+        /// Search by meaning chosen: the vectors adopted and opened, and the
+        /// backfill under way, with or without pictures and sound. Off: no
+        /// more embedding, the vectors' memory given back and the indexing
+        /// helper told to go. From one choice to the other, the helper of
+        /// the one before is told to go.
+        func setMeaning(_ mode: MeaningMode) {
             queue.async { [self] in
-                isMeaningOn = isOn
+                let before = meaningMode
+                meaningMode = mode
                 guard let meaning else { return }
-                if isOn {
-                    enableMeaning(meaning)
-                } else {
+                if before != .off, before != mode {
                     meaning.disable()
-                    let embedder = self.embedder
+                    let embedder = before == .text ? textOnlyEmbedder : self.embedder
                     Task { await embedder.shutdown() }
                 }
+                if mode != .off { enableMeaning(meaning) }
                 onProgress?(.wrote)
             }
         }
@@ -463,7 +520,7 @@ extension FileIndex {
         private func enableMeaning(_ meaning: MeaningScheduler) {
             do {
                 isVectorFileStale = false
-                try meaning.enable()
+                try meaning.enable(textOnly: meaningMode == .text)
                 meaning.resume()
             } catch {
                 NSLog("File Index meaning: %@", String(describing: error))
@@ -494,7 +551,7 @@ extension FileIndex {
                 vectors: vectors,
                 cache: cache,
                 queue: queue,
-                embed: MeaningScheduler.embedAll(with: embedder, cache: cache),
+                embed: MeaningScheduler.embedAll(full: embedder, textOnly: textOnlyEmbedder, cache: cache),
                 machine: .system,
                 onProgress: { [weak self] progress in self?.onProgress?(progress) }
             )
@@ -516,7 +573,7 @@ extension FileIndex {
             self.indexer = indexer
             self.contents = contents
             self.meaning = meaning
-            if isMeaningOn { enableMeaning(meaning) }
+            if meaningMode != .off { enableMeaning(meaning) }
             return indexer
         }
 

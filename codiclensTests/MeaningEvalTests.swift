@@ -49,7 +49,7 @@ struct MeaningEvalTests {
         let opened = vectors.open(expectedRows: reader.vectorRows())
         print("\(cases.count) queries over \(sources.count) Sources, \(opened ? vectors.liveCount : 0) vectors"
               + (opened ? "" : " (the vector files do not match the database: words only)"))
-        let encoder = EmbeddingClient.helper(textOnly: true, idleExit: 30)
+        let encoder = EmbeddingClient.helper(.queries, idleExit: 30)
         try await encoder.hold()
         defer { Task { await encoder.shutdown() } }
 
