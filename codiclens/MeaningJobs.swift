@@ -1,5 +1,5 @@
 // The step sizes and image budgets follow DigUp's IndexOptions (https://github.com/ARahim3/DigUp), MIT licence —
-// see digup-license.txt.
+// see docs/licenses/digup/LICENSE.
 import Foundation
 
 /// How the meaning pass walks a file, and what its vectors were made with.
@@ -49,6 +49,16 @@ nonisolated enum MeaningPass {
         "audio \(audioWindow)/\(audioHop)s",
         "steps \(firstPages)p \(firstChunks)c \(firstSeconds)s",
     ].joined(separator: "; ")
+
+    /// The Text choice's: text alone, so going to or from it embeds again,
+    /// through `VectorCache`, where every text vector is under the same key
+    /// either way. Pictures, sound and pages without words, done with
+    /// nothing under this one, are looked at once the encoders are added.
+    static let textOnlyFingerprint = fingerprint + "; text only"
+
+    static func fingerprint(for mode: MeaningMode) -> String {
+        mode == .text ? textOnlyFingerprint : fingerprint
+    }
 }
 
 /// The next of one file for the meaning pass to embed, as the writer hands it
@@ -78,12 +88,19 @@ nonisolated struct MeaningJob: Equatable, Sendable {
     /// Passage (`pagesWithText` is from 1) is embedded as a picture.
     var pages: Range<Int> = 0..<0
     var pagesWithText: Set<Int> = []
+    /// The choice it was handed out under. Text: only the text is
+    /// embedded, by the text model alone; a picture, a recording or a video
+    /// gets nothing and is done, and a PDF's pages without words are passed.
+    var mode = MeaningMode.full
+
+    var isTextOnly: Bool { mode == .text }
 
     /// Audio, video and PDFs take a batch of their own: one can be minutes
-    /// of work.
+    /// of work. Text-only, a recording or a video is none.
     var isHeavy: Bool {
         switch content {
-        case .pdf, .audio, .video: true
+        case .pdf: true
+        case .audio, .video: !isTextOnly
         case .screenshot, .image, .document, .text, .code: false
         }
     }
@@ -135,7 +152,7 @@ nonisolated extension FileIndexWriter {
     /// first step before any file's later ones, and within each in
     /// `FileContent`'s order, newest first. A file waits until the contents
     /// pass has read its first step: that is where its text comes from.
-    func meaningJobs(limit: Int, sources: [String]) throws -> [MeaningJob] {
+    func meaningJobs(limit: Int, sources: [String], mode: MeaningMode = .full) throws -> [MeaningJob] {
         var jobs: [MeaningJob] = []
         let list = FileIndexReader.jsonList(sources)
         for state in ["pending", "partial"] where jobs.count < limit {
@@ -146,14 +163,14 @@ nonisolated extension FileIndexWriter {
                     AND source IN (SELECT value FROM json_each(?))
                 ORDER BY content, mtime DESC LIMIT ?
                 """, [.text(state), .text(list), .int(Int64(limit - jobs.count))]) { rows.append(MeaningRow($0)) }
-            jobs += try rows.compactMap(meaningJob)
+            jobs += try rows.compactMap { try meaningJob($0, mode: mode) }
         }
         return jobs
     }
 
     /// The files among `ids` that have something to embed now, and those
     /// that will once the contents pass has read them.
-    func meaningJobs(ids: [Int64]) throws -> (jobs: [MeaningJob], waiting: [Int64]) {
+    func meaningJobs(ids: [Int64], mode: MeaningMode = .full) throws -> (jobs: [MeaningJob], waiting: [Int64]) {
         var jobs: [MeaningJob] = []
         var waiting: [Int64] = []
         for id in ids {
@@ -169,7 +186,7 @@ nonisolated extension FileIndexWriter {
             guard let row else { continue }
             if isUnread {
                 waiting.append(id)
-            } else if let job = try meaningJob(row) {
+            } else if let job = try meaningJob(row, mode: mode) {
                 jobs.append(job)
             }
         }
@@ -200,10 +217,11 @@ nonisolated extension FileIndexWriter {
 
     /// The job for one file: its next text to embed, or for a PDF its next
     /// pages. Pictures, recordings and videos are read by `MeaningReader`.
-    private func meaningJob(_ row: MeaningRow) throws -> MeaningJob? {
+    private func meaningJob(_ row: MeaningRow, mode: MeaningMode) throws -> MeaningJob? {
         guard let content = row.content else { return nil }
         var job = MeaningJob(id: row.id, path: row.path, content: content, size: row.size, mtime: row.mtime,
                              isFirstStep: row.isFirstStep, vecTo: row.vecTo)
+        job.mode = mode
         switch content {
         case .pdf:
             let start = Int(row.vecTo)

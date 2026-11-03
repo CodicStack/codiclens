@@ -29,6 +29,11 @@ class PanelController {
     /// Where an Incoming Subject came from, when Codiclens has already been
     /// activated by the time it arrives.
     private let lastActiveApp: LastActiveApp
+    /// Setup, for the Shortcuts, Open at login and Show Setup… rows in
+    /// Settings → General.
+    private let setupController: SetupController
+    /// For the Check for Updates Built-in and Settings → General → Updates.
+    private let updater: any Updater
     /// Search by meaning's query encoder, held while the Panel is up.
     private let queryEncoder = QueryEncoderHold.fileIndex
     private var isTornDown = false
@@ -44,12 +49,15 @@ class PanelController {
     /// whether it is still the current one before it orders the window out.
     private var showGeneration = 0
 
-    init(lastActiveApp: LastActiveApp) {
+    init(lastActiveApp: LastActiveApp, setupController: SetupController, updater: any Updater) {
         self.lastActiveApp = lastActiveApp
+        self.setupController = setupController
+        self.updater = updater
         let runner = SystemEffectRunner(pasteboard: .general)
         effectRunner = runner
         coordinator = CommandCoordinator(
             runner: runner,
+            updater: updater,
             history: .shared,
             emojiVM: EmojiSearchVM(recents: .shared, preferences: .shared),
             index: .shared,
@@ -77,6 +85,12 @@ class PanelController {
 
         runner.onShowSettings = { [weak self] in
             self?.showSettings()
+        }
+
+        // After `.hide`: the Panel is already on its way out when Sparkle's
+        // dialog comes up.
+        runner.onUpdateRequest = { [weak updater] request in
+            updater?.request(request)
         }
 
         runner.onSavePanel = { [weak self] (data: Data, name: String, type: UTType) in
@@ -501,7 +515,11 @@ class PanelController {
             )
             window.isReleasedWhenClosed = false
             window.title = "Codiclens Settings"
-            window.contentView = NSHostingView(rootView: ThemeWrapper { SettingsView() })
+            let setupController = setupController
+            let updater = updater
+            window.contentView = NSHostingView(rootView: ThemeWrapper {
+                SettingsView(setupController: setupController, updater: updater)
+            })
             window.center()
             settingsWindow = window
         }

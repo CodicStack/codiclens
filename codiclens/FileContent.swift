@@ -1,5 +1,5 @@
 // Chunking and the screenshot test adapted from DigUp's Extractors.swift and Rules.swift
-// (https://github.com/ARahim3/DigUp), MIT licence — see digup-license.txt.
+// (https://github.com/ARahim3/DigUp), MIT licence — see docs/licenses/digup/LICENSE.
 import Foundation
 
 /// What the File Index reads out of a file besides its name, and so when:

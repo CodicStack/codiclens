@@ -41,6 +41,24 @@ nonisolated struct Source: Identifiable, Hashable, Sendable {
     }
 }
 
+/// Whether macOS lets Codiclens read a folder. Downloads, Documents and
+/// Desktop each need the user's yes, asked the first time anything lists
+/// them; after a no, listing fails until it is turned on in Privacy &
+/// Security → Files and Folders.
+nonisolated enum FolderAccess {
+    /// Files and Folders in Privacy & Security.
+    static let privacySettings = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders")!
+
+    /// Listing `path` is refused. Asks macOS if it has not been asked, so it
+    /// is only for a folder that is about to be read anyway. A folder that
+    /// is not there is not refused.
+    static func isDenied(_ path: String) -> Bool {
+        guard let directory = opendir(path) else { return errno == EPERM || errno == EACCES }
+        closedir(directory)
+        return false
+    }
+}
+
 /// How much of a Source has been read. For a folder Source both numbers come
 /// from the File Index: `total` is every file and folder the crawl found,
 /// `indexed` those whose contents are read too, or that have none to read.
@@ -59,13 +77,14 @@ nonisolated struct SourceCounts: Equatable, Sendable {
 final class SourceStore {
     static let shared = SourceStore()
 
-    /// The folder Sources a new install starts with.
+    /// The folders Setup offers with Allow, and that an install from before
+    /// Setup has always read (`SourcesMigration`).
     static let defaultFolders: [String] = {
         let home = NSHomeDirectory()
         return [home + "/Downloads", home + "/Documents", home + "/Desktop"]
     }()
 
-    private static let foldersKey = "codiclens.sources.folders"
+    fileprivate static let foldersKey = "codiclens.sources.folders"
     private static let disabledKey = "codiclens.sources.disabled"
     private static let skippedKey = "codiclens.sources.skipped"
     private static let skipPatternsKey = "codiclens.sources.skipPatterns"
@@ -88,9 +107,11 @@ final class SourceStore {
     var onRulesChange: (() -> Void)?
 
     /// - Parameter defaults: where the Sources live. Tests pass their own.
+    ///   No folder Sources until some are added: a new install has none
+    ///   until Allow in Setup.
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        let folders = defaults.stringArray(forKey: Self.foldersKey) ?? Self.defaultFolders
+        let folders = defaults.stringArray(forKey: Self.foldersKey) ?? []
         let disabled = Set(defaults.stringArray(forKey: Self.disabledKey) ?? [])
         let kinds: [Source.Kind] = [.applications, .clipboardHistory, .emoji, .builtIns]
             + folders.map { .folder(path: $0) }
@@ -126,12 +147,24 @@ final class SourceStore {
     /// Adds a folder Source, enabled. Returns false if it is already one.
     @discardableResult
     func addFolder(_ url: URL) -> Bool {
-        let path = url.standardizedFileURL.path
-        guard !folders.contains(where: { $0.folderPath == path }) else { return false }
-        sources.append(Source(kind: .folder(path: path), isEnabled: true))
+        addFolders([url]) == 1
+    }
+
+    /// Adds each folder that is not already a Source, enabled, as one change
+    /// for the File Index. Returns how many were added.
+    @discardableResult
+    func addFolders(_ urls: [URL]) -> Int {
+        var added = 0
+        for url in urls {
+            let path = url.standardizedFileURL.path
+            guard !folders.contains(where: { $0.folderPath == path }) else { continue }
+            sources.append(Source(kind: .folder(path: path), isEnabled: true))
+            added += 1
+        }
+        guard added > 0 else { return 0 }
         save()
         onFoldersChange?()
-        return true
+        return added
     }
 
     /// Removes a folder Source. Its rows leave the File Index.
@@ -184,5 +217,22 @@ final class SourceStore {
     private func save() {
         defaults.set(folders.compactMap(\.folderPath), forKey: Self.foldersKey)
         defaults.set(sources.filter { !$0.isEnabled }.map(\.id), forKey: Self.disabledKey)
+    }
+}
+
+/// The one-time move of an install from before Setup to a folder list
+/// written down (AGENTS.md › Rules: always migrate). Such an install read
+/// Downloads, Documents and Desktop with no list kept, and goes on reading
+/// them; a new install reads none until Allow. Runs at launch, before
+/// anything reads the Sources or the File Index creates its database.
+enum SourcesMigration {
+    /// Writes the folder list down if it never was: the three default
+    /// folders when a File Index is on disk, none otherwise. The empty list
+    /// is written too, so the File Index a new install's first launch
+    /// creates does not make the next launch take it for an old one.
+    static func migrate(defaults: UserDefaults = .standard, fileIndex: URL = FileIndex.defaultDatabaseURL) {
+        guard defaults.object(forKey: SourceStore.foldersKey) == nil else { return }
+        let isFromBeforeSetup = FileManager.default.fileExists(atPath: fileIndex.path)
+        defaults.set(isFromBeforeSetup ? SourceStore.defaultFolders : [], forKey: SourceStore.foldersKey)
     }
 }

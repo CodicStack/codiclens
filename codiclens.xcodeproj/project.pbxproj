@@ -6,6 +6,13 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		38E0A1F12FB1000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 38E0A1F12FB1000000000002 /* Sparkle */; };
+		32A0C0DE2FB2000000000011 /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 32A0C0DE2FB2000000000001 /* LICENSE */; };
+		32A0C0DE2FB2000000000012 /* NOTICE in Resources */ = {isa = PBXBuildFile; fileRef = 32A0C0DE2FB2000000000002 /* NOTICE */; };
+		32A0C0DE2FB2000000000013 /* licenses in Resources */ = {isa = PBXBuildFile; fileRef = 32A0C0DE2FB2000000000003 /* licenses */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		383D3EFD2FAD061500B48984 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -19,6 +26,9 @@
 /* Begin PBXFileReference section */
 		383D3EEF2FAD061400B48984 /* codiclens.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = codiclens.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		383D3EFC2FAD061500B48984 /* codiclensTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = codiclensTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		32A0C0DE2FB2000000000001 /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
+		32A0C0DE2FB2000000000002 /* NOTICE */ = {isa = PBXFileReference; lastKnownFileType = text; path = NOTICE; sourceTree = "<group>"; };
+		32A0C0DE2FB2000000000003 /* licenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = licenses; path = docs/licenses; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -39,6 +49,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				38E0A1F12FB1000000000001 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -57,6 +68,9 @@
 			children = (
 				383D3EF12FAD061400B48984 /* codiclens */,
 				383D3EFF2FAD061500B48984 /* codiclensTests */,
+				32A0C0DE2FB2000000000001 /* LICENSE */,
+				32A0C0DE2FB2000000000002 /* NOTICE */,
+				32A0C0DE2FB2000000000003 /* licenses */,
 				383D3EF02FAD061400B48984 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -90,6 +104,7 @@
 			);
 			name = codiclens;
 			packageProductDependencies = (
+				38E0A1F12FB1000000000002 /* Sparkle */,
 			);
 			productName = codiclens;
 			productReference = 383D3EEF2FAD061400B48984 /* codiclens.app */;
@@ -146,6 +161,9 @@
 			);
 			mainGroup = 383D3EE62FAD061400B48984;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				38E0A1F12FB1000000000003 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 383D3EF02FAD061400B48984 /* Products */;
 			projectDirPath = "";
@@ -162,6 +180,9 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				32A0C0DE2FB2000000000011 /* LICENSE in Resources */,
+				32A0C0DE2FB2000000000012 /* NOTICE in Resources */,
+				32A0C0DE2FB2000000000013 /* licenses in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -204,6 +225,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -235,7 +257,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = HHNPP7C8GB;
+				DEVELOPMENT_TEAM = L256GR2793;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -269,6 +291,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -300,7 +323,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = HHNPP7C8GB;
+				DEVELOPMENT_TEAM = L256GR2793;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -328,10 +351,11 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = L256GR2793;
+				DEVELOPMENT_TEAM = "";
 				AUTOMATION_APPLE_EVENTS = YES;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -342,7 +366,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Codiclens asks QuickTime Player to open a video or recording at the moment your search found.";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Emil Lykke Grann. Apache License 2.0.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -368,6 +392,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.codiclens.debug;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
+				SPARKLE_FEED_URL = "https://codiclens.codicstack.com/appcast.xml";
+				SPARKLE_PUBLIC_ED_KEY = "PYpr7tzX6a/R9PwweJULIl5xOQ1Eqq6IriUvHxGmHF4=";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -397,7 +423,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Codiclens asks QuickTime Player to open a video or recording at the moment your search found.";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Emil Lykke Grann. Apache License 2.0.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -423,6 +449,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.codiclens;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
+				SPARKLE_FEED_URL = "https://codiclens.codicstack.com/appcast.xml";
+				SPARKLE_PUBLIC_ED_KEY = "PYpr7tzX6a/R9PwweJULIl5xOQ1Eqq6IriUvHxGmHF4=";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -436,9 +464,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = L256GR2793;
+				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.4;
 				MARKETING_VERSION = 1.0;
@@ -505,6 +534,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		38E0A1F12FB1000000000003 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.10.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		38E0A1F12FB1000000000002 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 38E0A1F12FB1000000000003 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 383D3EE72FAD061400B48984 /* Project object */;
 }

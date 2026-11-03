@@ -91,13 +91,13 @@ struct EmbeddingIntegrationTests {
 
     @Test func theQueryEncoderRanksMeaningAndAnswersQuickly() async throws {
         try await #require(MainActor.run { ModelFiles().isReady }, "download the model files first")
-        let client = EmbeddingClient.helper(textOnly: true, idleExit: 60)
+        let client = EmbeddingClient.helper(.queries, idleExit: 60)
 
         let cold = try await ContinuousClock().measure { try await client.hold() }
         let pid = try #require(await client.serviceProcessIdentifier)
         print("query encoder: cold start (spawn, load, warm-up) \(Self.ms(cold)), \(Self.footprint(pid))")
 
-        let kontrakt = try await client.embedQuery("kontrakt med Repodo")
+        let kontrakt = try await client.embedQuery("kontrakt med Nordlys")
         let employment = try await client.embedQuery("employment contract")
         let banana = try await client.embedQuery("banana")
         for vector in [kontrakt, employment, banana] {
@@ -112,7 +112,7 @@ struct EmbeddingIntegrationTests {
 
         // Documents are found by queries across languages.
         let documents = try await client.embed(texts: [
-            EmbeddingPrompt.document(title: "Ansættelseskontrakt.pdf", text: "Ansættelseskontrakt mellem Repodo ApS og medarbejderen. Løn, arbejdstid og opsigelse."),
+            EmbeddingPrompt.document(title: "Ansættelseskontrakt.pdf", text: "Ansættelseskontrakt mellem Nordlys ApS og medarbejderen. Løn, arbejdstid og opsigelse."),
             EmbeddingPrompt.document(title: "Smoothie.txt", text: "Blend two bananas with yoghurt and a little honey."),
         ])
         #expect(EmbeddingVector.cosine(employment, documents[0]) > EmbeddingVector.cosine(employment, documents[1]))
@@ -132,7 +132,7 @@ struct EmbeddingIntegrationTests {
 
     @Test func theFullHelperEmbedsImagesAndAudio() async throws {
         try await #require(MainActor.run { ModelFiles().isReady }, "download the model files first")
-        let client = EmbeddingClient.helper(textOnly: false, idleExit: 60)
+        let client = EmbeddingClient.helper(.indexing, idleExit: 60)
 
         let cold = try await ContinuousClock().measure { try await client.hold() }
         let pid = try #require(await client.serviceProcessIdentifier)

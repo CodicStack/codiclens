@@ -5,7 +5,8 @@ import CoreGraphics
 /// There is exactly one Panel — see `docs/adr/0001-single-panel-two-slabs.md` —
 /// sized once to its maximum extent and never resized. Everything the user sees
 /// is drawn inside it as SwiftUI: a row of Cards at the top, a real gap, then
-/// the Results Slab. Both Slabs change size inside a window that does not.
+/// the Results Slab, and the Update Notice a gap under it. The Slab changes size,
+/// and the Update Notice comes and goes, inside a window that does not.
 ///
 /// **Most of the Panel is empty space, and that is the point.** A `.shadow()` on
 /// a view that fills its window is clipped by the window bounds and renders as a
@@ -155,6 +156,21 @@ enum PanelLayout {
         max(cardRowWidth(cardCount), slabMinWidth)
     }
 
+    // MARK: - The Update Notice
+
+    /// The Update Notice's strip: one 12pt line with the ⌘U chip beside it,
+    /// `Style.rowPaddingV` above and below. Definite, so the Panel's reserve
+    /// for it is arithmetic.
+    static let updateNoticeHeight: CGFloat = 30
+
+    /// The strip is as wide as what it sits under: the preview, or the
+    /// Results Slab (`slabWidth`, which is also the width the Slab would have
+    /// when the strip sits under the Card row alone, and wide enough for the
+    /// longest line under one Card).
+    static func updateNoticeWidth(cardCount: Int, underPreview: Bool) -> CGFloat {
+        underPreview ? contentWidth : slabWidth(cardCount)
+    }
+
     /// The widest and tallest the content inside the margin ever gets.
     ///
     /// The Slab is written into the max as well as the Card row. Three Cards
@@ -162,7 +178,13 @@ enum PanelLayout {
     /// bites today — it is there so the invariant is stated rather than
     /// assumed: nothing inside the margin is wider than this.
     static var contentWidth: CGFloat { max(cardRowWidth(maxCardCount), slabMinWidth) }
-    static var contentHeight: CGFloat { cardHeight + Style.gap + maxResultsHeight }
+    ///
+    /// The height reserves room for the Update Notice under the tallest Slab
+    /// whether or not one is showing: the Panel is never resized, so the strip
+    /// cannot ask for room when it arrives.
+    static var contentHeight: CGFloat {
+        cardHeight + Style.gap + maxResultsHeight + Style.gap + updateNoticeHeight
+    }
 
     /// Empty space on all four sides of the content.
     ///
@@ -194,7 +216,7 @@ enum PanelLayout {
 ///
 /// Reported by the SwiftUI layout in the Panel's own coordinate space: origin
 /// top-left, y increasing downwards, the size of the whole Panel. Everything
-/// outside them — the margin, and the gap between the two Slabs — has to behave
+/// outside them — the margin, and the gaps between the surfaces — has to behave
 /// like bare desktop, because click-outside-to-dismiss depends on a click there
 /// counting as "outside". The Panel is mostly empty space, so getting this wrong
 /// breaks dismissal almost everywhere.
@@ -206,6 +228,9 @@ struct PanelHitRegions: Equatable {
     /// The Results Slab, or `.zero` when it isn't showing.
     var results: CGRect = .zero
 
+    /// The Update Notice, or `.zero` when no update is waiting.
+    var notice: CGRect = .zero
+
     /// Whether a point in AppKit **window** coordinates — origin bottom-left —
     /// lands on a surface rather than on the margin or the gap.
     ///
@@ -213,6 +238,6 @@ struct PanelHitRegions: Equatable {
     ///   two coordinate systems have to be flipped through.
     func accepts(windowPoint: CGPoint, panelHeight: CGFloat) -> Bool {
         let flipped = CGPoint(x: windowPoint.x, y: panelHeight - windowPoint.y)
-        return [cards, results].contains { !$0.isEmpty && $0.contains(flipped) }
+        return [cards, results, notice].contains { !$0.isEmpty && $0.contains(flipped) }
     }
 }

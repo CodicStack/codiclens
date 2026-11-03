@@ -318,6 +318,40 @@ struct MeaningIndexTests {
         #expect(hit.passage?.subtitle == "page 2")
     }
 
+    /// The Text choice: Passages get their vectors; pictures, recordings and
+    /// a PDF's pages without words get none and are done without the helper
+    /// being asked. Adding the encoders revisits them, and the text's
+    /// vectors come from the cache.
+    @Test func textOnlyEmbedsPassagesAndPassesPicturesAndSoundByThenTheEncodersAddThem() async throws {
+        let f = try MeaningFixture()
+        f.meaning.disable()
+        try f.meaning.enable(.text)
+        let full = String(repeating: "The lease runs a year and the rent is paid monthly. ", count: 6)
+        try FileContentReaderTests.makePDF(at: f.path("lease.pdf"), pages: [full, "Scan", full])
+        try f.make("note.md", contents: "budget")
+        try TestMedia.picture(at: f.path("zebra.png"))
+        try TestMedia.wav(at: f.path("standup.wav"), seconds: 60)
+        try await f.index()
+
+        #expect(f.embedder.requests.withLock { $0 }.allSatisfy { $0.hasPrefix("text ") })
+        #expect(try f.count("SELECT COUNT(*) FROM files WHERE content IS NOT NULL AND vec_state != 'done'") == 0)
+        #expect(try f.count("SELECT COUNT(*) FROM segments WHERE vec_key IS NOT NULL") == 3, "two pages and the note")
+        #expect(f.search("zebra").allSatisfy { $0.meaning != .image })
+
+        f.meaning.disable()
+        try f.meaning.enable()
+        f.embedder.requests.withLock { $0 = [] }
+        try await f.embedAll()
+
+        let asked = f.embedder.requests.withLock { $0 }
+        #expect(!asked.contains { $0.hasPrefix("text ") }, "the text's vectors came from the cache")
+        #expect(asked.contains("data 280"))
+        #expect(asked.contains { $0.hasPrefix("image zebra.png") })
+        #expect(asked.contains { $0.hasPrefix("audio standup.wav") })
+        #expect(try f.count("SELECT COUNT(*) FROM segments WHERE vec_key IS NOT NULL") == 8,
+                "two pages, a page as a picture, the note, the picture and three windows of sound")
+    }
+
     @Test func aRecordingIsWindowsOfSoundEachWithItsSpan() async throws {
         let f = try MeaningFixture()
         try TestMedia.wav(at: f.path("standup.wav"), seconds: 60)

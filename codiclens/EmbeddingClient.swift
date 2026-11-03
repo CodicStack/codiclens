@@ -1,18 +1,20 @@
 // The query encoder's lifecycle follows DigUp's `Engine`
-// (https://github.com/ARahim3/DigUp, MIT; see digup-license.txt).
+// (https://github.com/ARahim3/DigUp, MIT; see docs/licenses/digup/LICENSE).
 
 import Foundation
 
 /// The app's side of the embedding helper (`EmbeddingService`): starts it when
 /// a vector is first asked for, keeps it while it is useful, starts another
-/// when it has gone. Two of these are expected, one per kind of helper:
+/// when it has gone. One per kind of helper (`Helper`):
 ///
-/// - **The query encoder** (`textOnly`): the text model alone, about 0.25 GB.
+/// - **The query encoder** (`queries`): the text model alone, about 0.25 GB.
 ///   `hold()` when the Panel opens loads it before the first keystroke lands
 ///   and keeps it loaded however long the Panel stays open; `release()` when
 ///   it closes lets the helper's idle exit run again.
-/// - **The indexer's** (full): the image and audio encoders too, about 1 GB,
-///   asked for vectors in bursts and gone between them.
+/// - **The indexer's** (`indexing`): the image and audio encoders too, about
+///   1 GB, asked for vectors in bursts and gone between them. With the Text
+///   choice, `textIndexing`: the text model alone, taking inputs as long as
+///   the full one's, so a Passage's vector is the same from either.
 ///
 /// **A helper that dies is started again, but what it was answering is not
 /// asked again.** A crash may have been the input's doing — a file that trips
@@ -60,22 +62,35 @@ actor EmbeddingClient {
         self.launcher = launcher
     }
 
+    /// What a helper is for.
+    enum Helper {
+        /// The query encoder: text alone, and short.
+        case queries
+        /// The meaning pass: text, pictures and sound.
+        case indexing
+        /// The meaning pass of the Text choice: text alone, as long as
+        /// `indexing` takes it.
+        case textIndexing
+    }
+
     /// A client of this very binary, relaunched as the helper.
     static func helper(
-        textOnly: Bool,
+        _ helper: Helper,
         models: URL = ModelFiles.defaultFolder,
         idleExit: TimeInterval
     ) -> EmbeddingClient {
         var options = EmbeddingService.Options()
         options.models = models
-        options.textOnly = textOnly
+        options.textOnly = helper != .indexing
+        // A Query is short, so the query encoder reserves less.
+        options.maxTokens = helper == .queries ? 512 : 2048
         options.idleExit = idleExit
         return EmbeddingClient(launcher: HelperProcessLauncher(
             executable: Bundle.main.executableURL!,
             options: options,
             // App Nap and the efficiency cores can make a Query's vector
             // several times slower; indexing can wait.
-            qualityOfService: textOnly ? .userInitiated : .utility
+            qualityOfService: helper == .queries ? .userInitiated : .utility
         ))
     }
 

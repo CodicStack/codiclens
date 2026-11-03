@@ -1,4 +1,4 @@
-// The pinned files and their checks are DigUp's (https://github.com/ARahim3/DigUp, MIT; see digup-license.txt).
+// The pinned files and their checks are DigUp's (https://github.com/ARahim3/DigUp, MIT; see docs/licenses/digup/LICENSE).
 
 import CryptoKit
 import Foundation
@@ -11,13 +11,23 @@ nonisolated struct ModelFile: Hashable, Sendable {
     /// Lowercase hex.
     let sha256: String
     let url: URL
+
+    /// Where it downloads to until it is checked.
+    var stagingName: String { name + ".download" }
+    /// Where a broken-off download's resume data waits.
+    var resumeName: String { name + ".resume" }
+    /// Every name it can have in the folder: whole, partial, resume data.
+    var namesOnDisk: [String] { [name, stagingName, resumeName] }
 }
 
 /// The EmbeddingGemma 2 files on this Mac: ggml-org's Q8_0 conversion at one
-/// pinned revision, downloaded when the user turns search by meaning on and
+/// pinned revision, downloaded when the user chooses search by meaning and
 /// checked against their size and SHA-256 before they get their real names.
-/// A file under its real name in `folder` is therefore always whole, and being
-/// there is all `isReady` asks.
+/// A file under its real name in `folder` is therefore always whole, and the
+/// wanted ones being there is all `isReady` asks.
+///
+/// - Every file is wanted unless told otherwise (`want`): the Text choice
+///   wants the text model alone, and adding the encoders later wants both.
 ///
 /// Never the F16 files: the model's activations overflow float16.
 ///
@@ -73,11 +83,17 @@ final class ModelFiles {
     }
 
     let folder: URL
+    /// Every file, the text model first.
     let files: [ModelFile]
+    /// What `download()` fetches and `isReady` asks for: a prefix of `files`.
+    private(set) var wanted: [ModelFile]
     private(set) var state: State
 
     @ObservationIgnored private let downloader: any ModelFileDownloader
     @ObservationIgnored private var running: Task<Void, Never>?
+    /// Which download `running` is, so a cancelled one that ends late does
+    /// not forget a newer one.
+    @ObservationIgnored private var runs = 0
 
     init(
         folder: URL = ModelFiles.defaultFolder,
@@ -87,11 +103,32 @@ final class ModelFiles {
         self.folder = folder
         self.files = files
         self.downloader = downloader
+        wanted = files
         state = .notDownloaded
-        if missing.isEmpty { state = .ready }
+        state = settled
     }
 
     var isReady: Bool { state == .ready }
+
+    /// The text model (310 MB): all a Query and the Text choice need.
+    var textModel: ModelFile { files[0] }
+
+    /// From now on `download()` fetches `files` and `isReady` asks for them.
+    /// Call `cancel()` first to stop a download of what is no longer wanted.
+    func want(_ files: [ModelFile]) {
+        guard files != wanted else { return }
+        wanted = files
+        if running == nil { state = settled }
+    }
+
+    /// Something is on disk: a file, whole or partial, or its resume data.
+    var hasAnything: Bool {
+        files.contains { file in
+            file.namesOnDisk.contains {
+                FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path)
+            }
+        }
+    }
 
     /// Where `file` lives once it has been checked.
     func location(of file: ModelFile) -> URL {
@@ -99,18 +136,30 @@ final class ModelFiles {
     }
 
     private var missing: [ModelFile] {
-        files.filter { !FileManager.default.fileExists(atPath: location(of: $0).path) }
+        wanted.filter { !FileManager.default.fileExists(atPath: location(of: $0).path) }
     }
 
-    /// Downloads and checks whatever is missing, and returns when that has
-    /// settled: `ready`, `failed`, or `notDownloaded` again after `cancel()`.
-    /// A second call while one runs waits for the same download.
+    /// The state with no download running.
+    private var settled: State {
+        missing.isEmpty ? .ready : .notDownloaded
+    }
+
+    /// Downloads and checks whatever wanted file is missing, and returns when
+    /// that has settled: `ready`, `failed`, or as `cancel()` left it. A
+    /// second call while one runs waits for the same download; one after a
+    /// `cancel()` waits for the cancelled one to put its resume data down,
+    /// then starts afresh.
     func download() async {
-        if let running { return await running.value }
-        let task = Task { await fetchMissing() }
+        if let running, !running.isCancelled { return await running.value }
+        while let running { await running.value }
+        runs += 1
+        let run = runs
+        let task = Task {
+            await fetchMissing()
+            if runs == run { running = nil }
+        }
         running = task
         await task.value
-        running = nil
     }
 
     /// Stops the download, keeping what arrived for the next `download()`.
@@ -123,7 +172,7 @@ final class ModelFiles {
     func remove() {
         cancel()
         for file in files {
-            for name in [file.name, file.name + ".download", file.name + ".resume"] {
+            for name in file.namesOnDisk {
                 try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
             }
         }
@@ -133,6 +182,7 @@ final class ModelFiles {
     private func fetchMissing() async {
         let missing = self.missing
         guard !missing.isEmpty else { return state = .ready }
+        let wanted = self.wanted
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             var values = URLResourceValues()
@@ -142,11 +192,11 @@ final class ModelFiles {
         } catch {
             return state = .failed("Can't create \(folder.path): \(error.localizedDescription)")
         }
-        let total = files.reduce(0) { $0 + $1.bytes }
-        var done = files.filter { !missing.contains($0) }.reduce(0) { $0 + $1.bytes }
+        let total = wanted.reduce(0) { $0 + $1.bytes }
+        var done = wanted.filter { !missing.contains($0) }.reduce(0) { $0 + $1.bytes }
         for file in missing {
-            let staging = folder.appendingPathComponent(file.name + ".download")
-            let resume = folder.appendingPathComponent(file.name + ".resume")
+            let staging = folder.appendingPathComponent(file.stagingName)
+            let resume = folder.appendingPathComponent(file.resumeName)
             state = .downloading(progress: Double(done) / Double(total))
             do {
                 try await downloader.download(
@@ -155,10 +205,10 @@ final class ModelFiles {
                 )
             } catch let interruption as ModelDownloadInterruption {
                 if let data = interruption.resumeData { try? data.write(to: resume) }
-                state = Task.isCancelled ? .notDownloaded : .failed(interruption.reason)
+                state = Task.isCancelled ? settled : .failed(interruption.reason)
                 return
             } catch {
-                state = Task.isCancelled ? .notDownloaded : .failed(error.localizedDescription)
+                state = Task.isCancelled ? settled : .failed(error.localizedDescription)
                 return
             }
             try? FileManager.default.removeItem(at: resume)
@@ -180,7 +230,7 @@ final class ModelFiles {
             }
             done += file.bytes
         }
-        state = .ready
+        state = settled
     }
 
     /// A progress callback for the downloader's thread that comes to the main

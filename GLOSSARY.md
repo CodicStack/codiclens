@@ -107,7 +107,7 @@ What Codiclens has read from the files in its folder Sources: their names, and w
 _Avoid_: Index on its own, library, database, embeddings
 
 **Built-in**:
-A Subject that isn't a file on disk — Settings, Clipboard, Emoji. Appears in Subject search alongside apps.
+A Subject that isn't a file on disk — Settings, Clipboard, Emoji, Check for Updates. Appears in Subject search alongside apps.
 _Avoid_: internal, system item, virtual subject
 
 **Clipboard History**:

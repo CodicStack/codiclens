@@ -55,7 +55,7 @@ struct EmbeddingVectorTests {
     // MARK: - Prompts
 
     @Test func queriesAndDocumentsTakeTheModelCardsPrompts() {
-        #expect(EmbeddingPrompt.query("kontrakt med Repodo") == "task: search result | query: kontrakt med Repodo")
+        #expect(EmbeddingPrompt.query("kontrakt med Nordlys") == "task: search result | query: kontrakt med Nordlys")
         #expect(EmbeddingPrompt.codeQuery("retry with backoff") == "task: code retrieval | query: retry with backoff")
         #expect(EmbeddingPrompt.document(title: "Kontrakt.pdf", text: "Ansættelse")
             == "title: Kontrakt.pdf | text: Ansættelse")

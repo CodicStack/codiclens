@@ -349,7 +349,10 @@ class SubjectSearchVM {
         [
             builtIn(name: "Settings", symbol: "gear", kind: .builtIn(.settings)),
             builtIn(name: "Clipboard", symbol: "clipboard", kind: .builtIn(.clipboard)),
-            Subject.emojiBuiltIn
+            Subject.emojiBuiltIn,
+            // Its name never changes, whatever the updater knows: a Built-in
+            // is found by what it is called.
+            builtIn(name: "Check for Updates", symbol: "arrow.down.circle", kind: .builtIn(.checkForUpdates))
         ]
     }
 

@@ -1,4 +1,4 @@
-// Adapted from DigUp's Database.swift (https://github.com/ARahim3/DigUp), MIT licence — see digup-license.txt.
+// Adapted from DigUp's Database.swift (https://github.com/ARahim3/DigUp), MIT licence — see docs/licenses/digup/LICENSE.
 import Foundation
 import SQLite3
 

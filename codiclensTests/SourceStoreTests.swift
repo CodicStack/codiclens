@@ -8,20 +8,81 @@ import Testing
 struct SourceStoreTests {
     private let defaults = ThrowawayDefaults()
 
-    @Test func aNewInstallHasTheBuiltInSourcesAndThreeFoldersAllOn() {
+    /// The folder Sources wait for Allow in Setup: until then Codiclens
+    /// reads no folder, and apps, Clipboard History and Emoji work anyway.
+    @Test func aNewInstallHasTheBuiltInSourcesAllOnAndNoFolders() {
         let store = SourceStore(defaults: defaults)
 
-        #expect(store.sources.map(\.kind) == [
-            .applications, .clipboardHistory, .emoji, .builtIns,
+        #expect(store.sources.map(\.kind) == [.applications, .clipboardHistory, .emoji, .builtIns])
+        #expect(store.sources.allSatisfy { $0.isEnabled })
+    }
+
+    // MARK: - Migrating an install from before Setup
+
+    /// An install from before Setup asked about folders has always read the
+    /// three default ones with no folder list written down. The migration
+    /// writes them down once, and the Sources keep reading them.
+    @Test func anInstallFromBeforeSetupIsMigratedToTheThreeDefaultFolders() throws {
+        let folder = try TemporaryFolder()
+        defer { folder.remove() }
+        try folder.makeFile("FileIndex.sqlite")
+
+        SourcesMigration.migrate(defaults: defaults, fileIndex: folder.url.appendingPathComponent("FileIndex.sqlite"))
+
+        let store = SourceStore(defaults: defaults)
+        #expect(store.folders.map(\.kind) == [
             .folder(path: NSHomeDirectory() + "/Downloads"),
             .folder(path: NSHomeDirectory() + "/Documents"),
             .folder(path: NSHomeDirectory() + "/Desktop")
         ])
-        #expect(store.sources.allSatisfy { $0.isEnabled })
+        #expect(store.folders.allSatisfy { $0.isEnabled })
+    }
+
+    /// A new install's first launch writes down that it has no folders, so
+    /// the next launch, which finds the File Index that launch created, does
+    /// not take itself for an install from before Setup.
+    @Test func aNewInstallIsMigratedToNoFoldersAndStaysThatWay() throws {
+        let folder = try TemporaryFolder()
+        defer { folder.remove() }
+        let fileIndex = folder.url.appendingPathComponent("FileIndex.sqlite")
+
+        SourcesMigration.migrate(defaults: defaults, fileIndex: fileIndex)
+        try folder.makeFile("FileIndex.sqlite")
+        SourcesMigration.migrate(defaults: defaults, fileIndex: fileIndex)
+
+        #expect(SourceStore(defaults: defaults).folders.isEmpty)
+    }
+
+    @Test func aFolderListAlreadyWrittenDownIsNotMigrated() throws {
+        let folder = try TemporaryFolder()
+        defer { folder.remove() }
+        try folder.makeFile("FileIndex.sqlite")
+        SourceStore(defaults: defaults).addFolder(URL(fileURLWithPath: "/Volumes/Archive"))
+
+        SourcesMigration.migrate(defaults: defaults, fileIndex: folder.url.appendingPathComponent("FileIndex.sqlite"))
+
+        #expect(SourceStore(defaults: defaults).folders.compactMap(\.folderPath) == ["/Volumes/Archive"])
+    }
+
+    // MARK: - Folders
+
+    @Test func severalFoldersAreAddedAsOneChange() {
+        let store = SourceStore(defaults: defaults)
+        var changes = 0
+        store.onFoldersChange = { changes += 1 }
+
+        store.addFolders([
+            URL(fileURLWithPath: "/tmp/a"), URL(fileURLWithPath: "/tmp/b"), URL(fileURLWithPath: "/tmp/a/")
+        ])
+        store.addFolders([URL(fileURLWithPath: "/tmp/b")])
+
+        #expect(store.folders.compactMap(\.folderPath) == ["/tmp/a", "/tmp/b"])
+        #expect(changes == 1, "nothing new, no change")
+        #expect(SourceStore(defaults: defaults).folders.count == 2)
     }
 
     @Test func addingAndRemovingFoldersIsRemembered() {
-        let store = SourceStore(defaults: defaults)
+        let store = SourceStore.withDefaultFolders(defaults: defaults)
 
         #expect(store.addFolder(URL(fileURLWithPath: "/Volumes/Archive/Projects")))
         #expect(!store.addFolder(URL(fileURLWithPath: "/Volumes/Archive/Projects/")), "already a Source")
@@ -34,7 +95,7 @@ struct SourceStoreTests {
     }
 
     @Test func everySourceHasASwitchThatIsRemembered() {
-        let store = SourceStore(defaults: defaults)
+        let store = SourceStore.withDefaultFolders(defaults: defaults)
 
         store.setEnabled(false, for: "emoji")
         store.setEnabled(false, for: "folder:" + NSHomeDirectory() + "/Downloads")
@@ -46,7 +107,7 @@ struct SourceStoreTests {
     }
 
     @Test func onlyFolderChangesReachTheFileIndex() {
-        let store = SourceStore(defaults: defaults)
+        let store = SourceStore.withDefaultFolders(defaults: defaults)
         var changes = 0
         store.onFoldersChange = { changes += 1 }
 

@@ -25,6 +25,20 @@ import Foundation
 ///
 /// Off until `enable()`: the switch in Settings is on and the model files
 /// are there (`MeaningSettings`).
+/// The indexing helpers: with the image and audio encoders, and the text
+/// model alone for the Text choice. Which one a choice embeds with is
+/// decided here and nowhere else.
+nonisolated struct MeaningEmbedders: Sendable {
+    let full: any MeaningEmbedder & EmbeddingShutdown
+    let text: any MeaningEmbedder & EmbeddingShutdown
+
+    func embedder(for mode: MeaningMode) -> any MeaningEmbedder & EmbeddingShutdown {
+        mode == .text ? text : full
+    }
+
+    var all: [any MeaningEmbedder & EmbeddingShutdown] { [full, text] }
+}
+
 nonisolated final class MeaningScheduler: @unchecked Sendable {
     typealias Embed = @Sendable ([MeaningJob], MeaningPace) async throws -> [MeaningResult]
 
@@ -37,6 +51,16 @@ nonisolated final class MeaningScheduler: @unchecked Sendable {
         { jobs, pace in
             await embedder.setFullSpeed(pace == .full)
             return try await MeaningReader.read(jobs, with: embedder, cache: cache)
+        }
+    }
+
+    /// `embedAll(with:cache:)` with the embedder for the choice the batch
+    /// was handed out under (`enable(_:)`).
+    static func embedAll(_ embedders: MeaningEmbedders, cache: VectorCache) -> Embed {
+        let full = embedAll(with: embedders.embedder(for: .full), cache: cache)
+        let text = embedAll(with: embedders.embedder(for: .text), cache: cache)
+        return { jobs, pace in
+            try await (jobs.first?.mode == .text ? text : full)(jobs, pace)
         }
     }
 
@@ -54,6 +78,9 @@ nonisolated final class MeaningScheduler: @unchecked Sendable {
     private var isPanelOpen = false
     private var isBusy = false
     private(set) var isEnabled = false
+    /// The choice embedding is under: Text is no pictures or sound
+    /// (`MeaningJob.mode`).
+    private(set) var mode = MeaningMode.full
     /// The helper could not start, or kept crashing: no more batches until
     /// the next `enable()`.
     private var isFailed = false
@@ -111,11 +138,13 @@ nonisolated final class MeaningScheduler: @unchecked Sendable {
         MeaningPace(isLowPower: isLowPower, isPanelOpen: isPanelOpen, machine: machine)
     }
 
-    /// Starts embedding: the database's vectors under `MeaningPass.fingerprint`
-    /// and in this `cache` (any others are dropped), and the vector files
-    /// opened, or rebuilt from the cache when they do not match the database.
-    func enable() throws {
-        let isNewFingerprint = try writer.adoptMeaningFingerprint()
+    /// Starts embedding under `mode`, Text or full: the database's vectors
+    /// under `MeaningPass.fingerprint(for:)` and in this `cache` (any others
+    /// are dropped), and the vector files opened, or rebuilt from the cache
+    /// when they do not match the database.
+    func enable(_ mode: MeaningMode = .full) throws {
+        self.mode = mode
+        let isNewFingerprint = try writer.adoptMeaningFingerprint(MeaningPass.fingerprint(for: mode))
         let isNewCache = try writer.adoptVectorCache(cache.id)
         if try isNewFingerprint || isNewCache || !vectors.open(expectedRows: writer.vectorRows()) {
             try writer.rebuild(vectors, from: cache)
@@ -138,13 +167,14 @@ nonisolated final class MeaningScheduler: @unchecked Sendable {
     func nextBatch(_ pace: MeaningPace) throws -> [MeaningJob] {
         guard isEnabled, !isFailed else { return [] }
         if !changed.isEmpty {
-            let (jobs, waiting) = try writer.meaningJobs(ids: changed)
+            let (jobs, waiting) = try writer.meaningJobs(ids: changed, mode: mode)
             let batch = Self.batch(from: jobs, size: pace.batchSize)
             changed = jobs.dropFirst(batch.count).map(\.id) + waiting
             if !batch.isEmpty { return batch }
         }
         guard pace != .paused, !sources.isEmpty else { return [] }
-        return Self.batch(from: try writer.meaningJobs(limit: pace.batchSize, sources: sources), size: pace.batchSize)
+        return Self.batch(from: try writer.meaningJobs(limit: pace.batchSize, sources: sources, mode: mode),
+                          size: pace.batchSize)
     }
 
     /// `nextBatch(_:)` at the pace in force now.

@@ -42,12 +42,32 @@ keyword-less or any variant cannot be filed under a base. `--unicode` and
 `--cldr` bump the versions; `--cache <dir>` reuses downloads. See
 `docs/adr/0005-bundled-emoji-dataset.md`.
 
+## Releasing
+
+`Scripts/release.sh` cuts a release on the maintainer's Mac (ADR 0015); the guide is
+`docs/RELEASING.md`. It needs the Developer ID identity, the `codiclens` notarytool profile
+and the Sparkle key, so an agent can only run its fixture test and, via sourcing, single steps:
+
+```bash
+Scripts/tests/release-notes.sh   # the changelog-to-notes step (Scripts/release-notes.swift)
+```
+
+- Sourcing `Scripts/release.sh` defines its guards and steps without running anything.
+- Everything goes under `build/release/vX.Y.Z/`, one marker per finished step in `.done/`; a
+  rerun skips marked steps. Its Xcode builds use `build/release/DerivedData` and Sparkle's
+  tools come from `build/release/SourcePackages/artifacts/sparkle/Sparkle/bin`.
+- The version (`MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`, both `X.Y.Z`) is passed to
+  the archive as build settings and written into the project only in the release commit, so a
+  dry run leaves git untouched. Exported `codiclens.app` is renamed to `Codiclens.app`, the
+  name installs have.
+- Notes live in `CHANGELOG.md` under `## Unreleased`; the release renames that section and
+  embeds the newest five in the appcast as `<section data-sparkle-version>` blocks.
+
 ## Project Structure
 
 ```
 codiclens/           # Main app source (Swift)
 codiclensTests/      # Unit tests
-Codiclens.app/       # Built app bundle
 ```
 
 There are two targets, app and unit tests. There is no UI test target.
@@ -433,7 +453,13 @@ runs that one, after its `status` check. Either may start that Codictate hidden.
 codiclensApp (@main)
   └─ AppDelegate (NSApplicationDelegateAdaptor)
        ├─ Starts LastActiveApp (applicationWillFinishLaunching)
-       ├─ Registers Cmd+Space hotkey (Carbon EventHotKey)
+       ├─ Release builds outside /Applications: Move to Applications first
+       │  (MoveToApplications; when it moves, nothing below starts)
+       ├─ Takes ⌘Space and ⌃⌘Space from macOS if the user chose it
+       │  (ShortcutTakeover.takeAtLaunch; handed back in applicationWillTerminate)
+       ├─ Registers Cmd+Space and Ctrl+Cmd+Space hotkeys (Carbon EventHotKey)
+       ├─ Creates SparkleUpdater (started in Release only) and hands it to
+       │  PanelController
        ├─ Creates PanelController
        ├─ Registers the "Open in Codiclens" Service, then hands over an
        │  Incoming Subject that arrived before the Panel existed
@@ -800,7 +826,8 @@ Each Card carries a `KeyHintChip` in its bottom-trailing corner while it has the
 keyboard, and only where its action has an obvious key.
 
 ### PanelView / ResultsListView — the Panel's contents
-`PanelView` is the Card row, a real gap, and the Results Slab. The Slab animates in
+`PanelView` is the Card row, a real gap, the Results Slab, and the Update Notice a gap
+under it while an update is waiting (see Updates). The Slab animates in
 when there are Results and out when there are not, with `Motion.resize` — except in
 Emoji Mode, where the grid is never empty and the Slab is unconditional. A
 display-only Query field is pinned along its bottom, because the Subject Card shows
@@ -903,9 +930,9 @@ from the start". Open on its Actions is the same. A PDF at a page opens normally
 has no reliable page API.
 
 ### Settings — General and Sources
-`SettingsView` is two tabs. **General** is appearance, Emoji, the App Index refresh and
-the Acknowledgements sheet, which shows every bundled licence (`emoji-data-license.txt`,
-`digup-license.txt`; both are resources through the synchronised group). **Sources**
+`SettingsView` is two tabs. **General** is appearance, Emoji, the App Index refresh, Updates
+(see Updates below) and the Acknowledgements sheet (`AcknowledgementsView`), which lists
+`Acknowledgements.all` and shows each entry's bundled notice (see Licensing below). **Sources**
 (`SourcesSettingsView`) lists every Source (`GLOSSARY.md`) with one switch and two counts,
 indexed and total, and nothing else: there is no priority between Sources. For a folder,
 total is every row and indexed the rows whose contents are read (or that have none to read),
@@ -916,6 +943,21 @@ rows from `SourceStore` and closures for counts and reading state, so `SourcesPa
 runs it on its own `UserDefaults` suite. A row being read — crawled, or with contents
 unread while the backfill runs — shows the Loading Ring with "Reading" beside it, never a
 `ProgressView`.
+
+**No folder Source until Allow.** A new install has no folder Sources: Setup's "Search your
+files" row (`FoldersRow`) offers Downloads, Documents and Desktop, and Allow adds them at
+once, so macOS's three folder prompts come while that row is on screen. A skip leaves none;
+apps, Clipboard History and Emoji work regardless. `SourceStore` reads only the folder list
+it has written down. An install from before Setup asked kept no list and read the three;
+`SourcesMigration`, run once at launch before anything reads the Sources, writes the list
+down: the three when a `FileIndex.sqlite` is on disk, empty otherwise, so a new install's
+empty list survives the database its first launch creates. A folder macOS
+refused (`FolderAccess.isDenied`, checked by `FileIndexer.crawl` before the walk) is
+reported as `.access`, kept in `FileIndex.deniedFolders`, never marked caught up, and shows
+"No access" with an "Open Privacy & Security" link in place of its counts (and under the
+Setup row). Each time the app comes to the front `FileIndex.recheckAccess` crawls the
+refused ones that are readable now. Tests stand a folder with no permissions in for a
+refusal (`FolderAccessTests`); nothing asks macOS.
 
 Under Folders, **Skip** is what the File Index leaves out inside the folder Sources, all
 user-set and kept by `SourceStore` beside the Sources: a checkbox per
@@ -930,7 +972,7 @@ is a cache. "node_modules and build output" is installed dependencies
 `.docusaurus`, `.dart_tool`, `.terraform`, `.wrangler`, `.cxx`) and `build`/`dist`/`out`/
 `target`/`_build` beside a project marker. **Git worktrees** skips a folder whose `.git` is a
 *file* whose `gitdir:` names `…/worktrees/<name>` (`Entry.isLinkedWorktree`): the same repo
-again, file for file — on this Mac `repodo-project` held eighteen of them, ~224k rows. The
+again, file for file — one repo held eighteen of them, ~224k rows. The
 main checkout (`.git` a folder) is left to the Repos switch, a submodule (`gitdir:` naming
 `modules`) is not a worktree, and a worktree that is itself a Source is read.
 
@@ -1103,19 +1145,70 @@ on a connection of its own so the keystroke never waits behind it. Measured by
 `FileIndexKeystrokeTimingTests` and `FileContentTimingTests`
 (`TEST_RUNNER_CODICLENS_TIME_FILE_CONTENTS=<runs>`, real Sources into a temp database).
 
+### Updates — Sparkle behind the Updater seam
+Sparkle 2 (SPM, up to next major from 2.10.1; `Package.resolved` is tracked) keeps Codiclens
+up to date with its stock dialog, but **no update window ever opens unless the user asked**.
+Everything outside `SparkleUpdater.swift` reads and asks `Updater` (`Updater.swift`), never
+Sparkle: `state` (none, available version, ready version), the two Settings flags, the
+version and the last-check date, and three `UpdateRequest`s (check, show the waiting update,
+install the ready update now). It is `@Observable`, so a view reading it redraws.
+`FakeUpdater` (tests) and `SparkleUpdater` both move `state` through
+`UpdateState.applying(_:)`, so `UpdaterTests` drive the rules the app runs.
+
+- The user-driver delegate supports gentle reminders and answers "don't show" to every
+  scheduled update, at launch too. "Will handle showing update" (only when Sparkle left it to
+  us) is `.scheduledUpdateFound`, which makes the update available, or ready when already
+  downloaded; "did receive user attention" and "will finish update session" clear it. A check
+  the user asked for is shown by Sparkle and raises nothing. **User attention leaves a *ready*
+  update in place**: answering "will install on quit" with true stops Sparkle running update
+  cycles, so nothing would say it again, and it still installs on quit. Only the session
+  finishing (or the install) clears a ready one.
+- "Will install update on quit" (automatic downloads) is `.readyToInstall`: the delegate
+  answers true and keeps Sparkle's immediate-install block, which `.installReadyUpdate` runs
+  to restart straight into it. It installs on quit either way, through normal termination.
+- A check and showing the waiting update are the same Sparkle call: with an update waiting,
+  `checkForUpdates` brings its dialog up instead of checking again. The app activates first,
+  being an accessory app.
+- Info.plist (`codiclens-Info.plist`): `SUFeedURL` from `SPARKLE_FEED_URL`
+  (`https://codiclens.codicstack.com/appcast.xml`, the site's byte-for-byte proxy of the
+  newest release's appcast), `SUPublicEDKey` from `SPARKLE_PUBLIC_ED_KEY`, a signed feed and
+  verification before extraction, automatic checks on with no second-launch prompt, every
+  24 h, automatic downloads off. No `SUEnable*Service` keys: not sandboxed.
+  `SPARKLE_PUBLIC_ED_KEY` is the public key for login Keychain account `codiclens`
+  (#20). The release script refuses a placeholder or a key that does not match that account.
+- Not started in Debug: a dev build never checks, and Check Now stays disabled.
+- **The Update Notice** (`UpdateNoticeView`, text from `UpdateNotice(state)`): its own strip
+  of bare glass (`noticeSurface()`, like a Card), a gap under the Results Slab, the preview or
+  the Card row, as wide as what it sits under (`PanelLayout.updateNoticeWidth`), with a "⌘U"
+  `KeyHintChip`. It sits in the Panel's one column, so a Slab arriving or leaving carries it on
+  `Motion.resize`; its arrival and text hard-cut. The Panel reserves `Style.gap +
+  PanelLayout.updateNoticeHeight` for it always; its frame is `hitRegions.notice`.
+  `CommandCoordinator.actOnUpdateNotice()` (⌘U in `CardContainerView`, or a click) is
+  `[.hide, .update(.showWaitingUpdate)]` when available, `[.hide, .update(.installReadyUpdate)]`
+  when ready, and nothing with no update, in every Phase. The coordinator is handed the
+  `Updater` (`FakeUpdater` by default in `CommandCoordinator.isolated`) and only reads it.
+- **Check for Updates** is a Built-in (`BuiltInType.checkForUpdates`, one Action, "Check").
+  Enter is `[.hide, .update(.check)]`; `SystemEffectRunner.onUpdateRequest` hands the request
+  to the updater. Its name never changes.
+- Settings → General → **Updates**: check automatically; download and install automatically
+  (disabled while the first is off); Check Now; "Version X.Y.Z · last checked …"
+  (`UpdateStatusLine`); the caption "Checks codiclens.codicstack.com once a day." No menu bar
+  item.
+
 ### Search by meaning — the embedding runtime
 EmbeddingGemma 2 (`google/embeddinggemma-2`, Apache 2.0) on llama.cpp with Metal: 768-d,
 L2-normalized vectors, stored as float16 (`EmbeddingVector`). **Compute in bf16/fp32 only,
 never fp16** — its activations overflow. Wired into the File Index and its settled search
 (below), and the Panel calls both (see "What the Panel calls"). Adapted in parts
-from DigUp (MIT, `digup-license.txt`); each such file says so in its first line.
+from DigUp (MIT, `docs/licenses/digup/LICENSE`); each such file says so in its first line.
 
 - **Apple silicon only.** `MeaningSearch.isSupported` (arm64 and a Metal device) is the
   one gate; on Intel the feature is unavailable and nothing downloads.
 - **`ModelFiles`** — ggml-org's Q8_0 GGUFs at one pinned Hugging Face revision: the text
   model (310 MB, all a Query needs) and the mmproj image + audio encoders (555 MB), into
-  `~/Library/Application Support/codiclens/models/`, downloaded at launch while the
-  feature is on (it is unless the user turned it off), never bundled. A file gets its real name only after its size and SHA-256
+  `~/Library/Application Support/codiclens/models/`, never bundled, downloaded only once the
+  user has chosen (see Settings below): the Text choice wants the text model alone (`want`),
+  the full one both, and a launch carries on with what the choice needs. A file gets its real name only after its size and SHA-256
   match, so a file there is whole. Resumable (`<name>.resume` holds URLSession resume
   data), observable `state`: `notDownloaded` / `downloading(progress:)` / `verifying` /
   `ready` / `failed(reason)`. Tests inject a `ModelFileDownloader`.
@@ -1126,10 +1219,14 @@ from DigUp (MIT, `digup-license.txt`); each such file says so in its first line.
 - **`Embedder`** (arm64 only) — llama.cpp in-process, values in and out: texts (batched,
   up to 16 a `llama_process` call), a `CGImage` (decoded upright by `EmbeddingInput`,
   sized by `ImageSizing` as the reference's Pillow does) or 16 kHz mono samples (≤ 30 s;
-  `EmbeddingInput.audio` decodes and resamples with AVFoundation). Text-only reserves a
-  512-token context, full 2,048.
+  `EmbeddingInput.audio` decodes and resamples with AVFoundation). The query encoder
+  reserves a 512-token context, the indexing helpers 2,048 (`--max-tokens`), with or
+  without the encoders, so a Passage's vector is the same from either and the vector
+  cache serves both.
 - **The helper** — the app binary relaunched as `codiclens --embedding-service
-  [--text-only] [--models <dir>] [--idle-exit <s>]`. `AppDelegate` returns into
+  [--text-only] [--max-tokens <n>] [--models <dir>] [--idle-exit <s>]`, one per
+  `EmbeddingClient.Helper`: `queries` (text-only, 512), `indexing` (full) and
+  `textIndexing` (text-only, 2,048: the Text choice's meaning pass). `AppDelegate` returns into
   `EmbeddingService.start()` before anything else, so it has no Panel, hotkeys, File
   Index or clipboard recorder. It loads the model, writes an `EmbeddingServiceHello`, then
   answers JSON lines (`EmbeddingServiceProtocol.swift`: `embedText`, `embedImage`,
@@ -1151,7 +1248,12 @@ from DigUp (MIT, `digup-license.txt`); each such file says so in its first line.
 
 **The meaning pass** (`MeaningScheduler`, on the File Index queue beside the contents pass,
 the same shape). Everything with a `FileContent` gets vectors, in the helper (the full model,
-~1 GB while it works, gone after its 60 s idle exit; `.utility` QoS):
+~1 GB while it works, gone after its 60 s idle exit; `.utility` QoS). **The Text choice**
+(`enable(.text)`, `MeaningJob.mode`) embeds the text alone in the `textIndexing` helper
+(`MeaningEmbedders`, the one place a choice picks its helper): pictures, recordings and videos are done with nothing and a PDF's
+pages without words are passed. It runs under its own fingerprint
+(`MeaningPass.textOnlyFingerprint`), so going to or from it drops the vectors and embeds
+again, the text's straight from the vector cache, the rest with the encoders:
 - **Text**: every Passage the contents pass read (`chunk`, `page`; code, notes, documents,
   PDFs), with the card's document prompt and the file's name as title, cut at 4,000
   characters. Text that is mostly digits gets no vector (keyword search has it). OCR text
@@ -1355,16 +1457,24 @@ unless given one), and puts the answer through `SourceSearch` (see SubjectSearch
 shows it on the Card, plays from it in the Passage Preview and opens there in QuickTime.
 
 **Settings**: Sources → "Search by meaning" (`MeaningSettings`, drawn from
-`SourcesPage.meaningRow`): one switch, **on unless the user turns it off**: on Apple silicon a
-fresh install downloads the model at launch (`FileIndex.start()` → `MeaningSettings.start()`,
-never in the test host) and then reads every file, with nobody touching Settings. On downloads
-the model (progress from `ModelFiles.state`), then starts the pass; a status line ("Downloading the
+`SourcesPage.meaningRow`), and Setup's Meaning row (`MeaningChoiceRow`): one choice,
+`MeaningMode` **Off, Text (310 MB) or Text, images and audio (865 MB)**, captioned
+"Downloads from Hugging Face. Your files never leave this Mac." in both places. **Off until
+the user chooses**: nothing downloads by itself; Setup preselects the full choice and its
+Done starts the download. A choice downloads what it needs (progress from
+`ModelFiles.state`), then starts the pass (`apply(mode)`); Text to the full choice keeps the
+text pass running while the encoders download, then switches; a status line ("Downloading the
 model, 42%", "Reading 1,234 of 5,678 files", "Paused in Low Power Mode, …", "Ready, …",
 "Needs a Mac with Apple silicon") and the files-read counts; off stops embedding and frees
 the vectors, keeping model and vectors on disk; "Remove Model and Vectors…" (one
-confirmation) deletes both, the vector cache's entries included. Kept in `UserDefaults` (`codiclens.meaning.enabled`, missing =
-on, so only the user's own off is written down); a test's File Index has the switch off
-(`MeaningSettings.Switch.off`) and every test's `ModelFiles` downloads through a stub.
+confirmation) deletes both, the vector cache's entries included. Kept in `UserDefaults`
+(`codiclens.meaning.mode`, missing = not chosen, run as off). **Migration** from the old
+switch (`codiclens.meaning.enabled`, on unless turned off, downloaded at launch): an explicit
+off stays off, and an install with anything in the models folder keeps the full choice and
+carries on as it was; the old key is removed. A launch (`FileIndex.start()` →
+`MeaningSettings.start()`, never in the test host) carries on with the choice in force. A
+test's File Index has the choice off (`MeaningSettings.Choice.off`) and every test's
+`ModelFiles` downloads through a stub.
 
 **The ship gate**: ≥ 80% top-5 on the user's real Danish and English Queries.
 `TEST_RUNNER_CODICLENS_MEANING_EVAL=1` reads `~/Library/Application Support/codiclens/eval/eval.json`
@@ -1389,6 +1499,29 @@ before (index and vector files), 803.8 MB after (index, cache and vector files);
 cosine over **300k** vectors 5.2 ms, with the scale and each file's best 6.8 ms (172 ms before the scale
 was masks and `vDSP`; Debug 39 ms); the fusion's SQL 3–23 ms (most for several common words:
 "how to retry with backoff"). The real-model test finds all six of its files first.
+
+### Licensing — LICENSE, NOTICE and the bundled notices
+Codiclens is Apache-2.0 (`LICENSE`); `NOTICE` is attribution only. Every third-party notice
+the app owes (license audit, map issue #5) ships in the bundle and is listed by
+`Acknowledgements.all` (`Acknowledgements.swift`), which Settings shows:
+
+- `LICENSE` and `NOTICE` (repository root) are file references in the app's Resources
+  phase; `docs/licenses/` is a **folder reference** that lands as `Resources/licenses/`,
+  subfolders kept (a synchronised group would flatten the two `LICENSE`s into one). Adding a
+  file under `docs/licenses/` needs no project edit; adding a folder there needs a new
+  `Acknowledgement`.
+- `docs/licenses/llama-cpp/` is llama.cpp's `LICENSE` and `THIRD-PARTY.txt`, the notices of
+  the code `Scripts/build-llama.sh` compiles in (llamafile, YaRN, the BPE tokenizer's
+  ggllm.cpp credit, Pillow resampling, xxHash, rotate-bits, sha1/sha256, stb_image,
+  miniaudio, subprocess.h), copied from `Vendor/llama.cpp` at the pinned tag. Sparkle's
+  `LICENSE` is its SwiftPM checkout's, all sections. `emoji-data-license.txt` stays
+  generated in `codiclens/`. EmbeddingGemma 2 gets a credit only: it is downloaded, not
+  bundled.
+- **A bump updates them in the same commit.** llama.cpp: the tag in NOTICE, both files in
+  `docs/licenses/llama-cpp/` (re-run the audit's vendor check: the vendor list moves).
+  Sparkle: `docs/licenses/sparkle/LICENSE`. `AcknowledgementsTests` catches a stale llama
+  tag in NOTICE and a bundled llama.cpp or Sparkle licence that differs from the checkout
+  it was built from (those two tests run only where the checkouts are).
 
 ## Data Flow: Paste
 
@@ -1424,7 +1557,15 @@ User types query → Enter
 | `codiclensApp.swift` | @main entry, AppDelegate adaptor |
 | `AppDelegate.swift` | Hotkey registration, QLPreviewPanel responder, Open With (`application(_:open:)`) and the Service's registration, and `isTestHost`: the test host starts nothing |
 | `Incoming.swift` | How an Incoming Subject gets in: `Incoming` read off a Service's pasteboard, `IncomingService` (the "Open in Codiclens" provider), and `LastActiveApp`, the app it came from |
-| `codiclens-Info.plist` | Merged into the generated Info.plist: the Open With document types and the Service |
+| `Setup.swift` | Setup's model: its rows (`SetupRow`: Shortcuts, Folders, Meaning, Paste, Open at login), Done, and when it shows (the first launch ever, reopen until Done) |
+| `SetupView.swift` / `SetupWindow.swift` | Setup's window, and `SetupController`, which wires it to the real Mac for Setup and Settings → General |
+| `SystemShortcuts.swift` | `ShortcutTakeover`: ⌘Space and ⌃⌘Space through the private symbolic hotkey call (ADR 0016), behind `SymbolicHotKeys` |
+| `LoginItem.swift` / `AccessibilityAccess.swift` | Open at login (`SMAppService.mainApp`) and the Accessibility grant, each behind a protocol so `SetupTests` runs over fakes |
+| `MoveToApplications.swift` | The launch alert that moves a copy outside /Applications there (Release only) |
+| `codiclens-Info.plist` | Merged into the generated Info.plist: the Open With document types, the Service, and Sparkle's keys |
+| `Acknowledgements.swift` / `AcknowledgementsView.swift` | Every bundled notice (`Acknowledgements.all`) and the Settings sheet that shows them (see Licensing) |
+| `Updater.swift` | The `Updater` seam: `UpdateState` (none / available / ready, newest version only), `UpdateEvent` and the one rule that applies them, `UpdateRequest`, the Settings line |
+| `SparkleUpdater.swift` | The only file that imports Sparkle: the standard updater controller and its delegates, translated into `UpdateEvent`s |
 | `PanelController.swift` | The one window: show/hide, focus lifecycle, observers, hit test |
 | `PanelView.swift` | The SwiftUI content of the Panel: Card row, gap, Results Slab |
 | `PanelLayout.swift` | The Panel's fixed geometry, the margin, and `PanelHitRegions` |
@@ -1466,7 +1607,7 @@ User types query → Enter
 | `LoadingRing.swift` | The app's own spinner, in place of a system `ProgressView` |
 | `AppIndex.swift` | The app Index: background scan, atomic swap, lazy icons |
 | `AppDirectoryWatcher.swift` | FSEvents watch over the application directories |
-| `Source.swift` | `Source` and `SourceStore`: the Sources, their switches and the folder list, in `UserDefaults` |
+| `Source.swift` | `Source` and `SourceStore`: the Sources, their switches and the folder list, in `UserDefaults`; `FolderAccess`, whether macOS refuses a folder |
 | `FileIndex.swift` | The File Index: started at launch, `search` on the keystroke and `searchSettled` (words and meaning) from any thread, counts and reading state for Settings, Low Power Mode, search by meaning's wiring |
 | `FileIndexStore.swift` | The File Index's SQLite schema, writer (incl. the `meta` catch-up bookkeeping and content jobs) and thread-safe reader (`FileHit`, its Passage, `fusedSearch`) |
 | `FileContent.swift` | What a file has to read (`FileContent`, in reading order), chunking, and the job/result values |
@@ -1480,7 +1621,7 @@ User types query → Enter
 | `SourcesPage.swift` | The Sources page's rows (switch, counts, reading state), its add/remove/switch controls, and the Skip switches and patterns |
 | `SourcesSettingsView.swift` | The Sources tab in Settings, drawn from `SourcesPage` |
 | `MeaningSearch.swift` | `isSupported`, and `MeaningRanking`: the per-modality scale, the gates, the fusion (from DigUp), the Query's words, Kind Words, Kind Hints and folder words |
-| `MeaningSettings.swift` | Search by meaning's switch (on by default): download, then the pass; its status line |
+| `MeaningSettings.swift` | Search by meaning's choice (`MeaningMode`: off until chosen, text, full): download, then the pass; its status line; the old switch's migration |
 | `MeaningJobs.swift` | `MeaningPass` (steps, fingerprint), job and result values, and the writer's side: jobs, storing vectors, the fingerprint |
 | `MeaningReader.swift` | One step of a file to vectors: text, pictures, PDF pages as pictures, windows of sound, video frames; the cache first (`JobVectors`); a batch's texts together |
 | `MeaningScheduler.swift` | The meaning pass: changed files first, then the backfill, at the pace decided per batch |
@@ -1512,9 +1653,6 @@ Real, unfixed, none urgent.
   the files outside the Sources wait for it; "Searching…" stays up until it lands.
   Cancellation means it only costs anything if the user stops typing at one letter.
 
-- Signing teams are inconsistent. Both targets override `DEVELOPMENT_TEAM` to
-  `L256GR2793`, while the project-level default is `HHNPP7C8GB`. Will bite on a clean
-  checkout.
 - **A Subject Card outside a Query Phase shows `selectedSubject`, not
   `subjectVM.cardSubject`.** `SubjectCardView.isQueryPhase` is the
   switch. The two values are only the same while the Query is still the question
@@ -1567,7 +1705,7 @@ Real, unfixed, none urgent.
   hit-test rule are covered by `PanelLayoutTests`; the show/hide *window* sequence is
   not covered by anything.
 
-### Four deliberate exceptions to the no-timing-hacks rule
+### Six deliberate exceptions to the no-timing-hacks rule
 
 All are device, API or lifecycle constraints, not fixes. Do not "clean them up".
 
@@ -1588,3 +1726,13 @@ All are device, API or lifecycle constraints, not fixes. Do not "clean them up".
   once a day (24 h, 12 h tolerance, background QoS). It is maintenance the system times
   around battery, heat and load, not a wait for anything: whether it may prune is decided
   by the index's state, and until it is caught up the run defers.
+- `MoveToApplications.relaunch` hands a `/bin/sh` loop the copy's launch: it polls
+  `kill -0 <pid>` with `sleep 0.2` until this process has exited, then (ejecting the DMG
+  first) opens the copy. Nothing outlives the quitting process to be told it has gone, and
+  the copy must not start while this one still holds the File Index. The poll is the wait
+  for an exit, not a delay standing in for one.
+- Setup's Paste row (`PasteRowView`) re-checks the Accessibility grant on a 1 s `Timer`
+  while the window is up, besides on `didBecomeActiveNotification`. macOS posts nothing
+  when the grant changes, and the user may grant it in System Settings while Setup stays
+  in the background, so asking is the only way the tick can follow. It lives and dies with
+  the window.

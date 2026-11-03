@@ -216,6 +216,7 @@ enum ActionHandler {
 
     case service(String)
     case openSettings
+    case checkForUpdates
 }
 
 struct SubjectAction: Identifiable {
@@ -331,6 +332,11 @@ struct SubjectAction: Identifiable {
         case .builtIn(.settings):
             return [
                 .init(name: "Open", icon: .sfSymbol("gear"), isFinal: true, handler: .openSettings),
+            ]
+
+        case .builtIn(.checkForUpdates):
+            return [
+                .init(name: "Check", icon: .sfSymbol("arrow.down.circle"), isFinal: true, handler: .checkForUpdates),
             ]
 
         case .builtIn(.clipboard), .builtIn(.emoji):

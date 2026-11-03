@@ -63,6 +63,7 @@ extension CommandCoordinator {
     /// the File Index's own does with search by meaning off.
     static func isolated(
         runner: EffectRunner? = nil,
+        updater: (any Updater)? = nil,
         history: ClipboardHistory? = nil,
         emojiVM: EmojiSearchVM? = nil,
         index: AppIndex? = nil,
@@ -73,6 +74,7 @@ extension CommandCoordinator {
     ) -> CommandCoordinator {
         CommandCoordinator(
             runner: runner ?? RecordingEffectRunner(),
+            updater: updater ?? FakeUpdater(),
             history: history ?? ClipboardHistory(store: InMemoryClipboardStore()),
             emojiVM: emojiVM ?? throwawayEmojiVM(),
             index: index ?? inertAppIndex,
@@ -119,5 +121,15 @@ final class HeldSearchSchedule: SearchSchedule {
         pause = nil
         settle?()
         await runSearches()
+    }
+}
+
+extension SourceStore {
+    /// A store with Downloads, Documents and Desktop as folder Sources, as
+    /// after Allow in Setup or an install from before it.
+    static func withDefaultFolders(defaults: UserDefaults) -> SourceStore {
+        let store = SourceStore(defaults: defaults)
+        store.addFolders(defaultFolders.map { URL(fileURLWithPath: $0, isDirectory: true) })
+        return store
     }
 }

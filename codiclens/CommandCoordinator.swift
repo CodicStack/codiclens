@@ -67,6 +67,10 @@ class CommandCoordinator {
     private let history: ClipboardHistory
     private let sources: SourceStore
 
+    /// Read for the Update Notice; asked only through `.update` Effects, by
+    /// the runner.
+    @ObservationIgnored private let updater: any Updater
+
     /// Everything that reaches the user's own data is a parameter without a
     /// default: `PanelController` hands in the shared ones, and a test that
     /// forgot one does not compile rather than read the real thing.
@@ -85,8 +89,10 @@ class CommandCoordinator {
     ///     stand-in.
     ///   - searchSchedule: when Subject search asks for the list below the
     ///     apps. Tests pass one they run by hand.
+    ///   - updater: what the Update Notice reads. Tests pass `FakeUpdater`.
     init(
         runner: EffectRunner,
+        updater: any Updater,
         history: ClipboardHistory,
         emojiVM: EmojiSearchVM,
         index: AppIndex,
@@ -96,6 +102,7 @@ class CommandCoordinator {
         searchSchedule: SearchSchedule = LiveSearchSchedule()
     ) {
         self.runner = runner
+        self.updater = updater
         self.history = history
         self.sources = sources
         self.clipboardVM = ClipboardSearchVM(history: history)
@@ -965,6 +972,27 @@ class CommandCoordinator {
         focusTrigger.toggle()
     }
 
+    // MARK: - Update Notice
+
+    /// What the Update Notice says, or nil while no update is waiting
+    /// (`GLOSSARY.md`, **Update Notice**). Read from the updater, so a view
+    /// reading it redraws when the state changes.
+    var updateNotice: UpdateNotice? { UpdateNotice(updater.state) }
+
+    /// ⌘U, or a click on the Update Notice, in any Phase: the Panel goes,
+    /// then Sparkle's dialog comes up for the waiting update, or the ready
+    /// one installs and Codiclens restarts into it. Nothing with no update.
+    @discardableResult
+    func actOnUpdateNotice() -> [Effect] {
+        let effects: [Effect] = switch updater.state {
+        case .none: []
+        case .available: [.hide, .update(.showWaitingUpdate)]
+        case .ready: [.hide, .update(.installReadyUpdate)]
+        }
+        runner.run(effects)
+        return effects
+    }
+
     /// Advances the machine and hands the resulting effects to the runner.
     /// The effects are returned too, so tests can assert on them directly.
     @discardableResult
@@ -1614,6 +1642,8 @@ class CommandCoordinator {
             return [.paste(.text(emoji.string))]
         case .builtIn(.settings):
             return [.hide, .showSettings]
+        case .builtIn(.checkForUpdates):
+            return [.hide, .update(.check)]
         case .builtIn(.clipboard), .builtIn(.emoji):
             return []
         }
@@ -1836,6 +1866,9 @@ class CommandCoordinator {
 
         case .openSettings:
             return [.hide, .showSettings]
+
+        case .checkForUpdates:
+            return [.hide, .update(.check)]
 
         case .service:
             return []

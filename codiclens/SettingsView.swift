@@ -1,10 +1,13 @@
 import SwiftUI
 
 struct SettingsView: View {
+    let setupController: SetupController
+    let updater: any Updater
+
     var body: some View {
         TabView {
             Tab("General", systemImage: "gearshape") {
-                GeneralSettingsView()
+                GeneralSettingsView(setupController: setupController, updater: updater)
             }
             Tab("Sources", systemImage: "folder") {
                 SourcesSettingsView()
@@ -15,12 +18,28 @@ struct SettingsView: View {
 }
 
 private struct GeneralSettingsView: View {
+    let setupController: SetupController
+    let updater: any Updater
     @AppStorage("appTheme") private var selectedTheme: String = AppTheme.system.rawValue
     @AppStorage(Motion.animationsEnabledKey) private var animationsEnabled: Bool = true
     @State private var isShowingAcknowledgements = false
 
     var body: some View {
         Form {
+            Section {
+                shortcutRows
+                Toggle("Open at login", isOn: Binding(
+                    get: { setupController.openAtLogin.isOn },
+                    set: { setupController.openAtLogin.setOn($0) }
+                ))
+            } header: {
+                Text("Startup and shortcuts")
+            } footer: {
+                Text("Quitting Codiclens gives ⌘Space and ⌃⌘Space back to macOS until it opens again.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section {
                 Picker("Theme", selection: $selectedTheme) {
                     ForEach(AppTheme.allCases, id: \.rawValue) { theme in
@@ -42,8 +61,6 @@ private struct GeneralSettingsView: View {
                 skinToneRow
             } header: {
                 Text("Emoji")
-            } footer: {
-                emojiHotKeyExplanation
             }
 
             Section {
@@ -64,27 +81,76 @@ private struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            updatesSection
+
             Section {
+                Button("Show Setup…") { setupController.show() }
                 Button("Acknowledgements…") { isShowingAcknowledgements = true }
                 Button("Quit Codiclens") { NSApp.terminate(nil) }
                     .keyboardShortcut("q")
             }
         }
         .formStyle(.grouped)
-        .sheet(isPresented: $isShowingAcknowledgements) { acknowledgementsSheet }
+        .sheet(isPresented: $isShowingAcknowledgements) {
+            AcknowledgementsView { isShowingAcknowledgements = false }
+        }
+        .onAppear { setupController.openAtLogin.refresh() }
     }
 
-    // MARK: - Emoji hotkey
+    // MARK: - Shortcuts
 
-    /// ⌃⌘Space is registered unconditionally, but macOS ships owning it. The
-    /// footer says so, because a shortcut that silently does nothing is worse
-    /// than one the user knows they have to free up. No path is given for
-    /// freeing it: System Settings has no row for Emoji & Symbols — see
-    /// `docs/adr/0006-private-symbolic-hotkey-api.md`.
-    private var emojiHotKeyExplanation: some View {
-        Text("⌃⌘Space opens the emoji picker, and ⌘Space opens Codiclens. If macOS's own Emoji & Symbols window appears instead, the system still holds ⌃⌘Space and is consuming the keystroke before Codiclens sees it.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+    /// The same choices as Setup's Shortcuts row, put into effect at once:
+    /// off hands the shortcut back to macOS (ADR 0016). Where macOS kept
+    /// one, the row says so in Setup's words.
+    @ViewBuilder
+    private var shortcutRows: some View {
+        let takeover = setupController.takeover
+        if takeover.isAvailable {
+            Toggle(SystemShortcut.spotlight.choiceTitle, isOn: binding(for: .spotlight))
+            if takeover.isOn(.spotlight), takeover.hasFailed(.spotlight) { SpotlightFallbackNote() }
+            Toggle(SystemShortcut.emoji.choiceTitle, isOn: binding(for: .emoji))
+            if takeover.isOn(.emoji), takeover.hasFailed(.emoji) { EmojiFallbackNote() }
+        } else {
+            SpotlightFallbackNote()
+            EmojiFallbackNote()
+        }
+    }
+
+    private func binding(for shortcut: SystemShortcut) -> Binding<Bool> {
+        Binding(
+            get: { setupController.takeover.isOn(shortcut) },
+            set: { setupController.takeover.setOn($0, for: shortcut) }
+        )
+    }
+
+    // MARK: - Updates
+
+    /// Reads and asks only the `Updater`, never Sparkle.
+    private var updatesSection: some View {
+        Section {
+            Toggle("Check for updates automatically", isOn: Binding(
+                get: { updater.checksAutomatically },
+                set: { updater.checksAutomatically = $0 }
+            ))
+            Toggle("Download and install updates automatically", isOn: Binding(
+                get: { updater.downloadsAutomatically },
+                set: { updater.downloadsAutomatically = $0 }
+            ))
+            .disabled(!updater.canDownloadAutomatically)
+            Button("Check Now") { updater.request(.check) }
+                .disabled(!updater.canCheck)
+            // Once a minute, so "last checked 2 minutes ago" keeps up.
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                Text(UpdateStatusLine.text(version: updater.version, lastCheck: updater.lastCheck, now: context.date))
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Updates")
+        } footer: {
+            Text("Checks codiclens.codicstack.com once a day.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     // MARK: - Skin tone
@@ -105,47 +171,5 @@ private struct GeneralSettingsView: View {
     private func preview(_ tone: SkinTone) -> String {
         guard let modifier = tone.modifier else { return "👍" }
         return "👍" + String(Character(modifier))
-    }
-
-    // MARK: - Acknowledgements
-
-    /// Third-party material the app ships, each with the licence it came
-    /// under. Both files are bundled resources.
-    private var acknowledgements: [(title: String, text: String)] {
-        [
-            ("Emoji Data", EmojiIndex.licenseText() ?? "The bundled emoji data is missing its licence file."),
-            ("DigUp", Self.bundledText("digup-license") ?? "The DigUp licence file is missing from the app.")
-        ]
-    }
-
-    private static func bundledText(_ resource: String) -> String? {
-        guard let url = Bundle.main.url(forResource: resource, withExtension: "txt") else { return nil }
-        return try? String(contentsOf: url, encoding: .utf8)
-    }
-
-    private var acknowledgementsSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Acknowledgements").font(.headline)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(acknowledgements, id: \.title) { acknowledgement in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(acknowledgement.title).font(.subheadline.weight(.semibold))
-                            Text(acknowledgement.text)
-                                .font(.system(.caption, design: .monospaced))
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            HStack {
-                Spacer()
-                Button("Done") { isShowingAcknowledgements = false }
-                    .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(20)
-        .frame(width: 520, height: 420)
     }
 }

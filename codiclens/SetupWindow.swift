@@ -1,0 +1,86 @@
+import AppKit
+import SwiftUI
+
+/// The app's Setup over the real Mac: macOS's shortcut table, the folder
+/// Sources, search by meaning's choice, the app's login item and the
+/// Accessibility grant, and the window that shows it.
+/// Made once, by `AppDelegate`, after the test-host check: nothing a test
+/// runs reaches these.
+final class SetupController {
+    let takeover: ShortcutTakeover
+    let openAtLogin: OpenAtLogin
+    private let setup: Setup
+    private var window: NSWindow?
+    private var closeObserver: Any?
+
+    init(meaning: MeaningSettings, defaults: UserDefaults = .standard) {
+        takeover = ShortcutTakeover(hotKeys: PrivateSymbolicHotKeys(), defaults: defaults)
+        openAtLogin = OpenAtLogin(service: MainAppLoginItem())
+        setup = Setup(
+            shortcuts: ShortcutsRow(takeover: takeover),
+            folders: FoldersRow(sources: .shared, isDenied: FileIndex.shared.isDenied),
+            meaning: MeaningChoiceRow(meaning: meaning),
+            paste: PasteRow(access: SystemAccessibility()),
+            login: LoginRow(openAtLogin: openAtLogin),
+            defaults: defaults
+        )
+    }
+
+    /// The launch is done: Setup opens on the first launch ever.
+    func showAtLaunch() {
+        if setup.showsAtLaunch { show() }
+    }
+
+    /// The running app was reopened: Setup opens until Done has been
+    /// pressed once.
+    func showOnReopen() {
+        if setup.opensOnReopen { show() }
+    }
+
+    /// Opens the window, or brings it forward with what it already shows:
+    /// "Show Setup…" in Settings.
+    func show() {
+        if window == nil {
+            setup.begin()
+            // Sized by its content, so a row added later grows the window.
+            let content = NSHostingController(rootView: ThemeWrapper {
+                SetupView(setup: self.setup, done: { [weak self] in self?.done() })
+            })
+            // Constrain the view's ideal size directly. Driving this window through
+            // preferredContentSize feeds its grouped Form back into AppKit sizing
+            // until the display cycle aborts with repeated constraint updates.
+            content.sizingOptions = [.intrinsicContentSize]
+            let window = NSWindow(contentViewController: content)
+            window.styleMask = [.titled, .closable]
+            window.isReleasedWhenClosed = false
+            window.title = "Set Up Codiclens"
+            window.center()
+            // Closing without Done is a skip: the window goes, the choices
+            // with it, and Setup comes back on the next reopen.
+            closeObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification, object: window, queue: .main
+            ) { [weak self] _ in
+                self?.forgetWindow()
+            }
+            self.window = window
+        }
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func done() {
+        setup.done()
+        window?.close()
+    }
+
+    private func forgetWindow() {
+        if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) }
+        closeObserver = nil
+        window = nil
+    }
+
+    /// Before the app quits.
+    func tearDown() {
+        window?.close()
+    }
+}
