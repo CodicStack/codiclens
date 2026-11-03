@@ -17,6 +17,20 @@ struct SetupView: View {
                     Text("Shortcuts")
                 }
                 Section {
+                    FoldersRowView(row: setup.folders)
+                } header: {
+                    Text("Search your files")
+                }
+                Section {
+                    MeaningChoiceRowView(row: setup.meaning)
+                } header: {
+                    Text("Search by meaning")
+                } footer: {
+                    Text(MeaningSettings.caption)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section {
                     PasteRowView(row: setup.paste)
                 } header: {
                     Text("Paste into apps")
@@ -61,6 +75,46 @@ private struct ShortcutsRowView: View {
         } else {
             EmojiFallbackNote()
         }
+    }
+}
+
+private struct FoldersRowView: View {
+    let row: FoldersRow
+
+    var body: some View {
+        LabeledContent {
+            if row.isAllowed {
+                Label("Allowed", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            } else {
+                Button("Allow") { row.allow() }
+            }
+        } label: {
+            Text(ListFormatter.localizedString(byJoining: row.names))
+            Text("macOS asks once for each folder. Skip it and Codiclens still finds apps, clipboard and emoji.")
+        }
+        if !row.deniedNames.isEmpty {
+            NoFolderAccessNote(names: row.deniedNames)
+        }
+    }
+}
+
+private struct MeaningChoiceRowView: View {
+    @Bindable var row: MeaningChoiceRow
+
+    var body: some View {
+        Picker(selection: $row.mode) {
+            ForEach(MeaningMode.allCases, id: \.self) { mode in
+                Text(mode.title).tag(mode)
+            }
+        } label: {
+            Text("Find files by what they say, show or sound like")
+            if !row.isAvailable {
+                Text(MeaningSettings.Status.unavailable.text)
+            }
+        }
+        .pickerStyle(.radioGroup)
+        .disabled(!row.isAvailable)
     }
 }
 
@@ -111,6 +165,22 @@ struct SpotlightFallbackNote: View {
             Text("macOS kept ⌘Space for Spotlight. To use it for Codiclens, open Keyboard, click Keyboard Shortcuts, choose Spotlight and turn off Show Spotlight search.")
                 .fixedSize(horizontal: false, vertical: true)
             Link("Open Keyboard Settings", destination: Self.keyboardSettings)
+        }
+    }
+}
+
+// MARK: - When macOS refuses a folder
+
+/// Shown in Setup under the Folders row when macOS refused one or more of
+/// them.
+struct NoFolderAccessNote: View {
+    let names: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("No access to \(ListFormatter.localizedString(byJoining: names)). Turn Codiclens on for it in Files and Folders.")
+                .fixedSize(horizontal: false, vertical: true)
+            Link("Open Privacy & Security", destination: FolderAccess.privacySettings)
         }
     }
 }

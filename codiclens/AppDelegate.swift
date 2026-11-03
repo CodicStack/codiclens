@@ -83,7 +83,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             isMovingToApplications = true
             return
         }
-        let setupController = SetupController()
+        let setupController = SetupController(meaning: FileIndex.shared.meaning)
         self.setupController = setupController
         // Whatever an OS update, a restart or a crash left behind: the
         // shortcuts the user gave Codiclens are taken again.
@@ -135,6 +135,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         panelController?.showPanel()
         return false
+    }
+
+    /// Back to the front, from System Settings perhaps: a folder macOS
+    /// refused may be allowed now.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard !Self.isTestHost, !EmbeddingService.isRequested(), setupController != nil else { return }
+        FileIndex.shared.recheckAccess()
     }
 
     /// Everything the app holds outside its own memory, released in one place.

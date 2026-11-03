@@ -6,7 +6,7 @@ import Testing
 /// `UserDefaults` suite and counts handed in by the test.
 @MainActor
 struct SourcesPageTests {
-    private let store = SourceStore(defaults: ThrowawayDefaults())
+    private let store = SourceStore(defaults: ThrowawayDefaults(), isFromBeforeSetup: true)
     private let downloads = NSHomeDirectory() + "/Downloads"
 
     private func page(
@@ -82,6 +82,25 @@ struct SourcesPageTests {
         #expect(!page.folderRows.contains { $0.source.folderPath == downloads })
         #expect(page.folderRows.count == 2)
         #expect(page.builtInRows.count == 4)
+    }
+
+    /// A folder macOS refused says so, and points at Privacy & Security.
+    @Test func aFolderMacOSDeniedReadsNoAccess() {
+        let desktop = NSHomeDirectory() + "/Desktop"
+        let page = SourcesPage(store: store, counts: { _ in nil }, isReading: { _ in false }, isDenied: { $0 == desktop })
+
+        #expect(page.folderRows.map(\.hasNoAccess) == [false, false, true])
+        #expect(page.builtInRows.allSatisfy { !$0.hasNoAccess })
+    }
+
+    /// With no folder Sources (skipped in Setup) the built-in ones are
+    /// listed and on, and the folders section has only Add Folder….
+    @Test func skippedFoldersLeaveTheBuiltInSourcesOn() {
+        let skipped = SourceStore(defaults: ThrowawayDefaults())
+        let page = SourcesPage(store: skipped, counts: { _ in nil }, isReading: { _ in false })
+
+        #expect(page.folderRows.isEmpty)
+        #expect(page.builtInRows.map(\.isEnabled) == [true, true, true, true])
     }
 
     @Test func aBuiltInSourceCannotBeRemoved() throws {

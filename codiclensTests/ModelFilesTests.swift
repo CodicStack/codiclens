@@ -70,6 +70,55 @@ struct ModelFilesTests {
         #expect(fixture.downloader.requested.withLock { $0 } == ["a.gguf", "b.gguf", "b.gguf"])
     }
 
+    /// Search by meaning's Text choice: the text model alone is enough to be
+    /// ready, and the encoders come later when they are wanted too.
+    @Test func wantingOnlyTheTextModelDownloadsOnlyItThenTheEncodersLater() async throws {
+        let folder = try TemporaryFolder()
+        defer { folder.remove() }
+        let fixture = Fixture()
+        let files = ModelFiles(folder: folder.url, files: fixture.files, downloader: fixture.downloader)
+        #expect(files.textModel.name == "a.gguf", "the first file is the text model")
+
+        files.want([files.textModel])
+        await files.download()
+
+        #expect(files.state == .ready)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path) == ["a.gguf"])
+        #expect(ModelFiles(folder: folder.url, files: fixture.files, downloader: fixture.downloader).state
+                == .notDownloaded, "a launch wants every file until told otherwise")
+
+        files.want(fixture.files)
+        #expect(files.state == .notDownloaded)
+        await files.download()
+
+        #expect(files.state == .ready)
+        #expect(fixture.downloader.requested.withLock { $0 } == ["a.gguf", "b.gguf"])
+    }
+
+    /// Changing the choice while the encoders download: the download stops,
+    /// and the text model that is there is all that is wanted.
+    @Test func wantingLessWhileDownloadingSettlesOnWhatIsThere() async throws {
+        let folder = try TemporaryFolder()
+        defer { folder.remove() }
+        let fixture = Fixture()
+        let files = ModelFiles(folder: folder.url, files: fixture.files, downloader: fixture.downloader)
+        files.want([files.textModel])
+        await files.download()
+        files.want(fixture.files)
+        fixture.downloader.onProgress = { @Sendable in
+            await MainActor.run {
+                files.cancel()
+                files.want([files.textModel])
+            }
+        }
+
+        await files.download()
+
+        #expect(files.state == .ready)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasSuffix(".gguf") }
+                == ["a.gguf"])
+    }
+
     @Test func anInterruptedDownloadResumesFromWhereItStopped() async throws {
         let folder = try TemporaryFolder()
         defer { folder.remove() }
@@ -169,6 +218,8 @@ private final class FakeDownloader: ModelFileDownloader, @unchecked Sendable {
         await onProgress?()
         progress(Int64(data.count))
         await onProgress?()
+        // As URLSession's task does when cancelled.
+        if Task.isCancelled { throw ModelDownloadInterruption(reason: "Cancelled", resumeData: nil) }
         try data.write(to: destination)
     }
 }

@@ -922,6 +922,20 @@ runs it on its own `UserDefaults` suite. A row being read — crawled, or with c
 unread while the backfill runs — shows the Loading Ring with "Reading" beside it, never a
 `ProgressView`.
 
+**No folder Source until Allow.** A new install has no folder Sources: Setup's "Search your
+files" row (`FoldersRow`) offers Downloads, Documents and Desktop, and Allow adds them at
+once, so macOS's three folder prompts come while that row is on screen. A skip leaves none;
+apps, Clipboard History and Emoji work regardless. An install from before Setup asked
+(`SourceStore.isFromBeforeSetup`: Setup finished, or a `FileIndex.sqlite` on disk) keeps the
+three, and `SetupController` writes the folder list down before the File Index starts, so a
+new install's empty list survives the database its first launch creates. A folder macOS
+refused (`FolderAccess.isDenied`, checked by `FileIndexer.crawl` before the walk) is
+reported as `.access`, kept in `FileIndex.deniedFolders`, never marked caught up, and shows
+"No access" with an "Open Privacy & Security" link in place of its counts (and under the
+Setup row). Each time the app comes to the front `FileIndex.recheckAccess` crawls the
+refused ones that are readable now. Tests stand a folder with no permissions in for a
+refusal (`FolderAccessTests`); nothing asks macOS.
+
 Under Folders, **Skip** is what the File Index leaves out inside the folder Sources, all
 user-set and kept by `SourceStore` beside the Sources: a checkbox per
 `FileIndexRules.SkipGroup` (on = skipped; Caches, node_modules and build output, App bundles
@@ -1156,8 +1170,9 @@ from DigUp (MIT, `docs/licenses/digup/LICENSE`); each such file says so in its f
   one gate; on Intel the feature is unavailable and nothing downloads.
 - **`ModelFiles`** — ggml-org's Q8_0 GGUFs at one pinned Hugging Face revision: the text
   model (310 MB, all a Query needs) and the mmproj image + audio encoders (555 MB), into
-  `~/Library/Application Support/codiclens/models/`, downloaded at launch while the
-  feature is on (it is unless the user turned it off), never bundled. A file gets its real name only after its size and SHA-256
+  `~/Library/Application Support/codiclens/models/`, never bundled, downloaded only once the
+  user has chosen (see Settings below): the Text choice wants the text model alone (`want`),
+  the full one both, and a launch carries on with what the choice needs. A file gets its real name only after its size and SHA-256
   match, so a file there is whole. Resumable (`<name>.resume` holds URLSession resume
   data), observable `state`: `notDownloaded` / `downloading(progress:)` / `verifying` /
   `ready` / `failed(reason)`. Tests inject a `ModelFileDownloader`.
@@ -1168,10 +1183,14 @@ from DigUp (MIT, `docs/licenses/digup/LICENSE`); each such file says so in its f
 - **`Embedder`** (arm64 only) — llama.cpp in-process, values in and out: texts (batched,
   up to 16 a `llama_process` call), a `CGImage` (decoded upright by `EmbeddingInput`,
   sized by `ImageSizing` as the reference's Pillow does) or 16 kHz mono samples (≤ 30 s;
-  `EmbeddingInput.audio` decodes and resamples with AVFoundation). Text-only reserves a
-  512-token context, full 2,048.
+  `EmbeddingInput.audio` decodes and resamples with AVFoundation). The query encoder
+  reserves a 512-token context, the indexing helpers 2,048 (`--max-tokens`), with or
+  without the encoders, so a Passage's vector is the same from either and the vector
+  cache serves both.
 - **The helper** — the app binary relaunched as `codiclens --embedding-service
-  [--text-only] [--models <dir>] [--idle-exit <s>]`. `AppDelegate` returns into
+  [--text-only] [--max-tokens <n>] [--models <dir>] [--idle-exit <s>]`, one per
+  `EmbeddingClient.Helper`: `queries` (text-only, 512), `indexing` (full) and
+  `textIndexing` (text-only, 2,048: the Text choice's meaning pass). `AppDelegate` returns into
   `EmbeddingService.start()` before anything else, so it has no Panel, hotkeys, File
   Index or clipboard recorder. It loads the model, writes an `EmbeddingServiceHello`, then
   answers JSON lines (`EmbeddingServiceProtocol.swift`: `embedText`, `embedImage`,
@@ -1193,7 +1212,12 @@ from DigUp (MIT, `docs/licenses/digup/LICENSE`); each such file says so in its f
 
 **The meaning pass** (`MeaningScheduler`, on the File Index queue beside the contents pass,
 the same shape). Everything with a `FileContent` gets vectors, in the helper (the full model,
-~1 GB while it works, gone after its 60 s idle exit; `.utility` QoS):
+~1 GB while it works, gone after its 60 s idle exit; `.utility` QoS). **The Text choice**
+(`enable(textOnly: true)`, `MeaningJob.isTextOnly`) embeds the text alone in the
+`textIndexing` helper: pictures, recordings and videos are done with nothing and a PDF's
+pages without words are passed. It runs under its own fingerprint
+(`MeaningPass.textOnlyFingerprint`), so going to or from it drops the vectors and embeds
+again, the text's straight from the vector cache, the rest with the encoders:
 - **Text**: every Passage the contents pass read (`chunk`, `page`; code, notes, documents,
   PDFs), with the card's document prompt and the file's name as title, cut at 4,000
   characters. Text that is mostly digits gets no vector (keyword search has it). OCR text
@@ -1397,16 +1421,24 @@ unless given one), and puts the answer through `SourceSearch` (see SubjectSearch
 shows it on the Card, plays from it in the Passage Preview and opens there in QuickTime.
 
 **Settings**: Sources → "Search by meaning" (`MeaningSettings`, drawn from
-`SourcesPage.meaningRow`): one switch, **on unless the user turns it off**: on Apple silicon a
-fresh install downloads the model at launch (`FileIndex.start()` → `MeaningSettings.start()`,
-never in the test host) and then reads every file, with nobody touching Settings. On downloads
-the model (progress from `ModelFiles.state`), then starts the pass; a status line ("Downloading the
+`SourcesPage.meaningRow`), and Setup's Meaning row (`MeaningChoiceRow`): one choice,
+`MeaningMode` **Off, Text (310 MB) or Text, images and audio (865 MB)**, captioned
+"Downloads from Hugging Face. Your files never leave this Mac." in both places. **Off until
+the user chooses**: nothing downloads by itself; Setup preselects the full choice and its
+Done starts the download. A choice downloads what it needs (progress from
+`ModelFiles.state`), then starts the pass (`apply(mode)`); Text to the full choice keeps the
+text pass running while the encoders download, then switches; a status line ("Downloading the
 model, 42%", "Reading 1,234 of 5,678 files", "Paused in Low Power Mode, …", "Ready, …",
 "Needs a Mac with Apple silicon") and the files-read counts; off stops embedding and frees
 the vectors, keeping model and vectors on disk; "Remove Model and Vectors…" (one
-confirmation) deletes both, the vector cache's entries included. Kept in `UserDefaults` (`codiclens.meaning.enabled`, missing =
-on, so only the user's own off is written down); a test's File Index has the switch off
-(`MeaningSettings.Switch.off`) and every test's `ModelFiles` downloads through a stub.
+confirmation) deletes both, the vector cache's entries included. Kept in `UserDefaults`
+(`codiclens.meaning.mode`, missing = not chosen, run as off). **Migration** from the old
+switch (`codiclens.meaning.enabled`, on unless turned off, downloaded at launch): an explicit
+off stays off, and an install with anything in the models folder keeps the full choice and
+carries on as it was; the old key is removed. A launch (`FileIndex.start()` →
+`MeaningSettings.start()`, never in the test host) carries on with the choice in force. A
+test's File Index has the choice off (`MeaningSettings.Choice.off`) and every test's
+`ModelFiles` downloads through a stub.
 
 **The ship gate**: ≥ 80% top-5 on the user's real Danish and English Queries.
 `TEST_RUNNER_CODICLENS_MEANING_EVAL=1` reads `~/Library/Application Support/codiclens/eval/eval.json`
@@ -1489,7 +1521,7 @@ User types query → Enter
 | `codiclensApp.swift` | @main entry, AppDelegate adaptor |
 | `AppDelegate.swift` | Hotkey registration, QLPreviewPanel responder, Open With (`application(_:open:)`) and the Service's registration, and `isTestHost`: the test host starts nothing |
 | `Incoming.swift` | How an Incoming Subject gets in: `Incoming` read off a Service's pasteboard, `IncomingService` (the "Open in Codiclens" provider), and `LastActiveApp`, the app it came from |
-| `Setup.swift` | Setup's model: its rows (`SetupRow`: Shortcuts, Paste, Open at login; Folders and Meaning slot in), Done, and when it shows (launch, reopen until Done) |
+| `Setup.swift` | Setup's model: its rows (`SetupRow`: Shortcuts, Folders, Meaning, Paste, Open at login), Done, and when it shows (launch, reopen until Done) |
 | `SetupView.swift` / `SetupWindow.swift` | Setup's window, and `SetupController`, which wires it to the real Mac for Setup and Settings → General |
 | `SystemShortcuts.swift` | `ShortcutTakeover`: ⌘Space and ⌃⌘Space through the private symbolic hotkey call (ADR 0016), behind `SymbolicHotKeys` |
 | `LoginItem.swift` / `AccessibilityAccess.swift` | Open at login (`SMAppService.mainApp`) and the Accessibility grant, each behind a protocol so `SetupTests` runs over fakes |
@@ -1539,7 +1571,7 @@ User types query → Enter
 | `LoadingRing.swift` | The app's own spinner, in place of a system `ProgressView` |
 | `AppIndex.swift` | The app Index: background scan, atomic swap, lazy icons |
 | `AppDirectoryWatcher.swift` | FSEvents watch over the application directories |
-| `Source.swift` | `Source` and `SourceStore`: the Sources, their switches and the folder list, in `UserDefaults` |
+| `Source.swift` | `Source` and `SourceStore`: the Sources, their switches and the folder list, in `UserDefaults`; `FolderAccess`, whether macOS refuses a folder |
 | `FileIndex.swift` | The File Index: started at launch, `search` on the keystroke and `searchSettled` (words and meaning) from any thread, counts and reading state for Settings, Low Power Mode, search by meaning's wiring |
 | `FileIndexStore.swift` | The File Index's SQLite schema, writer (incl. the `meta` catch-up bookkeeping and content jobs) and thread-safe reader (`FileHit`, its Passage, `fusedSearch`) |
 | `FileContent.swift` | What a file has to read (`FileContent`, in reading order), chunking, and the job/result values |
@@ -1553,7 +1585,7 @@ User types query → Enter
 | `SourcesPage.swift` | The Sources page's rows (switch, counts, reading state), its add/remove/switch controls, and the Skip switches and patterns |
 | `SourcesSettingsView.swift` | The Sources tab in Settings, drawn from `SourcesPage` |
 | `MeaningSearch.swift` | `isSupported`, and `MeaningRanking`: the per-modality scale, the gates, the fusion (from DigUp), the Query's words, Kind Words, Kind Hints and folder words |
-| `MeaningSettings.swift` | Search by meaning's switch (on by default): download, then the pass; its status line |
+| `MeaningSettings.swift` | Search by meaning's choice (`MeaningMode`: off until chosen, text, full): download, then the pass; its status line; the old switch's migration |
 | `MeaningJobs.swift` | `MeaningPass` (steps, fingerprint), job and result values, and the writer's side: jobs, storing vectors, the fingerprint |
 | `MeaningReader.swift` | One step of a file to vectors: text, pictures, PDF pages as pictures, windows of sound, video frames; the cache first (`JobVectors`); a batch's texts together |
 | `MeaningScheduler.swift` | The meaning pass: changed files first, then the backfill, at the pace decided per batch |
