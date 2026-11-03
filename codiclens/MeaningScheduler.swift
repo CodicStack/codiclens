@@ -40,6 +40,16 @@ nonisolated final class MeaningScheduler: @unchecked Sendable {
         }
     }
 
+    /// `embedAll(with:cache:)` with `textOnly`, the text model alone, for a
+    /// text-only batch (`enable(textOnly:)`), and `full` for the rest.
+    static func embedAll(full: some MeaningEmbedder, textOnly: some MeaningEmbedder, cache: VectorCache) -> Embed {
+        let full = embedAll(with: full, cache: cache)
+        let textOnly = embedAll(with: textOnly, cache: cache)
+        return { jobs, pace in
+            try await (jobs.contains(where: \.isTextOnly) ? textOnly : full)(jobs, pace)
+        }
+    }
+
     private let writer: FileIndexWriter
     private let vectors: MeaningVectors
     private let cache: VectorCache
@@ -54,6 +64,8 @@ nonisolated final class MeaningScheduler: @unchecked Sendable {
     private var isPanelOpen = false
     private var isBusy = false
     private(set) var isEnabled = false
+    /// The Text choice: no pictures or sound (`MeaningJob.isTextOnly`).
+    private(set) var isTextOnly = false
     /// The helper could not start, or kept crashing: no more batches until
     /// the next `enable()`.
     private var isFailed = false
@@ -112,10 +124,12 @@ nonisolated final class MeaningScheduler: @unchecked Sendable {
     }
 
     /// Starts embedding: the database's vectors under `MeaningPass.fingerprint`
-    /// and in this `cache` (any others are dropped), and the vector files
-    /// opened, or rebuilt from the cache when they do not match the database.
-    func enable() throws {
-        let isNewFingerprint = try writer.adoptMeaningFingerprint()
+    /// (the text-only one with `textOnly`) and in this `cache` (any others
+    /// are dropped), and the vector files opened, or rebuilt from the cache
+    /// when they do not match the database.
+    func enable(textOnly: Bool = false) throws {
+        isTextOnly = textOnly
+        let isNewFingerprint = try writer.adoptMeaningFingerprint(MeaningPass.fingerprint(textOnly: textOnly))
         let isNewCache = try writer.adoptVectorCache(cache.id)
         if try isNewFingerprint || isNewCache || !vectors.open(expectedRows: writer.vectorRows()) {
             try writer.rebuild(vectors, from: cache)
@@ -138,13 +152,14 @@ nonisolated final class MeaningScheduler: @unchecked Sendable {
     func nextBatch(_ pace: MeaningPace) throws -> [MeaningJob] {
         guard isEnabled, !isFailed else { return [] }
         if !changed.isEmpty {
-            let (jobs, waiting) = try writer.meaningJobs(ids: changed)
+            let (jobs, waiting) = try writer.meaningJobs(ids: changed, textOnly: isTextOnly)
             let batch = Self.batch(from: jobs, size: pace.batchSize)
             changed = jobs.dropFirst(batch.count).map(\.id) + waiting
             if !batch.isEmpty { return batch }
         }
         guard pace != .paused, !sources.isEmpty else { return [] }
-        return Self.batch(from: try writer.meaningJobs(limit: pace.batchSize, sources: sources), size: pace.batchSize)
+        return Self.batch(from: try writer.meaningJobs(limit: pace.batchSize, sources: sources, textOnly: isTextOnly),
+                          size: pace.batchSize)
     }
 
     /// `nextBatch(_:)` at the pace in force now.

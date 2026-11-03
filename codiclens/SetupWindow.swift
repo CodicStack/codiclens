@@ -1,8 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// The app's Setup over the real Mac: macOS's shortcut table, the app's
-/// login item and the Accessibility grant, and the window that shows it.
+/// The app's Setup over the real Mac: macOS's shortcut table, search by
+/// meaning's choice, the app's login item and the Accessibility grant, and
+/// the window that shows it.
 /// Made once, by `AppDelegate`, after the test-host check: nothing a test
 /// runs reaches these.
 final class SetupController {
@@ -12,11 +13,12 @@ final class SetupController {
     private var window: NSWindow?
     private var closeObserver: Any?
 
-    init(defaults: UserDefaults = .standard) {
+    init(meaning: MeaningSettings, defaults: UserDefaults = .standard) {
         takeover = ShortcutTakeover(hotKeys: PrivateSymbolicHotKeys(), defaults: defaults)
         openAtLogin = OpenAtLogin(service: MainAppLoginItem())
         setup = Setup(
             shortcuts: ShortcutsRow(takeover: takeover),
+            meaning: MeaningChoiceRow(meaning: meaning),
             paste: PasteRow(access: SystemAccessibility()),
             login: LoginRow(openAtLogin: openAtLogin),
             defaults: defaults

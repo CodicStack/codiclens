@@ -29,9 +29,10 @@ private let helperBinary = ProcessInfo.processInfo.environment["CODICLENS_HELPER
 @Suite(.serialized, .enabled(if: secondsPerKind != nil || scaleRows != nil), .timeLimit(.minutes(180)))
 struct MeaningTimingTests {
     static func helper(textOnly: Bool) -> EmbeddingClient {
-        guard let helperBinary else { return EmbeddingClient.helper(textOnly: textOnly, idleExit: 60) }
+        guard let helperBinary else { return EmbeddingClient.helper(textOnly ? .queries : .indexing, idleExit: 60) }
         var options = EmbeddingService.Options()
         options.textOnly = textOnly
+        options.maxTokens = textOnly ? 512 : 2048
         return EmbeddingClient(launcher: HelperProcessLauncher(
             executable: helperBinary, options: options, qualityOfService: textOnly ? .userInitiated : .utility
         ))

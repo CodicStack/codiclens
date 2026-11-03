@@ -87,7 +87,7 @@ struct MeaningThroughputTests {
 
     @Test func textsPerCall() async throws {
         try await #require(MainActor.run { ModelFiles().isReady }, "download the model files first")
-        let client = EmbeddingClient.helper(textOnly: false, idleExit: 60)
+        let client = EmbeddingClient.helper(.indexing, idleExit: 60)
         try await client.hold()
         let corpus = Array(try Self.corpus())
         let long = stride(from: 0, to: corpus.count - 1800, by: 1800).map { String(corpus[$0..<($0 + 1700)]) }
@@ -112,7 +112,7 @@ struct MeaningThroughputTests {
         let files = try TemporaryFolder()
         defer { files.remove() }
         try Self.makeFiles(in: files)
-        let client = EmbeddingClient.helper(textOnly: false, idleExit: 60)
+        let client = EmbeddingClient.helper(.indexing, idleExit: 60)
         try await client.hold()
         await client.setFullSpeed(true)
         for size in [1, 8, 16, 32, 64] {
@@ -140,7 +140,7 @@ struct MeaningThroughputTests {
         let files = try TemporaryFolder()
         defer { files.remove() }
         try Self.makeFiles(in: files)
-        let encoder = EmbeddingClient.helper(textOnly: true, idleExit: 60)
+        let encoder = EmbeddingClient.helper(.queries, idleExit: 60)
         try await encoder.hold()
         var alone: [Duration] = []
         for index in 0..<20 {
@@ -153,7 +153,7 @@ struct MeaningThroughputTests {
         for pace in [MeaningPace.gentle, .full, .gentle, .full] {
             let run = try await Run(files: files)
             defer { run.folder.remove() }
-            let client = EmbeddingClient.helper(textOnly: false, idleExit: 60)
+            let client = EmbeddingClient.helper(.indexing, idleExit: 60)
             _ = try await client.embed(texts: ["warm up"])
             let queue = DispatchQueue(label: "throughput.meaning")
             let (stored, storedContinuation) = AsyncStream.makeStream(of: Void.self)

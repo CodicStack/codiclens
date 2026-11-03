@@ -83,7 +83,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             isMovingToApplications = true
             return
         }
-        let setupController = SetupController()
+        let setupController = SetupController(meaning: FileIndex.shared.meaning)
         self.setupController = setupController
         // Whatever an OS update, a restart or a crash left behind: the
         // shortcuts the user gave Codiclens are taken again.
