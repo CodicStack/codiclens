@@ -32,6 +32,8 @@ class PanelController {
     /// Setup, for the Shortcuts, Open at login and Show Setup… rows in
     /// Settings → General.
     private let setup: SetupController
+    /// For the Check for Updates Built-in and Settings → General → Updates.
+    private let updater: any Updater
     /// Search by meaning's query encoder, held while the Panel is up.
     private let queryEncoder = QueryEncoderHold.fileIndex
     private var isTornDown = false
@@ -47,9 +49,10 @@ class PanelController {
     /// whether it is still the current one before it orders the window out.
     private var showGeneration = 0
 
-    init(lastActiveApp: LastActiveApp, setup: SetupController) {
+    init(lastActiveApp: LastActiveApp, setup: SetupController, updater: any Updater) {
         self.lastActiveApp = lastActiveApp
         self.setup = setup
+        self.updater = updater
         let runner = SystemEffectRunner(pasteboard: .general)
         effectRunner = runner
         coordinator = CommandCoordinator(
@@ -81,6 +84,12 @@ class PanelController {
 
         runner.onShowSettings = { [weak self] in
             self?.showSettings()
+        }
+
+        // After `.hide`: the Panel is already on its way out when Sparkle's
+        // dialog comes up.
+        runner.onUpdateRequest = { [weak updater] request in
+            updater?.request(request)
         }
 
         runner.onSavePanel = { [weak self] (data: Data, name: String, type: UTType) in
@@ -506,7 +515,8 @@ class PanelController {
             window.isReleasedWhenClosed = false
             window.title = "Codiclens Settings"
             let setup = setup
-            window.contentView = NSHostingView(rootView: ThemeWrapper { SettingsView(setup: setup) })
+            let updater = updater
+            window.contentView = NSHostingView(rootView: ThemeWrapper { SettingsView(setup: setup, updater: updater) })
             window.center()
             settingsWindow = window
         }

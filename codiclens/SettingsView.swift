@@ -2,11 +2,12 @@ import SwiftUI
 
 struct SettingsView: View {
     let setup: SetupController
+    let updater: any Updater
 
     var body: some View {
         TabView {
             Tab("General", systemImage: "gearshape") {
-                GeneralSettingsView(setup: setup)
+                GeneralSettingsView(setup: setup, updater: updater)
             }
             Tab("Sources", systemImage: "folder") {
                 SourcesSettingsView()
@@ -18,6 +19,7 @@ struct SettingsView: View {
 
 private struct GeneralSettingsView: View {
     let setup: SetupController
+    let updater: any Updater
     @AppStorage("appTheme") private var selectedTheme: String = AppTheme.system.rawValue
     @AppStorage(Motion.animationsEnabledKey) private var animationsEnabled: Bool = true
     @State private var isShowingAcknowledgements = false
@@ -79,6 +81,8 @@ private struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            updatesSection
+
             Section {
                 Button("Show Setup…") { setup.show() }
                 Button("Acknowledgements…") { isShowingAcknowledgements = true }
@@ -115,6 +119,36 @@ private struct GeneralSettingsView: View {
             get: { setup.takeover.isOn(shortcut) },
             set: { setup.takeover.setOn($0, for: shortcut) }
         )
+    }
+
+    // MARK: - Updates
+
+    /// Reads and asks only the `Updater`, never Sparkle.
+    private var updatesSection: some View {
+        Section {
+            Toggle("Check for updates automatically", isOn: Binding(
+                get: { updater.checksAutomatically },
+                set: { updater.checksAutomatically = $0 }
+            ))
+            Toggle("Download and install updates automatically", isOn: Binding(
+                get: { updater.downloadsAutomatically },
+                set: { updater.downloadsAutomatically = $0 }
+            ))
+            .disabled(!updater.canDownloadAutomatically)
+            Button("Check Now") { updater.request(.check) }
+                .disabled(!updater.canCheck)
+            // Once a minute, so "last checked 2 minutes ago" keeps up.
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                Text(UpdateStatusLine.text(version: updater.version, lastCheck: updater.lastCheck, now: context.date))
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Updates")
+        } footer: {
+            Text("Checks codiclens.codicstack.com once a day.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     // MARK: - Skin tone
