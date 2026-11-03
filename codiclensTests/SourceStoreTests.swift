@@ -17,11 +17,19 @@ struct SourceStoreTests {
         #expect(store.sources.allSatisfy { $0.isEnabled })
     }
 
-    /// An install from before Setup asked about folders has always read the
-    /// three default ones, and keeps reading them.
-    @Test func anInstallFromBeforeSetupKeepsTheThreeDefaultFolders() {
-        let store = SourceStore(defaults: defaults, isFromBeforeSetup: true)
+    // MARK: - Migrating an install from before Setup
 
+    /// An install from before Setup asked about folders has always read the
+    /// three default ones with no folder list written down. The migration
+    /// writes them down once, and the Sources keep reading them.
+    @Test func anInstallFromBeforeSetupIsMigratedToTheThreeDefaultFolders() throws {
+        let folder = try TemporaryFolder()
+        defer { folder.remove() }
+        try folder.makeFile("FileIndex.sqlite")
+
+        SourcesMigration.migrate(defaults: defaults, fileIndex: folder.url.appendingPathComponent("FileIndex.sqlite"))
+
+        let store = SourceStore(defaults: defaults)
         #expect(store.folders.map(\.kind) == [
             .folder(path: NSHomeDirectory() + "/Downloads"),
             .folder(path: NSHomeDirectory() + "/Documents"),
@@ -30,40 +38,33 @@ struct SourceStoreTests {
         #expect(store.folders.allSatisfy { $0.isEnabled })
     }
 
-    /// The first launch writes down that it had no folders, so a later
-    /// launch, which finds the File Index that launch created, does not take
-    /// itself for an install from before Setup.
-    @Test func aNewInstallsEmptyFolderListIsRememberedOnceWrittenDown() {
-        SourceStore(defaults: defaults).rememberFolders()
-
-        #expect(SourceStore(defaults: defaults, isFromBeforeSetup: true).folders.isEmpty)
-    }
-
-    @Test func folderSourcesSavedAnyWayAreKeptAsTheyAre() {
-        let store = SourceStore(defaults: defaults, isFromBeforeSetup: true)
-        store.removeFolder(NSHomeDirectory() + "/Desktop")
-
-        #expect(SourceStore(defaults: defaults).folders.compactMap(\.folderPath) == [
-            NSHomeDirectory() + "/Downloads", NSHomeDirectory() + "/Documents"
-        ])
-    }
-
-    /// Whether this Mac's install is from before Setup: Setup was finished,
-    /// or there is a File Index on disk.
-    @Test func anInstallIsFromBeforeSetupWhenSetupWasFinishedOrAFileIndexExists() throws {
+    /// A new install's first launch writes down that it has no folders, so
+    /// the next launch, which finds the File Index that launch created, does
+    /// not take itself for an install from before Setup.
+    @Test func aNewInstallIsMigratedToNoFoldersAndStaysThatWay() throws {
         let folder = try TemporaryFolder()
         defer { folder.remove() }
         let fileIndex = folder.url.appendingPathComponent("FileIndex.sqlite")
 
-        #expect(!SourceStore.isFromBeforeSetup(defaults: defaults, fileIndex: fileIndex))
-
+        SourcesMigration.migrate(defaults: defaults, fileIndex: fileIndex)
         try folder.makeFile("FileIndex.sqlite")
-        #expect(SourceStore.isFromBeforeSetup(defaults: defaults, fileIndex: fileIndex))
+        SourcesMigration.migrate(defaults: defaults, fileIndex: fileIndex)
 
-        let finished = ThrowawayDefaults()
-        finished.set(true, forKey: Setup.finishedKey)
-        #expect(SourceStore.isFromBeforeSetup(defaults: finished, fileIndex: folder.url.appendingPathComponent("none")))
+        #expect(SourceStore(defaults: defaults).folders.isEmpty)
     }
+
+    @Test func aFolderListAlreadyWrittenDownIsNotMigrated() throws {
+        let folder = try TemporaryFolder()
+        defer { folder.remove() }
+        try folder.makeFile("FileIndex.sqlite")
+        SourceStore(defaults: defaults).addFolder(URL(fileURLWithPath: "/Volumes/Archive"))
+
+        SourcesMigration.migrate(defaults: defaults, fileIndex: folder.url.appendingPathComponent("FileIndex.sqlite"))
+
+        #expect(SourceStore(defaults: defaults).folders.compactMap(\.folderPath) == ["/Volumes/Archive"])
+    }
+
+    // MARK: - Folders
 
     @Test func severalFoldersAreAddedAsOneChange() {
         let store = SourceStore(defaults: defaults)
@@ -81,7 +82,7 @@ struct SourceStoreTests {
     }
 
     @Test func addingAndRemovingFoldersIsRemembered() {
-        let store = SourceStore(defaults: defaults, isFromBeforeSetup: true)
+        let store = SourceStore.withDefaultFolders(defaults: defaults)
 
         #expect(store.addFolder(URL(fileURLWithPath: "/Volumes/Archive/Projects")))
         #expect(!store.addFolder(URL(fileURLWithPath: "/Volumes/Archive/Projects/")), "already a Source")
@@ -94,7 +95,7 @@ struct SourceStoreTests {
     }
 
     @Test func everySourceHasASwitchThatIsRemembered() {
-        let store = SourceStore(defaults: defaults, isFromBeforeSetup: true)
+        let store = SourceStore.withDefaultFolders(defaults: defaults)
 
         store.setEnabled(false, for: "emoji")
         store.setEnabled(false, for: "folder:" + NSHomeDirectory() + "/Downloads")
@@ -106,7 +107,7 @@ struct SourceStoreTests {
     }
 
     @Test func onlyFolderChangesReachTheFileIndex() {
-        let store = SourceStore(defaults: defaults, isFromBeforeSetup: true)
+        let store = SourceStore.withDefaultFolders(defaults: defaults)
         var changes = 0
         store.onFoldersChange = { changes += 1 }
 

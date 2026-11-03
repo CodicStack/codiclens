@@ -77,7 +77,6 @@ struct SetupTests {
 
         #expect(hotKeys.macOSHolds.isEmpty, "both shortcuts are Codiclens's")
         #expect(loginItem.isEnabled)
-        #expect(!setup.showsAtLaunch)
         #expect(!setup.opensOnReopen)
         let (nextLaunch, _, _) = launch()
         #expect(!nextLaunch.showsAtLaunch)
@@ -101,8 +100,10 @@ struct SetupTests {
     }
 
     /// Closing the window is a skip: nothing applied, and Setup is back at
-    /// the next reopen and the next launch, ticked as it was the first time.
-    @Test func skippingAppliesNothingAndSetupReturnsOnReopenAndAtLaunch() async {
+    /// the next reopen, ticked as it was the first time. Only the first
+    /// launch ever opens it on its own, so a skipped Setup with Open at login
+    /// on does not take the keyboard at every login.
+    @Test func skippingAppliesNothingAndSetupReturnsOnReopenButNotAtTheNextLaunch() async {
         let (setup, takeover, _) = launch()
         setup.begin()
         setup.shortcuts.takesSpotlight = false
@@ -119,7 +120,7 @@ struct SetupTests {
         let (nextLaunch, nextTakeover, _) = launch()
         nextTakeover.takeAtLaunch()
         nextLaunch.begin()
-        #expect(nextLaunch.showsAtLaunch)
+        #expect(!nextLaunch.showsAtLaunch)
         #expect(nextLaunch.opensOnReopen)
         #expect(nextLaunch.shortcuts.takesSpotlight)
         #expect(nextLaunch.login.opensAtLogin)
@@ -434,7 +435,7 @@ struct SetupTests {
         setup.done()
 
         #expect(!openAtLogin.isOn)
-        #expect(!setup.showsAtLaunch, "Done still closes Setup")
+        #expect(!setup.opensOnReopen, "Done still finishes Setup")
     }
 }
 

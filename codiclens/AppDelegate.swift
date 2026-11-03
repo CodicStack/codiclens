@@ -83,6 +83,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             isMovingToApplications = true
             return
         }
+        // Before anything reads the Sources and before the File Index
+        // creates its database.
+        SourcesMigration.migrate()
         let setupController = SetupController(meaning: FileIndex.shared.meaning)
         self.setupController = setupController
         // Whatever an OS update, a restart or a crash left behind: the
@@ -90,7 +93,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupController.takeover.takeAtLaunch()
         let updater = SparkleUpdater()
         self.updater = updater
-        panelController = PanelController(lastActiveApp: lastActiveApp, setup: setupController, updater: updater)
+        panelController = PanelController(lastActiveApp: lastActiveApp, setupController: setupController, updater: updater)
         // Off-thread, so neither launch nor the first Emoji Mode waits on the
         // 226 KB dataset being decoded.
         EmojiIndex.prewarm()
@@ -117,9 +120,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             receive(pendingIncoming)
         }
 
-        if setupController.setup.showsAtLaunch {
-            setupController.show()
-        }
+        setupController.showAtLaunch()
     }
 
     /// Opening the app while it runs, from Finder, Launchpad or Spotlight.
@@ -130,9 +131,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard !Self.isTestHost, !EmbeddingService.isRequested(), let setupController else { return false }
         // Setup first: the Panel hides when it stops being key, so it has to
         // be the last window to take the keyboard.
-        if setupController.setup.opensOnReopen {
-            setupController.show()
-        }
+        setupController.showOnReopen()
         panelController?.showPanel()
         return false
     }

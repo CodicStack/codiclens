@@ -1,13 +1,13 @@
 import SwiftUI
 
 struct SettingsView: View {
-    let setup: SetupController
+    let setupController: SetupController
     let updater: any Updater
 
     var body: some View {
         TabView {
             Tab("General", systemImage: "gearshape") {
-                GeneralSettingsView(setup: setup, updater: updater)
+                GeneralSettingsView(setupController: setupController, updater: updater)
             }
             Tab("Sources", systemImage: "folder") {
                 SourcesSettingsView()
@@ -18,7 +18,7 @@ struct SettingsView: View {
 }
 
 private struct GeneralSettingsView: View {
-    let setup: SetupController
+    let setupController: SetupController
     let updater: any Updater
     @AppStorage("appTheme") private var selectedTheme: String = AppTheme.system.rawValue
     @AppStorage(Motion.animationsEnabledKey) private var animationsEnabled: Bool = true
@@ -29,8 +29,8 @@ private struct GeneralSettingsView: View {
             Section {
                 shortcutRows
                 Toggle("Open at login", isOn: Binding(
-                    get: { setup.openAtLogin.isOn },
-                    set: { setup.openAtLogin.setOn($0) }
+                    get: { setupController.openAtLogin.isOn },
+                    set: { setupController.openAtLogin.setOn($0) }
                 ))
             } header: {
                 Text("Startup and shortcuts")
@@ -84,7 +84,7 @@ private struct GeneralSettingsView: View {
             updatesSection
 
             Section {
-                Button("Show Setup…") { setup.show() }
+                Button("Show Setup…") { setupController.show() }
                 Button("Acknowledgements…") { isShowingAcknowledgements = true }
                 Button("Quit Codiclens") { NSApp.terminate(nil) }
                     .keyboardShortcut("q")
@@ -94,7 +94,7 @@ private struct GeneralSettingsView: View {
         .sheet(isPresented: $isShowingAcknowledgements) {
             AcknowledgementsView { isShowingAcknowledgements = false }
         }
-        .onAppear { setup.openAtLogin.refresh() }
+        .onAppear { setupController.openAtLogin.refresh() }
     }
 
     // MARK: - Shortcuts
@@ -104,11 +104,11 @@ private struct GeneralSettingsView: View {
     /// one, the row says so in Setup's words.
     @ViewBuilder
     private var shortcutRows: some View {
-        let takeover = setup.takeover
+        let takeover = setupController.takeover
         if takeover.isAvailable {
-            Toggle("Use ⌘Space for Codiclens (replaces Spotlight)", isOn: binding(for: .spotlight))
+            Toggle(SystemShortcut.spotlight.choiceTitle, isOn: binding(for: .spotlight))
             if takeover.isOn(.spotlight), takeover.hasFailed(.spotlight) { SpotlightFallbackNote() }
-            Toggle("Open emoji with ⌃⌘Space (replaces Emoji & Symbols)", isOn: binding(for: .emoji))
+            Toggle(SystemShortcut.emoji.choiceTitle, isOn: binding(for: .emoji))
             if takeover.isOn(.emoji), takeover.hasFailed(.emoji) { EmojiFallbackNote() }
         } else {
             SpotlightFallbackNote()
@@ -118,8 +118,8 @@ private struct GeneralSettingsView: View {
 
     private func binding(for shortcut: SystemShortcut) -> Binding<Bool> {
         Binding(
-            get: { setup.takeover.isOn(shortcut) },
-            set: { setup.takeover.setOn($0, for: shortcut) }
+            get: { setupController.takeover.isOn(shortcut) },
+            set: { setupController.takeover.setOn($0, for: shortcut) }
         )
     }
 

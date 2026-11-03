@@ -10,9 +10,10 @@ import Foundation
 /// Done and never before. Folders' Allow and Paste's Grant are the
 /// exceptions: they act at once, because macOS asks the question.
 ///
-/// Setup shows at launch and on every reopen until Done has been pressed
-/// once, then only from "Show Setup…" in Settings → General. It never nags
-/// from the Panel.
+/// Setup shows on the first launch ever and on every reopen until Done has
+/// been pressed once, then only from "Show Setup…" in Settings → General.
+/// A later launch never opens it, so a skipped Setup with Open at login on
+/// does not take the keyboard at every login. It never nags from the Panel.
 @Observable
 final class Setup {
     let shortcuts: ShortcutsRow
@@ -22,8 +23,14 @@ final class Setup {
     let login: LoginRow
     private(set) var isFinished: Bool
 
+    /// Whether this launch opens Setup: only the first launch ever does.
+    /// A `Setup` is made once a launch, and making it writes the launch
+    /// down, so no later one is first.
+    let showsAtLaunch: Bool
+
     @ObservationIgnored private let defaults: UserDefaults
-    static let finishedKey = "codiclens.setup.finished"
+    private static let finishedKey = "codiclens.setup.finished"
+    private static let launchedKey = "codiclens.setup.launched"
 
     init(shortcuts: ShortcutsRow, folders: FoldersRow, meaning: MeaningChoiceRow, paste: PasteRow, login: LoginRow, defaults: UserDefaults) {
         self.shortcuts = shortcuts
@@ -32,17 +39,18 @@ final class Setup {
         self.paste = paste
         self.login = login
         self.defaults = defaults
-        isFinished = defaults.object(forKey: Self.finishedKey) as? Bool ?? false
+        let isFinished = defaults.object(forKey: Self.finishedKey) as? Bool ?? false
+        self.isFinished = isFinished
+        showsAtLaunch = !isFinished && !defaults.bool(forKey: Self.launchedKey)
+        defaults.set(true, forKey: Self.launchedKey)
     }
 
     /// Every row, in the window's order. A new row goes in here and in
     /// `SetupView`.
     private var rows: [any SetupRow] { [shortcuts, folders, meaning, paste, login] }
 
-    /// Whether the launch opens Setup.
-    var showsAtLaunch: Bool { !isFinished }
-
-    /// Whether reopening the running app opens Setup beside the Panel.
+    /// Whether reopening the running app opens Setup beside the Panel:
+    /// until Done has been pressed once.
     var opensOnReopen: Bool { !isFinished }
 
     /// The window is opening: each row shows its default the first time,

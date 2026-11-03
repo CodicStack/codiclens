@@ -18,7 +18,7 @@ struct SourcesPage {
     /// Whether a Source is being read right now.
     let isReading: (Source) -> Bool
     /// Whether macOS refused a folder Source, by its path
-    /// (`FileIndex.deniedFolders`).
+    /// (`FileIndex.isDenied`).
     var isDenied: (String) -> Bool = { _ in false }
     /// Whether there is a git to ask, without which "Ignored by git" does
     /// nothing (`GitIgnored.installedGit`).
@@ -52,7 +52,7 @@ struct SourcesPage {
                 case .clipboardHistory, .emoji, .builtIns: false
                 }
             },
-            isDenied: { FileIndex.shared.deniedFolders.contains($0) },
+            isDenied: FileIndex.shared.isDenied,
             meaning: FileIndex.shared.meaning
         )
     }
