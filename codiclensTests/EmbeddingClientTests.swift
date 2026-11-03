@@ -190,7 +190,7 @@ struct EmbeddingClientTests {
         ))
 
         await #expect(throws: EmbeddingClientError.unavailable("embeddinggemma-2-Q8_0.gguf is not downloaded")) {
-            try await client.embedQuery("kontrakt med Repodo")
+            try await client.embedQuery("kontrakt med Nordlys")
         }
         guard case .failed = await client.state else {
             Issue.record("expected failed, got \(await client.state)")
