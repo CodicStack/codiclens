@@ -11,6 +11,13 @@ nonisolated struct ModelFile: Hashable, Sendable {
     /// Lowercase hex.
     let sha256: String
     let url: URL
+
+    /// Where it downloads to until it is checked.
+    var stagingName: String { name + ".download" }
+    /// Where a broken-off download's resume data waits.
+    var resumeName: String { name + ".resume" }
+    /// Every name it can have in the folder: whole, partial, resume data.
+    var namesOnDisk: [String] { [name, stagingName, resumeName] }
 }
 
 /// The EmbeddingGemma 2 files on this Mac: ggml-org's Q8_0 conversion at one
@@ -117,7 +124,7 @@ final class ModelFiles {
     /// Something is on disk: a file, whole or partial, or its resume data.
     var hasAnything: Bool {
         files.contains { file in
-            [file.name, file.name + ".download", file.name + ".resume"].contains {
+            file.namesOnDisk.contains {
                 FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path)
             }
         }
@@ -165,7 +172,7 @@ final class ModelFiles {
     func remove() {
         cancel()
         for file in files {
-            for name in [file.name, file.name + ".download", file.name + ".resume"] {
+            for name in file.namesOnDisk {
                 try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
             }
         }
@@ -188,8 +195,8 @@ final class ModelFiles {
         let total = wanted.reduce(0) { $0 + $1.bytes }
         var done = wanted.filter { !missing.contains($0) }.reduce(0) { $0 + $1.bytes }
         for file in missing {
-            let staging = folder.appendingPathComponent(file.name + ".download")
-            let resume = folder.appendingPathComponent(file.name + ".resume")
+            let staging = folder.appendingPathComponent(file.stagingName)
+            let resume = folder.appendingPathComponent(file.resumeName)
             state = .downloading(progress: Double(done) / Double(total))
             do {
                 try await downloader.download(
