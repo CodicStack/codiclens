@@ -29,7 +29,7 @@ final class Setup {
     let showsAtLaunch: Bool
 
     @ObservationIgnored private let defaults: UserDefaults
-    static let finishedKey = "codiclens.setup.finished"
+    private static let finishedKey = "codiclens.setup.finished"
     private static let launchedKey = "codiclens.setup.launched"
 
     init(shortcuts: ShortcutsRow, folders: FoldersRow, meaning: MeaningChoiceRow, paste: PasteRow, login: LoginRow, defaults: UserDefaults) {

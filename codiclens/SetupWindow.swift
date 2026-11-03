@@ -9,7 +9,7 @@ import SwiftUI
 final class SetupController {
     let takeover: ShortcutTakeover
     let openAtLogin: OpenAtLogin
-    let setup: Setup
+    private let setup: Setup
     private var window: NSWindow?
     private var closeObserver: Any?
 
@@ -26,7 +26,19 @@ final class SetupController {
         )
     }
 
-    /// Opens the window, or brings it forward with what it already shows.
+    /// The launch is done: Setup opens on the first launch ever.
+    func showAtLaunch() {
+        if setup.showsAtLaunch { show() }
+    }
+
+    /// The running app was reopened: Setup opens until Done has been
+    /// pressed once.
+    func showOnReopen() {
+        if setup.opensOnReopen { show() }
+    }
+
+    /// Opens the window, or brings it forward with what it already shows:
+    /// "Show Setup…" in Settings.
     func show() {
         if window == nil {
             setup.begin()
