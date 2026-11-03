@@ -47,7 +47,6 @@ keyword-less or any variant cannot be filed under a base. `--unicode` and
 ```
 codiclens/           # Main app source (Swift)
 codiclensTests/      # Unit tests
-Codiclens.app/       # Built app bundle
 ```
 
 There are two targets, app and unit tests. There is no UI test target.
@@ -1512,9 +1511,6 @@ Real, unfixed, none urgent.
   the files outside the Sources wait for it; "Searching…" stays up until it lands.
   Cancellation means it only costs anything if the user stops typing at one letter.
 
-- Signing teams are inconsistent. Both targets override `DEVELOPMENT_TEAM` to
-  `L256GR2793`, while the project-level default is `HHNPP7C8GB`. Will bite on a clean
-  checkout.
 - **A Subject Card outside a Query Phase shows `selectedSubject`, not
   `subjectVM.cardSubject`.** `SubjectCardView.isQueryPhase` is the
   switch. The two values are only the same while the Query is still the question
