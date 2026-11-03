@@ -437,6 +437,8 @@ codiclensApp (@main)
        ├─ Takes ⌘Space and ⌃⌘Space from macOS if the user chose it
        │  (ShortcutTakeover.takeAtLaunch; handed back in applicationWillTerminate)
        ├─ Registers Cmd+Space and Ctrl+Cmd+Space hotkeys (Carbon EventHotKey)
+       ├─ Creates SparkleUpdater (started in Release only) and hands it to
+       │  PanelController
        ├─ Creates PanelController
        ├─ Registers the "Open in Codiclens" Service, then hands over an
        │  Incoming Subject that arrived before the Panel existed
@@ -906,8 +908,8 @@ from the start". Open on its Actions is the same. A PDF at a page opens normally
 has no reliable page API.
 
 ### Settings — General and Sources
-`SettingsView` is two tabs. **General** is appearance, Emoji, the App Index refresh and
-the Acknowledgements sheet, which shows every bundled licence (`emoji-data-license.txt`,
+`SettingsView` is two tabs. **General** is appearance, Emoji, the App Index refresh, Updates
+(see Updates below) and the Acknowledgements sheet, which shows every bundled licence (`emoji-data-license.txt`,
 `digup-license.txt`; both are resources through the synchronised group). **Sources**
 (`SourcesSettingsView`) lists every Source (`GLOSSARY.md`) with one switch and two counts,
 indexed and total, and nothing else: there is no priority between Sources. For a folder,
@@ -1119,6 +1121,43 @@ cache. The settled pass, prefix included: median 12 ms, p90 59 ms, worst "invoic
 on a connection of its own so the keystroke never waits behind it. Measured by
 `FileIndexKeystrokeTimingTests` and `FileContentTimingTests`
 (`TEST_RUNNER_CODICLENS_TIME_FILE_CONTENTS=<runs>`, real Sources into a temp database).
+
+### Updates — Sparkle behind the Updater seam
+Sparkle 2 (SPM, up to next major from 2.10.1; `Package.resolved` is tracked) keeps Codiclens
+up to date with its stock dialog, but **no update window ever opens unless the user asked**.
+Everything outside `SparkleUpdater.swift` reads and asks `Updater` (`Updater.swift`), never
+Sparkle: `state` (none, available version, ready version), the two Settings flags, the
+version and the last-check date, and three `UpdateRequest`s (check, show the waiting update,
+install the ready update now). It is `@Observable`, so a view reading it redraws.
+`FakeUpdater` (tests) and `SparkleUpdater` both move `state` through
+`UpdateState.applying(_:)`, so `UpdaterTests` drive the rules the app runs.
+
+- The user-driver delegate supports gentle reminders and answers "don't show" to every
+  scheduled update, at launch too. "Will handle showing update" (only when Sparkle left it to
+  us) is `.scheduledUpdateFound`, which makes the update available, or ready when already
+  downloaded; "did receive user attention" and "will finish update session" clear it. A check
+  the user asked for is shown by Sparkle and raises nothing.
+- "Will install update on quit" (automatic downloads) is `.readyToInstall`: the delegate
+  answers true and keeps Sparkle's immediate-install block, which `.installReadyUpdate` runs
+  to restart straight into it. It installs on quit either way, through normal termination.
+- A check and showing the waiting update are the same Sparkle call: with an update waiting,
+  `checkForUpdates` brings its dialog up instead of checking again. The app activates first,
+  being an accessory app.
+- Info.plist (`codiclens-Info.plist`): `SUFeedURL` from `SPARKLE_FEED_URL`
+  (`https://codiclens.codicstack.com/appcast.xml`, the site's byte-for-byte proxy of the
+  newest release's appcast), `SUPublicEDKey` from `SPARKLE_PUBLIC_ED_KEY`, a signed feed and
+  verification before extraction, automatic checks on with no second-launch prompt, every
+  24 h, automatic downloads off. No `SUEnable*Service` keys: not sandboxed.
+  **`SPARKLE_PUBLIC_ED_KEY` is a placeholder (32 zero bytes)** until the real key exists
+  (#20); such a build checks but rejects every update. The release script must refuse it.
+- Not started in Debug: a dev build never checks, and Check Now stays disabled.
+- **Check for Updates** is a Built-in (`BuiltInType.checkForUpdates`, one Action, "Check").
+  Enter is `[.hide, .update(.check)]`; `SystemEffectRunner.onUpdateRequest` hands the request
+  to the updater. Its name never changes.
+- Settings → General → **Updates**: check automatically; download and install automatically
+  (disabled while the first is off); Check Now; "Version X.Y.Z · last checked …"
+  (`UpdateStatusLine`); the caption "Checks codiclens.codicstack.com once a day." No menu bar
+  item.
 
 ### Search by meaning — the embedding runtime
 EmbeddingGemma 2 (`google/embeddinggemma-2`, Apache 2.0) on llama.cpp with Metal: 768-d,
@@ -1446,7 +1485,9 @@ User types query → Enter
 | `SystemShortcuts.swift` | `ShortcutTakeover`: ⌘Space and ⌃⌘Space through the private symbolic hotkey call (ADR 0016), behind `SymbolicHotKeys` |
 | `LoginItem.swift` / `AccessibilityAccess.swift` | Open at login (`SMAppService.mainApp`) and the Accessibility grant, each behind a protocol so `SetupTests` runs over fakes |
 | `MoveToApplications.swift` | The launch alert that moves a copy outside /Applications there (Release only) |
-| `codiclens-Info.plist` | Merged into the generated Info.plist: the Open With document types and the Service |
+| `codiclens-Info.plist` | Merged into the generated Info.plist: the Open With document types, the Service, and Sparkle's keys |
+| `Updater.swift` | The `Updater` seam: `UpdateState` (none / available / ready, newest version only), `UpdateEvent` and the one rule that applies them, `UpdateRequest`, the Settings line |
+| `SparkleUpdater.swift` | The only file that imports Sparkle: the standard updater controller and its delegates, translated into `UpdateEvent`s |
 | `PanelController.swift` | The one window: show/hide, focus lifecycle, observers, hit test |
 | `PanelView.swift` | The SwiftUI content of the Panel: Card row, gap, Results Slab |
 | `PanelLayout.swift` | The Panel's fixed geometry, the margin, and `PanelHitRegions` |
