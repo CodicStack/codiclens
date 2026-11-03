@@ -66,5 +66,26 @@
 			</array>
 		</dict>
 	</array>
+	<!--
+	Sparkle (SparkleUpdater.swift). The feed and the key come from build
+	settings so a local test feed can be built without editing this file.
+	SPARKLE_PUBLIC_ED_KEY is a PLACEHOLDER (32 zero bytes) until the real
+	key is generated (#20): a build with it checks, but rejects every update.
+	No SUEnable*Service keys: Codiclens is not sandboxed.
+	-->
+	<key>SUFeedURL</key>
+	<string>$(SPARKLE_FEED_URL)</string>
+	<key>SUPublicEDKey</key>
+	<string>$(SPARKLE_PUBLIC_ED_KEY)</string>
+	<key>SURequireSignedFeed</key>
+	<true/>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
 </dict>
 </plist>
