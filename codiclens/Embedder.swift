@@ -1,4 +1,4 @@
-// Adapted from DigUp (https://github.com/ARahim3/DigUp, MIT; see digup-license.txt).
+// Adapted from DigUp (https://github.com/ARahim3/DigUp, MIT; see docs/licenses/digup/LICENSE).
 
 import CoreGraphics
 import Foundation
