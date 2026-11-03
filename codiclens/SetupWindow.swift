@@ -46,7 +46,10 @@ final class SetupController {
             let content = NSHostingController(rootView: ThemeWrapper {
                 SetupView(setup: self.setup, done: { [weak self] in self?.done() })
             })
-            content.sizingOptions = [.preferredContentSize]
+            // Constrain the view's ideal size directly. Driving this window through
+            // preferredContentSize feeds its grouped Form back into AppKit sizing
+            // until the display cycle aborts with repeated constraint updates.
+            content.sizingOptions = [.intrinsicContentSize]
             let window = NSWindow(contentViewController: content)
             window.styleMask = [.titled, .closable]
             window.isReleasedWhenClosed = false
