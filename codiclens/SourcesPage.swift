@@ -17,6 +17,9 @@ struct SourcesPage {
     let counts: (Source) -> SourceCounts?
     /// Whether a Source is being read right now.
     let isReading: (Source) -> Bool
+    /// Whether macOS refused a folder Source, by its path
+    /// (`FileIndex.deniedFolders`).
+    var isDenied: (String) -> Bool = { _ in false }
     /// Whether there is a git to ask, without which "Ignored by git" does
     /// nothing (`GitIgnored.installedGit`).
     var isGitAvailable = GitIgnored.installedGit != nil
@@ -49,6 +52,7 @@ struct SourcesPage {
                 case .clipboardHistory, .emoji, .builtIns: false
                 }
             },
+            isDenied: { FileIndex.shared.deniedFolders.contains($0) },
             meaning: FileIndex.shared.meaning
         )
     }
@@ -70,7 +74,7 @@ struct SourcesPage {
 
     /// Adds each folder that is not already a Source.
     func addFolders(_ urls: [URL]) {
-        for url in urls { store.addFolder(url) }
+        store.addFolders(urls)
     }
 
     /// Removes a folder Source. What the File Index read from it goes; the
@@ -133,7 +137,8 @@ struct SourcesPage {
     }
 
     private func row(_ source: Source) -> SourceRow {
-        SourceRow(source: source, counts: counts(source), isReading: isReading(source))
+        SourceRow(source: source, counts: counts(source), isReading: isReading(source),
+                  hasNoAccess: source.folderPath.map(isDenied) ?? false)
     }
 }
 
@@ -142,6 +147,9 @@ struct SourceRow: Identifiable, Equatable {
     let source: Source
     let counts: SourceCounts?
     let isReading: Bool
+    /// macOS refused the folder: the row reads "No access", with the way to
+    /// Privacy & Security, in place of its counts.
+    var hasNoAccess = false
 
     var id: Source.ID { source.id }
     var name: String { source.name }
