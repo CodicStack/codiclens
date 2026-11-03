@@ -104,7 +104,11 @@ struct SourcesSettingsView: View {
     private func meaningSection(_ row: MeaningRow) -> some View {
         Section {
             HStack(spacing: 8) {
-                Toggle(isOn: Binding(get: { row.isOn }, set: { page.setMeaningEnabled($0) })) {
+                Picker(selection: Binding(get: { row.mode }, set: { page.setMeaningMode($0) })) {
+                    ForEach(MeaningMode.allCases, id: \.self) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                } label: {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Search by meaning")
                         Text(row.statusText)
@@ -134,11 +138,15 @@ struct SourcesSettingsView: View {
                     ) {
                         Button("Remove", role: .destructive) { page.removeMeaning() }
                     } message: {
-                        Text("Search by meaning turns off. The 865 MB model and the vectors made from your files are deleted; your files are not touched.")
+                        Text("Search by meaning turns off. The model and the vectors made from your files are deleted; your files are not touched.")
                     }
             }
         } header: {
             Text("Search by meaning")
+        } footer: {
+            Text(MeaningSettings.caption)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

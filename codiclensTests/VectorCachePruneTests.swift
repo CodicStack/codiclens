@@ -353,7 +353,7 @@ struct VectorCachePruneScheduleTests {
         return FileIndex(
             databaseURL: folder.url.appendingPathComponent("FileIndex.sqlite"),
             sources: SourceStore(defaults: defaults),
-            meaning: MeaningSettings(files: files, switch: MeaningSettings.Switch(isOn: true, save: { _ in }),
+            meaning: MeaningSettings(files: files, choice: MeaningSettings.Choice(mode: .full, save: { _ in }),
                                      isSupported: true),
             indexEmbedder: KeywordEmbedder(),
             queryEncoder: KeywordEmbedder(),

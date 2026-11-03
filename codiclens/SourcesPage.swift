@@ -4,7 +4,7 @@ import Foundation
 /// switch and two counts per Source; no priority, because ranking is the
 /// search's business (`SourceStore`). Below the folders, what the File Index
 /// skips inside them: a switch per group and the user's own patterns. Last,
-/// search by meaning: one switch, a status line and its counts
+/// search by meaning: the choice, a status line and its counts
 /// (`MeaningSettings`).
 ///
 /// The counts and the reading state are closures so that the page reads them
@@ -20,7 +20,7 @@ struct SourcesPage {
     /// Whether there is a git to ask, without which "Ignored by git" does
     /// nothing (`GitIgnored.installedGit`).
     var isGitAvailable = GitIgnored.installedGit != nil
-    /// Search by meaning's switch, or nil for a page without it.
+    /// Search by meaning's choice, or nil for a page without it.
     var meaning: MeaningSettings? = nil
 
     /// The page as the app shows it.
@@ -117,12 +117,14 @@ struct SourcesPage {
 
     /// What the meaning section shows: nil without one.
     var meaningRow: MeaningRow? {
-        meaning.map { MeaningRow(isOn: $0.isEnabled, isAvailable: $0.isSupported, status: $0.status,
-                                 canRemove: $0.files.state != .notDownloaded || $0.isEnabled) }
+        meaning.map { MeaningRow(mode: $0.mode, isAvailable: $0.isSupported, status: $0.status,
+                                 canRemove: $0.files.state != .notDownloaded || $0.files.hasAnything || $0.isEnabled) }
     }
 
-    func setMeaningEnabled(_ isOn: Bool) {
-        meaning?.setEnabled(isOn)
+    /// Off, Text, or Text, images and audio: Text to the full choice adds
+    /// the image and audio encoders.
+    func setMeaningMode(_ mode: MeaningMode) {
+        meaning?.setMode(mode)
     }
 
     /// After the one confirmation the view asks for.
@@ -153,10 +155,10 @@ struct SourceRow: Identifiable, Equatable {
     }
 }
 
-/// Search by meaning's section: the switch, the line under it and the counts.
+/// Search by meaning's section: the choice, the line under it and the counts.
 struct MeaningRow: Equatable {
-    let isOn: Bool
-    /// False on an Intel Mac: the switch is shown off and disabled.
+    let mode: MeaningMode
+    /// False on an Intel Mac: the choice is shown off and disabled.
     let isAvailable: Bool
     let status: MeaningSettings.Status
     /// Something is on disk to remove: the model, or vectors made with it.

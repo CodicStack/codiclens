@@ -17,6 +17,15 @@ struct SetupView: View {
                     Text("Shortcuts")
                 }
                 Section {
+                    MeaningChoiceRowView(row: setup.meaning)
+                } header: {
+                    Text("Search by meaning")
+                } footer: {
+                    Text(MeaningSettings.caption)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section {
                     PasteRowView(row: setup.paste)
                 } header: {
                     Text("Paste into apps")
@@ -61,6 +70,25 @@ private struct ShortcutsRowView: View {
         } else {
             EmojiFallbackNote()
         }
+    }
+}
+
+private struct MeaningChoiceRowView: View {
+    @Bindable var row: MeaningChoiceRow
+
+    var body: some View {
+        Picker(selection: $row.mode) {
+            ForEach(MeaningMode.allCases, id: \.self) { mode in
+                Text(mode.title).tag(mode)
+            }
+        } label: {
+            Text("Find files by what they say, show or sound like")
+            if !row.isAvailable {
+                Text(MeaningSettings.Status.unavailable.text)
+            }
+        }
+        .pickerStyle(.radioGroup)
+        .disabled(!row.isAvailable)
     }
 }
 

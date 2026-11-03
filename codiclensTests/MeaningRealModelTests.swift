@@ -102,7 +102,7 @@ struct MeaningRealModelTests {
             try contents.store(await FileContentScheduler.readAll(jobs))
         }
 
-        let indexing = EmbeddingClient.helper(textOnly: false, idleExit: 30)
+        let indexing = EmbeddingClient.helper(.indexing, idleExit: 30)
         let vectors = MeaningVectors(databaseURL: url)
         let cache = try VectorCache(url: VectorCache.url(besideDatabase: url))
         let meaning = MeaningScheduler(writer: writer, vectors: vectors, cache: cache, queue: DispatchQueue(label: "real.meaning"),
@@ -126,7 +126,7 @@ struct MeaningRealModelTests {
         for (kind, cost) in perKind.sorted(by: { $0.key < $1.key }) { print("  \(kind): \(cost.files) files, \(cost.time)") }
         await indexing.shutdown()
 
-        let query = EmbeddingClient.helper(textOnly: true, idleExit: 30)
+        let query = EmbeddingClient.helper(.queries, idleExit: 30)
         try await query.hold()
         let reader = FileIndexReader(url: url)
         let cases: [(query: String, expected: String)] = [
