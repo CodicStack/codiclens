@@ -43,3 +43,22 @@ default.profraw
 
 # llama.cpp, built by Scripts/build-llama.sh
 Vendor/
+
+# Built app and release artefacts
+/*.app/
+*.xcarchive
+*.zip
+*.dmg
+
+# Signing material
+*.p12
+*.p8
+*.cer
+*.pem
+*.key
+.env*
+
+# Agent local state and installed skills
+.claude/settings.local.json
+.agents/skills/
+.claude/skills/
