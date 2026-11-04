@@ -4,6 +4,8 @@ What changed in each release of Codiclens. Notes for the next release go under U
 
 ## Unreleased
 
+## 1.0.2 (2026-11-04)
+
 - After Transcribe, OCR, QR Code, a text change, Move To, Copy To, Rename or Compress, the panel goes back to the first card with the result as the new subject, ready for Enter or Tab. Enter on text pastes it, so a transcript or OCR text goes straight into the app you were in.
 - When the panel opens on something you used last time, Backspace clears it without typing first.
 
