@@ -65,8 +65,8 @@ enum Effect {
 
     /// Move, copy, rename or compress a file or folder, answered with where
     /// the result now is. Never overwrites anything; see `FileOperation`. No
-    /// `.hide` beside it, for the reason Rotate has none: the Subject retargets
-    /// to the answer *in* the Panel. The generation drops an answer meant for a
+    /// `.hide` beside it, for the reason OCR has none: where the result landed
+    /// stands *in* the Panel as the Subject. The generation drops an answer meant for a
     /// Panel session that has since been reset.
     case fileOperation(FileOperation, generation: Int)
 

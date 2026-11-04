@@ -305,4 +305,61 @@ struct IncomingSubjectTests {
         #expect(coordinator.standingSubject == nil)
         #expect(coordinator.currentSearchText == "saf", "nothing changed")
     }
+
+    // MARK: - Backspace and Actions' results
+
+    /// Backspace takes an Incoming Subject away, and it does not stand again
+    /// when the Panel next opens.
+    @Test func backspaceRemovesTheIncomingSubject() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let coordinator = fixture.coordinator
+        coordinator.receiveIncoming(urls: [fixture.file("a.txt"), fixture.file("b.txt")])
+
+        #expect(coordinator.removeStandingSubject())
+
+        #expect(coordinator.standingSubject == nil)
+        #expect(coordinator.incomingCount == 0)
+        coordinator.reset()
+        #expect(coordinator.standingSubject == nil)
+    }
+
+    /// An app sent in stands without being remembered; Backspace ends it all
+    /// the same.
+    @Test func backspaceRemovesAnIncomingApp() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let coordinator = fixture.coordinator
+        coordinator.receiveIncoming(urls: [calculator])
+        guard case .app? = coordinator.standingSubject?.kind else {
+            Issue.record("expected Calculator standing")
+            return
+        }
+
+        #expect(coordinator.removeStandingSubject())
+        #expect(coordinator.standingSubject == nil)
+    }
+
+    /// Compressing a file sent in ends the Incoming Subject: the zip stands
+    /// in its place, and the Card no longer counts what was sent.
+    @Test func whatAnActionMakesOfItStandsInItsPlace() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let coordinator = fixture.coordinator
+        coordinator.receiveIncoming(urls: [fixture.file("a.txt"), fixture.file("b.txt")])
+        coordinator.advancePhase()
+        try selectAction("Compress", coordinator)
+        guard case .fileOperation(_, let generation)? = coordinator.submit().first else {
+            Issue.record("expected a file operation")
+            return
+        }
+
+        let zip = fixture.file("a.txt.zip")
+        try Data("PK".utf8).write(to: zip)
+        coordinator.receiveFileOperation(.success(zip), generation: generation)
+
+        #expect(coordinator.phase == .searchingSubject)
+        #expect(coordinator.standingSubject?.url == zip)
+        #expect(coordinator.incomingCount == 0)
+    }
 }

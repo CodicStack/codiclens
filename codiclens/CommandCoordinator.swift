@@ -533,6 +533,25 @@ class CommandCoordinator {
         return queryBuffer.display
     }
 
+    /// Backspace with the Query empty: the standing Last Subject, Incoming
+    /// Subject or Action result goes, and the Card says "Type...". It is
+    /// forgotten too, not only put away: the user said they are done with it,
+    /// so it does not stand again when the Panel next opens.
+    ///
+    /// - Returns: whether there was one to remove. When there was not, the
+    ///   key is the field's own, and deletes text from the Query.
+    @discardableResult
+    func removeStandingSubject() -> Bool {
+        guard standingSubject != nil, subjectVM.searchText.isEmpty,
+              !isEditingTextSubject, !isRenaming else { return false }
+        isLastSubjectStanding = false
+        incoming = nil
+        lastSubject = nil
+        subjectVM.reset()
+        syncQueryDisplay()
+        return true
+    }
+
     /// Points the field at the current phase's query. Called when the phase
     /// changes or focus returns, so the field shows what it is now editing.
     func syncQueryDisplay() {
@@ -871,8 +890,8 @@ class CommandCoordinator {
 
     /// Where a Move, Copy, Rename or Compress landed, handed back by the
     /// runner. The Subject follows it there — the moved file, the copy, the
-    /// renamed file, the zip — and the Panel stays on the Action Phase with
-    /// that Subject's Actions, as it does after Rotate or "Use as Subject".
+    /// renamed file, the zip — and stands in Subject search, as the Last
+    /// Subject stands when the Panel opens (`standResult`).
     ///
     /// A failure leaves everything where it was, Rename's editor included, so
     /// a taken name can be changed and tried again.
@@ -906,20 +925,13 @@ class CommandCoordinator {
             recentDestinations.insert(folder, at: 0)
             recentDestinations = Array(recentDestinations.prefix(Self.recentDestinationLimit))
         case .rename:
+            // `standResult` gives the keyboard back to the hidden field.
             isRenaming = false
-            focusTrigger.toggle()
         case .compress:
             break
         }
 
-        // The Last Subject follows the file: renamed or moved, and to the copy
-        // or the zip the Subject has become.
-        selectedSubject = landed
-        remember(actedOn: landed)
-        selectedAction = nil
-        actionVM.loadActions(for: landed)
-        phase = .pickingAction
-        onPhaseChange?()
+        standResult(landed)
     }
 
     private static let recentDestinationLimit = 5
@@ -1069,6 +1081,9 @@ class CommandCoordinator {
                 return []
             }
             let effects = effects(for: action, on: subject)
+            // A transform's output stands in Subject search, and `standResult`
+            // has already made it the Last Subject.
+            if phase == .searchingSubject { return effects }
             if case .moveToTrash = action.handler {
                 // A file in the Trash is not one to stand next time.
                 lastSubject = nil
@@ -1097,29 +1112,39 @@ class CommandCoordinator {
         }
     }
 
-    /// Replaces the Subject with a text one holding `result` and reloads its
-    /// Actions, staying in the current Phase.
+    /// Where an Action that turned the Subject into a new one lands: OCR
+    /// Text, a transcript, a transform's output, a QR Code's Clipboard Item,
+    /// the file a Move, Copy, Rename or Compress left. The command is done,
+    /// so the Panel goes back to Subject search with the new Subject standing
+    /// there exactly as the Last Subject stands when the Panel opens: one
+    /// Card, the Query empty, the Slab away. Enter runs its default Action,
+    /// Tab opens its Actions, the first keystroke starts a new Query.
     ///
-    /// - Parameter writingTheQuery: whether `result` also becomes the Subject
-    ///   Query, standing there as text so Shift+Tab finds it. A transform's
-    ///   output is the same length as its input, so it
-    ///   survives a one-line bar; OCR Text is a page of prose and
-    ///   `PanelLayout.queryFieldHeight` is a bar, not a row. Split into a
-    ///   parameter rather than written and then cleared, because a Query that
-    ///   is briefly a page long is still a Query that is a page long.
-    private func retarget(at result: String, writingTheQuery: Bool) {
-        let newSubject = Subject(text: result)
-        selectedSubject = newSubject
+    /// It stands *as* the Last Subject, so what cannot be one cannot stand:
+    /// an app (a renamed `.app`), or a Clipboard Item gone from history. That
+    /// Subject stays chosen on its Actions instead, rather than leave an
+    /// empty Panel behind the Action the user just ran.
+    private func standResult(_ subject: Subject) {
         // The Subject an Action turned into is what it left behind, and the
         // Last Subject follows it, as it follows a moved file.
-        remember(actedOn: newSubject)
-        if writingTheQuery {
-            subjectVM.searchText = result
-            subjectVM.standAsText(newSubject)
+        remember(actedOn: subject)
+        selectedAction = nil
+        if lastSubject == nil {
+            selectedSubject = subject
+            actionVM.loadActions(for: subject)
+            phase = .pickingAction
+        } else {
+            selectedSubject = nil
+            isSubjectFromSearch = false
+            phase = .searchingSubject
+            isLastSubjectStanding = true
+            subjectVM.reset()
+            actionVM.reset()
+            targetVM.reset()
         }
-        actionVM.loadActions(for: newSubject)
         syncQueryDisplay()
         onPhaseChange?()
+        focusTrigger.toggle()
     }
 
     /// The OCR Text, handed back by the runner.
@@ -1129,9 +1154,10 @@ class CommandCoordinator {
     /// directly with a canned string, which is why Vision never runs under
     /// test — see `docs/adr/0007-async-action-behind-the-effect-seam.md`.
     ///
-    /// An image with no readable text produces **no** OCR Text, so no empty
-    /// text Subject is ever created: the Subject is left exactly as it was —
-    /// a Clipboard Image is still an image, still in history — and the Panel
+    /// The OCR Text stands in Subject search (`standResult`). An image with no
+    /// readable text produces **no** OCR Text, so no empty text Subject is
+    /// ever created: the Subject is left exactly as it was, on its Actions — a
+    /// Clipboard Image is still an image, still in history — and the Panel
     /// shakes instead.
     func receiveOCRText(_ text: String?) {
         guard isOCRInFlight else { return }
@@ -1142,11 +1168,12 @@ class CommandCoordinator {
             return
         }
 
-        retarget(at: text, writingTheQuery: false)
+        standResult(Subject(text: text))
     }
 
-    /// QR bytes returning from the runner become a new Clipboard Item and the
-    /// current Subject in one move. No pasteboard write occurs on this path.
+    /// QR bytes returning from the runner become a new Clipboard Item, which
+    /// stands in Subject search as the Subject (`standResult`). No pasteboard
+    /// write occurs on this path.
     func receiveQRCode(_ data: Data?, generation: Int) {
         guard isImageActionInFlight, generation == imageActionGeneration else { return }
         isImageActionInFlight = false
@@ -1159,14 +1186,7 @@ class CommandCoordinator {
         }
 
         clipboardVM.load()
-        let subject = clipboardSubject(for: item)
-        selectedSubject = subject
-        remember(actedOn: subject)
-        selectedAction = nil
-        actionVM.loadActions(for: subject)
-        phase = .pickingAction
-        syncQueryDisplay()
-        onPhaseChange?()
+        standResult(clipboardSubject(for: item))
     }
 
     /// Rotation completion changes no model identity or history position. A
@@ -1248,10 +1268,11 @@ class CommandCoordinator {
 
     /// The transcript, handed back by the runner.
     ///
-    /// It becomes a text Subject in place of the file, exactly as OCR Text
-    /// replaces an image, so Copy, Paste, Share, Editing and the transforms
-    /// all work on it. Silence produces no text Subject at all, never an empty
-    /// one: the file stays the Subject and the Panel shakes.
+    /// It becomes a text Subject in place of the file, standing in Subject
+    /// search exactly as OCR Text does (`standResult`), so Copy, Paste, Share,
+    /// Editing and the transforms are a Tab away. Silence produces no text
+    /// Subject at all, never an empty one: the file stays the Subject, on its
+    /// Actions, and the Panel shakes.
     func receiveTranscription(_ result: Result<String, Transcription.Failure>, generation: Int) {
         guard isTranscriptionInFlight, generation == transcriptionGeneration else { return }
         isTranscriptionInFlight = false
@@ -1274,7 +1295,7 @@ class CommandCoordinator {
                 transcriptionFailure = .noSpeech
                 return
             }
-            retarget(at: text, writingTheQuery: false)
+            standResult(Subject(text: text))
         }
     }
 
@@ -1901,8 +1922,8 @@ class CommandCoordinator {
     }
 
     /// Transforming a clipboard entry rewrites it in history and stays in the
-    /// browser; transforming a text subject feeds the result back in so
-    /// transforms can be chained.
+    /// browser; transforming a text subject stands the output in Subject
+    /// search (`standResult`), where Tab opens its Actions to chain another.
     ///
     /// **OCR does not come through here, and must not.** It has the same shape
     /// — an Action on a Subject that produces text — which is exactly why this
@@ -1921,7 +1942,7 @@ class CommandCoordinator {
         let result = transform.apply(text)
 
         guard let item = subject.clipboardItem else {
-            retarget(at: result, writingTheQuery: true)
+            standResult(Subject(text: result))
             return []
         }
 

@@ -173,10 +173,10 @@ struct OCRCommandTests {
 
     // MARK: - Where the OCR Text lands
 
-    /// The Subject becomes the OCR Text, the Phase does not move, and the Query
-    /// is left alone — `PanelLayout.queryFieldHeight` is a one-line bar and a
-    /// page of OCR Text cannot survive in it.
-    @Test func theOCRTextBecomesTheSubjectWithoutTouchingTheQuery() throws {
+    /// The command is done: the Panel is back in Subject search with the OCR
+    /// Text standing, as a Last Subject stands when the Panel opens. One Card,
+    /// the Query empty — the "shot" that found the image was its question.
+    @Test func theOCRTextStandsInSubjectSearch() throws {
         let (coordinator, _, _) = makeCoordinator()
         coordinator.subjectVM.searchText = "shot"
         _ = try readyToOCRAFile(coordinator)
@@ -185,28 +185,35 @@ struct OCRCommandTests {
         coordinator.receiveOCRText("Hello from the image\nsecond line")
 
         #expect(!coordinator.isOCRInFlight)
-        #expect(coordinator.phase == .pickingAction, "OCR fired from here and stays here")
-        #expect(coordinator.subjectVM.searchText == "shot", "the Query is not a page of prose")
+        #expect(coordinator.phase == .searchingSubject)
+        #expect(coordinator.cardCount == 1)
+        #expect(coordinator.subjectVM.searchText.isEmpty)
+        #expect(coordinator.displayedQuery.isEmpty)
+        #expect(coordinator.selectedSubject == nil)
 
-        guard case .text(let rawText)? = coordinator.selectedSubject?.kind else {
-            Issue.record("expected a text Subject holding the OCR Text")
+        guard case .text(let rawText)? = coordinator.standingSubject?.kind else {
+            Issue.record("expected the OCR Text standing")
             return
         }
         #expect(rawText == "Hello from the image\nsecond line")
-        #expect(coordinator.actionVM.selectedIndex == 0, "back to the top of the new Actions")
     }
 
-    /// The user's "Enter right after OCR pastes" depends entirely on this
-    /// ordering, and on nothing else.
-    @Test func theOCRTextsActionsStartWithPaste() throws {
+    /// Enter on the standing OCR Text copies it, as Enter on any standing text
+    /// does; Tab opens its Actions, Paste first.
+    @Test func enterCopiesTheOCRTextAndTabOpensItsActionsWithPasteFirst() throws {
         let (coordinator, _, _) = makeCoordinator()
         _ = try readyToOCRAFile(coordinator)
         _ = coordinator.submit()
-
         coordinator.receiveOCRText("some text")
 
+        coordinator.advancePhase()
+        #expect(coordinator.phase == .pickingAction)
         #expect(coordinator.actionVM.filteredActions.first?.name == "Paste")
+        #expect(coordinator.actionVM.selectedIndex == 0)
         #expect(coordinator.submit() == [.paste(.text("some text"))])
+
+        coordinator.reset()
+        #expect(coordinator.submit() == [.hide, .copy(.text("some text"))])
     }
 
     // MARK: - No text found
@@ -271,7 +278,7 @@ struct OCRCommandTests {
         #expect(itemAfter.imageFileName == itemBefore.imageFileName)
         #expect(history.imageData(for: itemAfter) == png, "the bytes are still there")
 
-        guard case .text? = coordinator.selectedSubject?.kind else {
+        guard case .text? = coordinator.standingSubject?.kind else {
             Issue.record("the Subject is the OCR Text now")
             return
         }
@@ -293,7 +300,8 @@ struct OCRCommandTests {
         #expect(!coordinator.isSearchInFlight, "OCR is not a search, and does not borrow that flag")
 
         coordinator.receiveOCRText("done")
-        #expect(coordinator.canReportNoResults)
+        #expect(coordinator.canReportNoResults == coordinator.subjectVM.hasAnswered,
+                "back in Subject search, which answers for itself")
     }
 
     /// Dismissing the Panel abandons the run: the answer arrives to a

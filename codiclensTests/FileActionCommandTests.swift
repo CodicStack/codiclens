@@ -195,7 +195,10 @@ struct FileActionCommandTests {
         #expect(coordinator.submit().isEmpty, "a second Enter does nothing while the first is on disk")
     }
 
-    @Test func aMovedFileIsTheSubjectWhereItLanded() throws {
+    /// The command is done, so the moved file stands in Subject search as a
+    /// Last Subject stands: one Card, the Query empty, Enter opens it and Tab
+    /// gives its Actions.
+    @Test func aMovedFileStandsWhereItLanded() throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let coordinator = fixture.coordinator
@@ -210,11 +213,18 @@ struct FileActionCommandTests {
         coordinator.receiveFileOperation(.success(landed), generation: generation)
 
         #expect(!coordinator.isFileOperationInFlight)
-        #expect(coordinator.selectedSubject?.url == landed.standardizedFileURL)
-        #expect(coordinator.phase == .pickingAction, "the Panel stays, on the moved file's Actions")
-        #expect(coordinator.cardCount == 2)
-        #expect(coordinator.actionVM.filteredActions.first?.name == "Open")
+        #expect(coordinator.phase == .searchingSubject)
+        #expect(coordinator.cardCount == 1)
+        #expect(coordinator.subjectVM.searchText.isEmpty, "the path that found it was the old Query")
+        #expect(coordinator.standingSubject?.url == landed.standardizedFileURL)
         #expect(coordinator.destinationFolders().first == fixture.inbox, "the last destination leads next time")
+
+        coordinator.advancePhase()
+        #expect(coordinator.selectedSubject?.url == landed.standardizedFileURL)
+        #expect(coordinator.actionVM.filteredActions.first?.name == "Open")
+        coordinator.retreatPhase()
+        #expect(coordinator.standingSubject?.url == landed.standardizedFileURL, "Shift+Tab comes back to it")
+        #expect(coordinator.submit() == [.hide, .open(landed.standardizedFileURL)])
     }
 
     @Test func copyToSendsACopyAndAFailureShakesWithAShortMessage() throws {
@@ -338,9 +348,38 @@ struct FileActionCommandTests {
         coordinator.receiveFileOperation(.success(renamed), generation: secondGeneration)
 
         #expect(!coordinator.isRenaming)
-        #expect(coordinator.selectedSubject?.url == renamed.standardizedFileURL)
-        #expect(coordinator.selectedSubject?.displayName == "memo.txt")
+        #expect(coordinator.phase == .searchingSubject)
+        #expect(coordinator.cardCount == 1)
+        #expect(coordinator.standingSubject?.url == renamed.standardizedFileURL)
+        #expect(coordinator.standingSubject?.displayName == "memo.txt")
+    }
+
+    /// A folder renamed into an app bundle is an app, and an app is never a
+    /// Last Subject, so it has nothing to stand as: the Panel stays on its
+    /// Actions rather than empty.
+    @Test func aRenameThatMakesAnAppStaysOnItsActions() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let coordinator = fixture.coordinator
+        choose(fixture.inbox, in: coordinator)
+        try selectAction("Rename", in: coordinator)
+        coordinator.submit()
+        coordinator.renameText = "Inbox.app"
+        let generation = try generation(of: coordinator.commitRename())
+
+        let app = fixture.root.appendingPathComponent("Inbox.app", isDirectory: true)
+        try FileManager.default.moveItem(at: fixture.inbox, to: app)
+        coordinator.receiveFileOperation(.success(app), generation: generation)
+
+        #expect(!coordinator.isRenaming)
+        guard case .app? = coordinator.selectedSubject?.kind else {
+            Issue.record("expected the app the folder became, got \(String(describing: coordinator.selectedSubject?.kind))")
+            return
+        }
         #expect(coordinator.phase == .pickingAction)
+        #expect(coordinator.cardCount == 2)
+        #expect(coordinator.standingSubject == nil)
+        #expect(coordinator.actionVM.filteredActions.first?.name == "Open")
     }
 
     @Test func escapeLeavesTheNameAsItWas() throws {
@@ -390,8 +429,10 @@ struct FileActionCommandTests {
         try Data("PK".utf8).write(to: zip)
         coordinator.receiveFileOperation(.success(zip), generation: generation)
 
+        #expect(coordinator.phase == .searchingSubject)
+        #expect(coordinator.standingSubject?.url == zip.standardizedFileURL)
+        coordinator.advancePhase()
         #expect(coordinator.selectedSubject?.url == zip.standardizedFileURL)
-        #expect(coordinator.phase == .pickingAction)
         #expect(coordinator.actionVM.filteredActions.contains { $0.name == "Share…" })
     }
 

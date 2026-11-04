@@ -341,6 +341,10 @@ struct LastSubjectTests {
         try selectAction("UPPERCASE", coordinator)
         coordinator.submit()
 
+        guard case .text("HELLO")? = coordinator.standingSubject?.kind else {
+            Issue.record("expected the output standing at once, got \(String(describing: coordinator.standingSubject?.kind))")
+            return
+        }
         coordinator.reset()
 
         guard case .text("HELLO")? = coordinator.standingSubject?.kind else {
@@ -463,5 +467,76 @@ struct LastSubjectTests {
         coordinator.reset()
 
         #expect(coordinator.standingSubject?.url == note)
+    }
+
+    // MARK: - Backspace
+
+    /// Backspace with the Query empty takes the standing Subject away, and
+    /// it is forgotten: the Card says "Type..." and the next opening is empty.
+    @Test func backspaceRemovesTheStandingSubjectForGood() throws {
+        let (coordinator, _) = try makeCoordinator(seededWith: ["hello"])
+        pasteFirstClipboardItem(coordinator)
+        coordinator.reset()
+        #expect(coordinator.standingSubject != nil)
+
+        #expect(coordinator.removeStandingSubject())
+
+        #expect(coordinator.standingSubject == nil)
+        #expect(coordinator.lastSubject == nil)
+        #expect(coordinator.subjectVM.cardSubject == nil, "the Card is empty, not holding it")
+        #expect(coordinator.phase == .searchingSubject)
+        #expect(coordinator.cardCount == 1)
+        #expect(coordinator.submit().isEmpty, "Enter has nothing to act on")
+
+        coordinator.reset()
+        #expect(coordinator.standingSubject == nil, "it does not come back")
+    }
+
+    /// An Action's result that stands is a Subject like the rest.
+    @Test func backspaceRemovesAStandingTransformOutput() throws {
+        let (coordinator, _) = try makeCoordinator()
+        coordinator.acceptTypedText("hello")
+        coordinator.toggleTextSubjectEdit()
+        coordinator.toggleTextSubjectEdit()
+        coordinator.advancePhase()
+        try selectAction("UPPERCASE", coordinator)
+        coordinator.submit()
+
+        #expect(coordinator.removeStandingSubject())
+        coordinator.reset()
+
+        #expect(coordinator.standingSubject == nil)
+    }
+
+    /// Anywhere else Backspace is the field's, deleting a letter of the Query.
+    @Test func backspaceWithAQueryOrNothingStandingIsLeftToTheField() throws {
+        let (coordinator, _) = try makeCoordinator(seededWith: ["hello"])
+        #expect(!coordinator.removeStandingSubject(), "nothing stands")
+
+        pasteFirstClipboardItem(coordinator)
+        coordinator.reset()
+        coordinator.subjectVM.searchText = "x"
+        #expect(!coordinator.removeStandingSubject(), "a Query is there to delete from")
+        #expect(coordinator.lastSubject != nil)
+
+        coordinator.reset()
+        coordinator.acceptTypedText("x")
+        #expect(!coordinator.removeStandingSubject(), "typing ended it standing")
+        #expect(coordinator.lastSubject != nil, "and did not forget it")
+    }
+
+    /// The editor holds the keyboard; its Backspace edits the text.
+    @Test func backspaceInTheEditorLeavesTheStandingTextAlone() throws {
+        let (coordinator, _) = try makeCoordinator()
+        coordinator.acceptTypedText("hello")
+        coordinator.toggleTextSubjectEdit()
+        coordinator.toggleTextSubjectEdit()
+        coordinator.submit()
+        coordinator.reset()
+
+        coordinator.toggleTextSubjectEdit()
+        #expect(coordinator.isEditingTextSubject)
+        #expect(!coordinator.removeStandingSubject())
+        #expect(coordinator.lastSubject != nil)
     }
 }

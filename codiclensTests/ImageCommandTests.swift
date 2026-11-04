@@ -118,10 +118,14 @@ struct ImageCommandTests {
         coordinator.receiveQRCode(png, generation: generation)
 
         #expect(!coordinator.isImageActionInFlight)
-        #expect(coordinator.phase == .pickingAction)
+        #expect(coordinator.phase == .searchingSubject)
+        #expect(coordinator.cardCount == 1)
         let item = try #require(history.items.first)
         #expect(item.isImage)
         #expect(history.imageData(for: item) == png)
+        #expect(coordinator.standingSubject?.clipboardItem?.id == item.id, "the new Clipboard Item stands")
+
+        coordinator.advancePhase()
         #expect(coordinator.selectedClipboardItem?.id == item.id)
         #expect(coordinator.actionVM.filteredActions.contains { $0.name == "Rotate Left" })
     }

@@ -158,7 +158,8 @@ struct ClipboardCommandTests {
 
         #expect(coordinator.submit().isEmpty)
         #expect(history.items.map(\.content) == ["untouched"])
-        #expect(coordinator.phase == .pickingAction)
+        #expect(coordinator.phase == .searchingSubject)
+        #expect(coordinator.standingSubject?.clipboardItem == nil, "the output is text, not an entry")
     }
 
     // MARK: - Images

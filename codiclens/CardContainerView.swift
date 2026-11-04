@@ -155,6 +155,13 @@ struct CardContainerView: View {
                 if !coordinator.deleteSelectedClipboardItem() { coordinator.retreatPhase() }
                 return .handled
             }
+            // Backspace with nothing typed takes away the Subject standing on
+            // the Card; with a Query it is the field's, and deletes a letter.
+            // Caps Lock and the like are not modifiers a Backspace means.
+            if press.modifiers.isDisjoint(with: [.command, .option, .control, .shift]) &&
+                (press.key == .delete || press.characters == "\u{7F}" || press.characters == "\u{8}") {
+                return coordinator.removeStandingSubject() ? .handled : .ignored
+            }
             if press.key == .space && press.modifiers.contains(.shift) {
                 coordinator.triggerQuickLook()
                 return .handled

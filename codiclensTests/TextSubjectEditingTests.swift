@@ -83,8 +83,8 @@ struct TextSubjectEditingTests {
 
     // MARK: - Any other text Subject
 
-    /// A transform's output is a text Subject on the Action Phase, and Ctrl+E
-    /// reaches it. The old gate refused this outright.
+    /// A transform's output is a text Subject standing in Subject search, and
+    /// Ctrl+E reaches it. The old gate refused this outright.
     @Test func aTransformsOutputCanBeEdited() throws {
         let (coordinator, history) = makeCoordinator(seededWith: ["untouched"])
         coordinator.subjectVM.results = [Subject(text: "hello")]

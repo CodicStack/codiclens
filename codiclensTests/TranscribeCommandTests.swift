@@ -40,8 +40,12 @@ struct TranscribeCommandTests {
         return (coordinator, runner, subject)
     }
 
+    /// The text Subject a transcript left: standing in Subject search, or
+    /// chosen once the user has gone on with it.
     private func text(of coordinator: CommandCoordinator) -> String? {
-        guard case .text(let text)? = coordinator.selectedSubject?.kind else { return nil }
+        guard case .text(let text)? = (coordinator.standingSubject ?? coordinator.selectedSubject)?.kind else {
+            return nil
+        }
         return text
     }
 
@@ -118,17 +122,25 @@ struct TranscribeCommandTests {
 
         coordinator.receiveTranscription(.success(" The quick brown fox.\n"), generation: generation)
 
-        let transcript = try #require(text(of: coordinator), "expected a text Subject")
+        // Done: back in Subject search with the transcript standing, the
+        // Query empty, as OCR Text stands.
+        let transcript = try #require(coordinator.standingSubject.flatMap {
+            if case .text(let text) = $0.kind { text } else { nil }
+        }, "expected a text Subject standing")
         #expect(transcript == "The quick brown fox.")
-        #expect(coordinator.phase == .pickingAction)
+        #expect(coordinator.phase == .searchingSubject)
+        #expect(coordinator.cardCount == 1)
+        #expect(coordinator.subjectVM.searchText.isEmpty)
         #expect(!coordinator.isTranscriptionInFlight)
         #expect(coordinator.transcriptionNote == nil)
+        #expect(coordinator.submit() == [.hide, .copy(.text("The quick brown fox."))], "Enter copies it")
+
+        coordinator.reset()
+        coordinator.advancePhase()
         let names = coordinator.actionVM.filteredActions.map(\.name)
         #expect(names.contains("Copy"))
         #expect(names.contains("Share…"))
         #expect(!names.contains("Transcribe"))
-        // Like OCR Text, it is not written into the Query.
-        #expect(coordinator.subjectVM.searchText != transcript)
     }
 
     @Test func theTranscriptCanBeEdited() throws {

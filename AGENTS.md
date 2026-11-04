@@ -155,8 +155,8 @@ runs that one, after its `status` check. Either may start that Codictate hidden.
   Notes, Freeform, Journal and Reminders. **Text that is a URL is shared as an `NSURL`
   instead** — that payload gets AirDrop *and* Add to Reading List.
 - **QR Code is an Action, not a Share Target.** A QR code is a form of the text, not a
-  recipient of it. Its output becomes a new Clipboard image at the top of history and the
-  Subject retargets to it, exactly as OCR retargets to OCR Text. Absent when the text
+  recipient of it. Its output becomes a new Clipboard image at the top of history and
+  stands as the Subject, exactly as OCR Text does (see **An Action's result stands**). Absent when the text
   exceeds the Core Image encoder's UTF-8 capacity, and never offered on Emoji. Capacity
   follows an actual encoder attempt, not a character-count estimate.
 - **Rotate is in place and must not hide the Panel.** Rotate Left / Rotate Right are Final
@@ -177,12 +177,23 @@ runs that one, after its `status` check. Either may start that Codictate hidden.
   goes straight after Quick Look (`SubjectAction.contentActions(for:)`). Clipboard Items
   keep their order with Quick Look third, after Paste and Copy; Finder's has it second.
   `FileActionCommandTests` pins all of it.
+- **An Action's result stands.** OCR, Transcribe, a transform on a text Subject, QR Code,
+  Move To…, Copy To…, Rename and Compress turn the Subject into a new one: OCR Text, the
+  transcript, the output, the new Clipboard Item, where the file landed. On success the
+  command is done and the Panel goes back to Subject search with that result standing
+  exactly as the Last Subject stands when the Panel opens (`CommandCoordinator.standResult`:
+  it *is* the Last Subject): one Card, the Query empty, the Slab away; Enter runs its
+  default Action, Tab opens its Actions, the first keystroke starts a new Query. What
+  cannot be a Last Subject cannot stand — a renamed `.app` is an app — and stays chosen on
+  its Actions instead of leaving an empty Panel. Not results: Rotate (the same Subject, new
+  pixels, rotated again as often as wanted), Use as Subject (its point is the Actions), a
+  count (`.showingResult`), a transform on a Clipboard Item (rewritten in place, back to
+  the browser), and every failure, which stays on the Actions with its shake or chip.
 - **Move To…, Copy To…, Rename and Compress never overwrite, and the Subject follows the
   file.** Each is one `FileOperation` in a `.fileOperation` Effect with no `.hide`, done by
-  `EffectRunner` on its own serial queue and answered through `onFileOperation`; the
-  Subject retargets to where the result landed (the moved file, the copy, the renamed
-  file, the zip) and the Panel stays on that Subject's Actions, as after Rotate or Use as
-  Subject. A Move or Copy onto a taken name lands as Finder's "Keep Both" does,
+  `EffectRunner` on its own serial queue and answered through `onFileOperation`; where the
+  result landed (the moved file, the copy, the renamed file, the zip) stands in Subject
+  search as the Subject, and Rename's editor closes. A Move or Copy onto a taken name lands as Finder's "Keep Both" does,
   `name 2.ext`, decided by the move itself failing with "file exists" rather than by a
   look first; moving into the folder it is already in does nothing. Compress is
   `ditto -c -k --sequesterRsrc --keepParent` into a scratch folder, then moved in beside the
@@ -218,7 +229,8 @@ runs that one, after its `status` check. Either may start that Codictate hidden.
   arrives** (never to EOF), ignores event types and fields it does not know, and
   answers through `onTranscriptionProgress` for each `queued`/`progress` and
   `onTranscription` at the end. The transcript (`result.text`), trimmed, becomes a
-  text Subject in place of the file, as OCR Text replaces an image. While it runs the
+  text Subject in place of the file and stands in Subject search, as OCR Text replaces
+  an image. While it runs the
   Subject Card's corner chip (`transcriptionNote`) says where it is, in Codictate's
   own window copy: "Transcribing…" until the first event, then "Waiting, 2 ahead",
   "Next up", "Reading the file · 0:01", "Transcribing · 0:42 · 52:01 of audio". A
@@ -649,15 +661,18 @@ Enter or a Final Action on anything but an app or a Built-in makes it `lastSubje
 text (⌘E, OCR Text, a transform's output, a transcript, a count copied). Acting on an
 app or a Built-in clears it; Move to Trash clears it. In memory only. Where an Action
 turns the Subject into another — Rename, Move To…, Copy To…, Compress, OCR,
-Transcribe, a transform, QR Code — the Last Subject follows it there. `reset()`
+Transcribe, a transform, QR Code — the Last Subject follows it there, and stands at
+once (`standResult`; see **An Action's result stands** under Rules). `reset()`
 stands it with the Query empty (`standingSubject`) after looking it up again: a
 Clipboard Item in history, a file or folder on disk through `PathSubject.subject(for:)`
 (its Passage kept). Gone means none and an empty Panel, no shake. It is not a
 Result, so the Slab stays away and `SubjectCardView.subject` reads it from the
 coordinator. Enter runs its default action, Tab opens its Actions and Shift+Tab
 comes back to it; the first keystroke ends it standing, and the Card keeps it
-until the new Query has something to show. ⌘E on standing text edits it, and the
-edit is the Last Subject.
+until the new Query has something to show. Backspace with the Query empty
+(`removeStandingSubject()`) takes it away and forgets it: the Card says "Type..." and
+the next opening is empty; an Incoming Subject goes the same way. ⌘E on standing text
+edits it, and the edit is the Last Subject.
 
 **Incoming Subject** (`GLOSSARY.md`): `PanelController` shows the Panel and then
 hands it to `receiveIncoming(urls:)` or `receiveIncoming(text:)`. Either drops the
@@ -787,6 +802,10 @@ display-only. Routes to coordinator:
   `PassagePreviewDriver`, and nothing to the list under it. Shift+Space and Escape close
   it, typing closes it and goes on into the Query, Tab and Shift+Tab close it with the
   Phase.
+- Backspace, no modifiers → `removeStandingSubject()`, taken only when it removed a
+  standing Last Subject, Incoming Subject or Action result (Phase Subject search, Query
+  empty, no editor open); otherwise the field's, deleting from the Query. Caps Lock does
+  not count as a modifier.
 - Cmd+Backspace → `deleteSelectedClipboardItem()` **first**, and only `retreatPhase()`
   when there was no Clipboard Item to delete. In Clipboard Mode it deletes the selected
   Clipboard Item from Clipboard History on the spot — Finder's Cmd+Delete habit, no

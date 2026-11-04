@@ -164,7 +164,8 @@ struct CommandCoordinatorTests {
 
     // MARK: - Phase machine
 
-    @Test func transformingTextFeedsTheResultBackAsTheNewSubject() throws {
+    /// The output stands in Subject search, and Tab chains the next transform.
+    @Test func transformingTextStandsTheResultAsTheNewSubject() throws {
         let (coordinator, runner) = makeCoordinator()
         seed(coordinator, with: textSubject("hello world"))
         coordinator.advancePhase()
@@ -172,14 +173,25 @@ struct CommandCoordinatorTests {
 
         #expect(coordinator.submit().isEmpty, "a transform stays in the panel")
         #expect(runner.recorded.isEmpty)
-        #expect(coordinator.phase == .pickingAction)
+        #expect(coordinator.phase == .searchingSubject)
+        #expect(coordinator.cardCount == 1)
+        #expect(coordinator.subjectVM.searchText.isEmpty)
 
-        let kind = try #require(coordinator.selectedSubject?.kind)
+        let kind = try #require(coordinator.standingSubject?.kind)
         guard case .text(let rawText) = kind else {
             Issue.record("expected a text subject after transforming")
             return
         }
         #expect(rawText == "HELLO WORLD")
+
+        coordinator.advancePhase()
+        try selectAction("lowercase", in: coordinator)
+        _ = coordinator.submit()
+        guard case .text(let chained)? = coordinator.standingSubject?.kind else {
+            Issue.record("expected the second transform's output standing")
+            return
+        }
+        #expect(chained == "hello world")
     }
 
     @Test func aNonFinalActionAdvancesToTargetsWithoutAnyEffect() throws {

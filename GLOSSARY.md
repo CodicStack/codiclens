@@ -61,7 +61,7 @@ A Result in Subject search that is a file, matched by its name or by what it con
 _Avoid_: file hit, document match, search result
 
 **Last Subject**:
-The Subject the user last acted on or sent in as an Incoming Subject, standing as the Subject when the Panel opens again, with the Query empty: a Clipboard Item, an Emoji, a file, a folder or text. Enter acts on it again; the first keystroke starts a new Query. Apps and Built-ins never become the Last Subject. A file renamed or moved by Codiclens is followed; one trashed, or gone since, leaves no Last Subject.
+The Subject the user last acted on or sent in as an Incoming Subject, standing as the Subject when the Panel opens again, with the Query empty: a Clipboard Item, an Emoji, a file, a folder or text. Enter acts on it again; Tab opens its Actions; the first keystroke starts a new Query; Backspace with nothing typed takes it away for good. Apps and Built-ins never become the Last Subject. What an Action turns the Subject into (OCR Text, a transcript, a transform's output, a QR Code, a file moved, copied, renamed or zipped) is the Last Subject at once, and stands straight away, the command done. One trashed, or gone since, leaves no Last Subject.
 _Avoid_: recent, history, sticky subject, resume
 
 **Passage**:
@@ -179,8 +179,8 @@ _Avoid_: send, export, share sheet, share menu
 
 **QR Code**:
 The Action that turns a text Subject into a QR code image. The image becomes a
-new Clipboard Item and the Subject in one move, so everything an image can have
-done to it — Paste, Save, Share — is one Phase away. Not a Share Target: a QR
+new Clipboard Item and stands as the Subject in one move, so everything an image
+can have done to it — Paste, Save, Share — is one Tab away. Not a Share Target: a QR
 code is a form of the text, not a recipient of it.
 _Avoid_: generate QR, QR share, scan code
 
@@ -194,8 +194,8 @@ _Avoid_: text recognition, scan, extract, read
 
 **OCR Text**:
 What OCR produces: the recognised characters, as one string, which becomes a
-text Subject in place of the image. An image with no readable text produces no
-OCR Text at all — never empty OCR Text.
+text Subject in place of the image, standing as a Last Subject stands. An image
+with no readable text produces no OCR Text at all — never empty OCR Text.
 _Avoid_: transcript, recognised text, output
 
 **Use as Subject**:
@@ -240,7 +240,7 @@ A Subject handed to Codiclens from outside it: a file or folder sent from
 Finder's right-click menu, or text selected in another app. The Panel opens on
 it standing, as a Last Subject stands: one Card, the Query empty. Enter runs its
 default Action, Tab goes to the Action Phase, the first keystroke starts a new
-Query. When several files are sent at once, the first becomes the Subject and
+Query, Backspace takes it away. When several files are sent at once, the first becomes the Subject and
 the rest are dropped; the Subject Card says how many were sent.
 _Avoid_: sent subject, handed subject, dropped file, opened file
 
@@ -252,8 +252,8 @@ the Speech Model the user picked in Codictate. Codiclens asks Codictate's comman
 line, which hands the file to the running Codictate (starting it hidden if need
 be); Codictate runs one File Transcription at a time, so a Transcribe may wait its
 turn, and the Subject Card says where it is ("Waiting, 1 ahead", "Transcribing ·
-0:42"). The text becomes a text Subject in place of the file, as OCR Text replaces
-an image; a file with no speech produces none. Codiclens has no Speech Model of
+0:42"). The text becomes a text Subject in place of the file and stands, as OCR
+Text replaces an image; a file with no speech produces none. Codiclens has no Speech Model of
 its own, so without Codictate, or with one too old to speak its command line's
 contract, the Action is still there and says where to get it.
 _Avoid_: dictate, speech to text, STT
