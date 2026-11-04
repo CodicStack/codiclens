@@ -198,9 +198,9 @@ struct OCRCommandTests {
         #expect(rawText == "Hello from the image\nsecond line")
     }
 
-    /// Enter on the standing OCR Text copies it, as Enter on any standing text
-    /// does; Tab opens its Actions, Paste first.
-    @Test func enterCopiesTheOCRTextAndTabOpensItsActionsWithPasteFirst() throws {
+    /// Enter on the standing OCR Text pastes it, as Enter on any text does;
+    /// Tab opens its Actions, Paste first.
+    @Test func enterPastesTheOCRTextAndTabOpensItsActionsWithPasteFirst() throws {
         let (coordinator, _, _) = makeCoordinator()
         _ = try readyToOCRAFile(coordinator)
         _ = coordinator.submit()
@@ -213,7 +213,7 @@ struct OCRCommandTests {
         #expect(coordinator.submit() == [.paste(.text("some text"))])
 
         coordinator.reset()
-        #expect(coordinator.submit() == [.hide, .copy(.text("some text"))])
+        #expect(coordinator.submit() == [.paste(.text("some text"))])
     }
 
     // MARK: - No text found

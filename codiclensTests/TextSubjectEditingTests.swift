@@ -205,7 +205,7 @@ struct TextSubjectEditingTests {
         coordinator.toggleTextSubjectEdit()
 
         #expect(coordinator.subjectVM.results.map(\.displayName) == ["hello"])
-        #expect(coordinator.submit() == [.hide, .copy(.text("hello"))])
+        #expect(coordinator.submit() == [.paste(.text("hello"))])
     }
 
     /// ⌘E does not care whether an app matched: the user asked for text.

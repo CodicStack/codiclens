@@ -600,7 +600,7 @@ Owns four view models, one per search phase:
 Phase state machine:
 ```
 searchingSubject ──Enter──→ executeDefaultAction + hide
-       │                      (app/file/folder/text, a Clipboard Item row pastes,
+       │                      (app/file/folder, text and a Clipboard Item row paste,
        │                       an Emoji row inserts, or the Last Subject)
        │Tab
        ▼
@@ -648,7 +648,7 @@ Text mode is **⌘E, and nothing else** (`docs/adr/0012-files-in-subject-search-
 Zero app matches is "No results" — offering ⌘E as a hint — never a text Subject.
 ⌘E in Subject search with a non-empty Query opens the editor with the Query in it,
 whether or not anything matched and for a path Query too; saving stands the text
-as the only Result (`SubjectSearchVM.standAsText`), so Enter copies it and Tab
+as the only Result (`SubjectSearchVM.standAsText`), so Enter pastes it and Tab
 opens its Actions. Escape in the editor discards it; Escape on the saved text goes
 back to what the Query matched. The next keystroke is a new Query: the text was
 written in the editor, not in the Query. `hasAnswered` — the Index landed and the

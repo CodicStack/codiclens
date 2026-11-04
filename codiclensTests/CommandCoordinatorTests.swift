@@ -59,11 +59,11 @@ struct CommandCoordinatorTests {
         #expect(runner.recorded == effects)
     }
 
-    @Test func enterOnTextCopiesIt() {
+    @Test func enterOnTextPastesIt() {
         let (coordinator, _) = makeCoordinator()
         seed(coordinator, with: textSubject("hello"))
 
-        #expect(coordinator.submit() == [.hide, .copy(.text("hello"))])
+        #expect(coordinator.submit() == [.paste(.text("hello"))])
     }
 
     @Test func enterOnSettingsOpensSettings() {

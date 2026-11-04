@@ -133,7 +133,7 @@ struct TranscribeCommandTests {
         #expect(coordinator.subjectVM.searchText.isEmpty)
         #expect(!coordinator.isTranscriptionInFlight)
         #expect(coordinator.transcriptionNote == nil)
-        #expect(coordinator.submit() == [.hide, .copy(.text("The quick brown fox."))], "Enter copies it")
+        #expect(coordinator.submit() == [.paste(.text("The quick brown fox."))], "Enter pastes it")
 
         coordinator.reset()
         coordinator.advancePhase()

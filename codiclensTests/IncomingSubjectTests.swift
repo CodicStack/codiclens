@@ -277,7 +277,7 @@ struct IncomingSubjectTests {
         }
         #expect(coordinator.cardCount == 1)
         #expect(coordinator.incomingCount == 1)
-        #expect(coordinator.submit() == [.hide, .copy(.text("from Safari"))])
+        #expect(coordinator.submit() == [.paste(.text("from Safari"))])
 
         coordinator.reset()
         guard case .text("from Safari")? = coordinator.standingSubject?.kind else {

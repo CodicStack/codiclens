@@ -1652,7 +1652,10 @@ class CommandCoordinator {
             guard let url = subject.url else { return [.hide] }
             return openEffects(for: subject, url: url)
         case .text(let rawText):
-            return [.hide, .copy(.text(rawText))]
+            // Pasted, as a Clipboard Item is: OCR Text or a transcript standing
+            // after its Action goes straight into the app the Panel was opened
+            // over. No `.hide`: `.paste` hides without animation before Cmd+V.
+            return [.paste(.text(rawText))]
         case .clipboard:
             return effects(for: .init(
                 name: "Paste", icon: .sfSymbol("doc.on.clipboard"), isFinal: true, handler: .paste

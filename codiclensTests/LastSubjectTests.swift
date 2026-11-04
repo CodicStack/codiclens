@@ -314,13 +314,13 @@ struct LastSubjectTests {
         #expect(coordinator.standingSubject?.url == inbox)
     }
 
-    /// ⌘E text acted on stands as text, and Enter copies it again.
+    /// ⌘E text acted on stands as text, and Enter pastes it again.
     @Test func typedTextStands() throws {
         let (coordinator, _) = try makeCoordinator()
         coordinator.acceptTypedText("hello")
         coordinator.toggleTextSubjectEdit()
         coordinator.toggleTextSubjectEdit()
-        #expect(coordinator.submit() == [.hide, .copy(.text("hello"))])
+        #expect(coordinator.submit() == [.paste(.text("hello"))])
 
         coordinator.reset()
 
@@ -328,7 +328,7 @@ struct LastSubjectTests {
             Issue.record("expected the text, got \(String(describing: coordinator.standingSubject?.kind))")
             return
         }
-        #expect(coordinator.submit() == [.hide, .copy(.text("hello"))])
+        #expect(coordinator.submit() == [.paste(.text("hello"))])
     }
 
     /// What a transform turned the text into is what it left behind.
@@ -365,7 +365,7 @@ struct LastSubjectTests {
         coordinator.textSubjectEditText = "hello, edited"
         coordinator.toggleTextSubjectEdit()
 
-        #expect(coordinator.submit() == [.hide, .copy(.text("hello, edited"))])
+        #expect(coordinator.submit() == [.paste(.text("hello, edited"))])
         coordinator.reset()
         guard case .text("hello, edited")? = coordinator.standingSubject?.kind else {
             Issue.record("expected the edit, got \(String(describing: coordinator.standingSubject?.kind))")
