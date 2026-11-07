@@ -205,22 +205,20 @@ struct CardContainerView: View {
         }
     }
 
-    /// Left/Right with Control alone are Ctrl+H/L; bare, they move the Phase
-    /// only with nothing typed (`arrowHorizontally`). With Shift, Option or
-    /// Command they never move the Phase: the grid still takes them, and
-    /// anywhere else they are the field's selection and word or line jumps.
+    /// Left/Right, bare or with Control alone, are exactly Ctrl+H/L
+    /// (`stepHorizontally`): the grid first, then the Phase, Query or not, so
+    /// a typed Query never swallows them for an invisible caret. With Shift,
+    /// Option or Command they never move the Phase: the grid still takes them,
+    /// and anywhere else they are the field's selection and word or line jumps.
     /// Only these four count, so Caps Lock, or the numeric-pad and function
     /// flags an arrow key may carry, change nothing.
     private func horizontalArrow(
         _ direction: CommandCoordinator.HorizontalDirection, _ press: KeyPress
     ) -> KeyPress.Result {
         let modifiers = press.modifiers.intersection([.command, .option, .control, .shift])
-        if modifiers == .control {
+        if modifiers.isEmpty || modifiers == .control {
             coordinator.stepHorizontally(direction)
             return .handled
-        }
-        if modifiers.isEmpty {
-            return coordinator.arrowHorizontally(direction) ? .handled : .ignored
         }
         let moved = direction == .left ? coordinator.moveLeft() : coordinator.moveRight()
         return moved ? .handled : .ignored

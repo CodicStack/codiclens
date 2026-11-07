@@ -1,9 +1,9 @@
 import Testing
 @testable import codiclens
 
-/// Left/Right and Ctrl+Left/Right, paired with Ctrl+H/L: the grid first, then
-/// the Phase. A bare arrow moves the Phase only with nothing typed in it, so a
-/// Query keeps its caret.
+/// Left/Right, bare or with Control, are exactly Ctrl+H/L: all of them go
+/// through `stepHorizontally`, the grid first, then the Phase. A typed Query
+/// changes nothing, so the arrows never vanish into an invisible caret.
 @MainActor
 struct HorizontalKeyTests {
 
@@ -18,15 +18,15 @@ struct HorizontalKeyTests {
         coordinator.clipboardVM.load()
     }
 
-    // MARK: - Plain arrows
+    // MARK: - Nothing typed
 
-    @Test func rightWithNothingTypedInClipboardModeOpensTheSelectedItemsActions() throws {
+    @Test func rightInClipboardModeOpensTheSelectedItemsActions() throws {
         let coordinator = makeCoordinator(seededWith: ["older", "newer"])
         browseClipboard(coordinator)
         coordinator.clipboardVM.selectedIndex = 1
         let item = try #require(coordinator.currentClipboardItem)
 
-        #expect(coordinator.arrowHorizontally(.right))
+        coordinator.stepHorizontally(.right)
 
         #expect(coordinator.phase == .pickingAction)
         #expect(coordinator.selectedClipboardItem?.id == item.id)
@@ -35,74 +35,26 @@ struct HorizontalKeyTests {
     @Test func leftFromAClipboardItemsActionsGoesBackToTheBrowser() {
         let coordinator = makeCoordinator(seededWith: ["hello"])
         browseClipboard(coordinator)
-        coordinator.arrowHorizontally(.right)
+        coordinator.stepHorizontally(.right)
         #expect(coordinator.phase == .pickingAction)
 
-        #expect(coordinator.arrowHorizontally(.left))
+        coordinator.stepHorizontally(.left)
 
         #expect(coordinator.phase == .browsingClipboard)
     }
 
-    @Test func leftWithNothingTypedInClipboardModeGoesBackToSubjectSearch() {
+    @Test func leftInClipboardModeGoesBackToSubjectSearch() {
         let coordinator = makeCoordinator(seededWith: ["hello"])
         browseClipboard(coordinator)
 
-        #expect(coordinator.arrowHorizontally(.left))
+        coordinator.stepHorizontally(.left)
 
         #expect(coordinator.phase == .searchingSubject)
     }
 
-    @Test func aTypedQueryKeepsTheArrowsForItsCaret() {
-        let coordinator = makeCoordinator(seededWith: ["apple pie", "banana"])
-        browseClipboard(coordinator)
-        coordinator.clipboardVM.searchText = "apple"
+    // MARK: - A typed Query moves the Phase all the same
 
-        #expect(coordinator.arrowHorizontally(.right) == false)
-        #expect(coordinator.arrowHorizontally(.left) == false)
-
-        #expect(coordinator.phase == .browsingClipboard)
-        #expect(coordinator.currentQuery == "apple")
-    }
-
-    @Test func aTypedQueryInTheActionPhaseKeepsTheArrowsToo() {
-        let coordinator = makeCoordinator(seededWith: ["hello"])
-        browseClipboard(coordinator)
-        coordinator.advancePhase()
-        coordinator.actionVM.searchText = "co"
-
-        #expect(coordinator.arrowHorizontally(.left) == false)
-
-        #expect(coordinator.phase == .pickingAction)
-    }
-
-    @Test func theEmojiGridStillWalksCells() {
-        let coordinator = makeCoordinator()
-        coordinator.enterEmojiMode()
-        coordinator.emojiVM.selectedIndex = 4
-
-        #expect(coordinator.arrowHorizontally(.right))
-        #expect(coordinator.emojiVM.selectedIndex == 5)
-        #expect(coordinator.arrowHorizontally(.left))
-        #expect(coordinator.emojiVM.selectedIndex == 4)
-
-        #expect(coordinator.phase == .browsingEmoji, "the Phase never moved")
-    }
-
-    @Test func anOpenEditorKeepsTheArrows() {
-        let coordinator = makeCoordinator(seededWith: ["hello"])
-        browseClipboard(coordinator)
-        coordinator.toggleTextSubjectEdit()
-        #expect(coordinator.isEditingTextSubject)
-
-        #expect(coordinator.arrowHorizontally(.right) == false)
-        #expect(coordinator.arrowHorizontally(.left) == false)
-
-        #expect(coordinator.phase == .browsingClipboard)
-    }
-
-    // MARK: - Control arrows, the same as Ctrl+H/L
-
-    @Test func controlArrowsMoveThePhaseEvenWithAQuery() {
+    @Test func aTypedQueryInClipboardModeStillMovesThePhase() {
         let coordinator = makeCoordinator(seededWith: ["apple pie", "banana"])
         browseClipboard(coordinator)
         coordinator.clipboardVM.searchText = "apple"
@@ -115,14 +67,32 @@ struct HorizontalKeyTests {
         #expect(coordinator.phase == .browsingClipboard)
     }
 
-    @Test func controlArrowsWalkTheEmojiGridFirst() {
+    @Test func aTypedQueryInTheActionPhaseStillMovesThePhase() {
+        let coordinator = makeCoordinator(seededWith: ["hello"])
+        browseClipboard(coordinator)
+        coordinator.advancePhase()
+        #expect(coordinator.phase == .pickingAction)
+        coordinator.actionVM.searchText = "co"
+
+        coordinator.stepHorizontally(.left)
+
+        #expect(coordinator.phase == .browsingClipboard)
+    }
+
+    // MARK: - The Emoji grid takes them first
+
+    @Test func theEmojiGridWalksCells() {
         let coordinator = makeCoordinator()
         coordinator.enterEmojiMode()
         coordinator.emojiVM.selectedIndex = 4
 
+        coordinator.stepHorizontally(.right)
+        #expect(coordinator.emojiVM.selectedIndex == 5)
         coordinator.stepHorizontally(.left)
-
+        #expect(coordinator.emojiVM.selectedIndex == 4)
+        coordinator.stepHorizontally(.left)
         #expect(coordinator.emojiVM.selectedIndex == 3)
-        #expect(coordinator.phase == .browsingEmoji)
+
+        #expect(coordinator.phase == .browsingEmoji, "the Phase never moved")
     }
 }

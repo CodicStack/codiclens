@@ -18,3 +18,4 @@ Codiclens has no Dock icon and no menu bar icon, so ⌘Space is the way in. macO
 - Settings → General has a toggle for each, which hands the shortcut back.
 - Symbols are resolved dynamically and every call is error-checked. If a macOS release removes them, the ⌘Space row in Setup falls back to instructions and a deep link to Keyboard Shortcuts.
 - Mac App Store distribution stays ruled out, as it already is by direct distribution.
+- The same call lends the Panel ⌃← and ⌃→ (Spaces' "Move left/right a space", 79 and 81) while it is up, so they can be Ctrl+H/L's pair. No choice to ask for: only what macOS holds is borrowed, it is handed back on every hide and at terminate, and what was borrowed is written down first so a launch after a crash hands it back. Switching Spaces with the Panel open would have dismissed it anyway.

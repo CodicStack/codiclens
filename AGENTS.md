@@ -803,17 +803,18 @@ display-only. Routes to coordinator:
   Shift+Tab is the inverse of **Tab**, not of Ctrl+L: it is unconditional, so in
   Emoji Mode it leaves the grid rather than walking a cell left.
 - Up/Down → `moveUp()` / `moveDown()`
-- Left/Right → `arrowHorizontally(_:)`: `moveLeft()` / `moveRight()` first (the Emoji
-  grid, one Skin Tone in the ⌥Enter picker); where that means nothing and the Query
-  (`currentSearchText`, this Phase's) is empty, `retreatPhase()` / `advancePhase()` as
-  Ctrl+H/L do; with a Query, `.ignored`, so the caret moves in the field. Ctrl+Left/Right
-  are exactly Ctrl+H/L (`stepHorizontally(_:)`), Query or not. Shift, Option and Command
-  arrows never move the Phase: the grid still takes them, and anywhere else they are the
-  field's selection and word or line jumps. An open editor (⌘E text, Rename) has its own
-  focus, so no arrow reaches the hidden field; `arrowHorizontally` refuses while one is
-  open all the same. **macOS binds Ctrl+←/→ to "Move left/right a space" by default**
-  (Keyboard Shortcuts → Mission Control), and the system takes them before the app does;
-  Ctrl+H/L always arrive
+- Left/Right and Ctrl+Left/Right → `stepHorizontally(_:)`, **exactly** Ctrl+H/L, Query
+  or not: the user asked for them to be Shift+Tab/Tab's pair with no conditions. An
+  earlier version left a plain arrow to the caret once a Query was typed, and the arrow
+  read as broken everywhere but the Clipboard browser (the caret is in a hidden field, so
+  moving it shows nothing). Shift, Option and Command arrows never move the Phase: the
+  grid still takes them, and anywhere else they are the field's selection and word or
+  line jumps. An open editor (⌘E text, Rename) has its own focus, so no arrow reaches the
+  hidden field. **macOS binds Ctrl+←/→ to "Move left/right a space" by default**
+  (symbolic hotkeys 79 and 81) and takes them before the app does, so the Panel borrows
+  the two while it is up, through the same private call as ADR 0016, only where macOS
+  holds them, and hands them back on every hide and at terminate; what it borrowed is
+  written down first, so a launch after a crash hands it back
 - Escape → `handleEscape()`, which closes the Panel's own preview first
 - **While the Panel's own preview is open** (`coordinator.passagePreview`), the field
   sends Up/Down and Ctrl+J/K (a few lines), Left/Right (a PDF's page, a recording's 5 s)
@@ -852,7 +853,7 @@ display-only. Routes to coordinator:
   **first**, and only `retreatPhase()` / `advancePhase()` when the horizontal move meant
   nothing. Routing them straight to the Phase took Ctrl+H and Ctrl+L out of Emoji Mode.
   Both spellings of a Control-modified key are accepted, via `ControlKey.letter`. The
-  plain arrows are the same pair with nothing typed (see Left/Right above).
+  plain arrows are the same pair (see Left/Right above).
   `HorizontalKeyTests` pins both.
 
 ### View Cards

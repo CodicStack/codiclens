@@ -40,6 +40,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Settings.
     private var setupController: SetupController?
 
+    /// ⌃← and ⌃→, lent by macOS while the Panel is up.
+    private var spacesArrows: SpacesArrowLoan?
+
     /// Sparkle, behind the `Updater` seam. Made after Move to Applications,
     /// so a copy about to be replaced never checks.
     private var updater: SparkleUpdater?
@@ -91,9 +94,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Whatever an OS update, a restart or a crash left behind: the
         // shortcuts the user gave Codiclens are taken again.
         setupController.takeover.takeAtLaunch()
+        // A crash with the Panel up left ⌃←/⌃→ borrowed for the rest of the
+        // login session: macOS gets them back for Spaces.
+        let spacesArrows = SpacesArrowLoan(hotKeys: PrivateSymbolicHotKeys(), defaults: .standard)
+        spacesArrows.handBack()
+        self.spacesArrows = spacesArrows
         let updater = SparkleUpdater()
         self.updater = updater
-        panelController = PanelController(lastActiveApp: lastActiveApp, setupController: setupController, updater: updater)
+        panelController = PanelController(
+            lastActiveApp: lastActiveApp,
+            setupController: setupController,
+            updater: updater,
+            spacesArrows: spacesArrows
+        )
         // Off-thread, so neither launch nor the first Emoji Mode waits on the
         // 226 KB dataset being decoded.
         EmojiIndex.prewarm()
@@ -154,6 +167,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Spotlight and Emoji & Symbols go back to macOS whenever Codiclens
         // is not running to answer them.
         setupController?.takeover.handBack()
+        spacesArrows?.handBack()
         setupController?.tearDown()
         unregisterHotKeys()
         lastActiveApp.stop()

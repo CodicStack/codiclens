@@ -663,31 +663,14 @@ class CommandCoordinator {
 
     enum HorizontalDirection { case left, right }
 
-    /// Ctrl+H/L and Ctrl+Left/Right: one cell in the grid, and the Phase
-    /// back or forward wherever that means nothing. Always consumed.
+    /// Ctrl+H/L and Left/Right, with or without Control: one cell in the
+    /// grid, and the Phase back or forward wherever that means nothing, Query
+    /// or not. Always consumed.
     func stepHorizontally(_ direction: HorizontalDirection) {
         switch direction {
         case .left: if !moveLeft() { retreatPhase() }
         case .right: if !moveRight() { advancePhase() }
         }
-    }
-
-    /// Plain Left/Right: one cell in the grid; with nothing typed in this
-    /// Phase, the Phase back or forward as Ctrl+H/L does; with a Query, not
-    /// consumed, so the caret moves in it.
-    ///
-    /// - Returns: whether the key was consumed.
-    @discardableResult
-    func arrowHorizontally(_ direction: HorizontalDirection) -> Bool {
-        switch direction {
-        case .left: if moveLeft() { return true }
-        case .right: if moveRight() { return true }
-        }
-        // An open editor has the keyboard itself; this is for the one case it
-        // does not, so the arrows never move the Phase out from under it.
-        guard currentSearchText.isEmpty, !isEditingTextSubject, !isRenaming else { return false }
-        stepHorizontally(direction)
-        return true
     }
 
     /// ⌥Enter: the six-tone override for the selected Emoji, where tones apply.

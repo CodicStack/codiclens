@@ -34,14 +34,23 @@ enum SystemShortcut: CaseIterable, Hashable {
     }
 }
 
-/// macOS's symbolic hotkey table. A fake in tests: nothing under test ever
-/// changes the Mac's shortcuts.
+/// macOS's symbolic hotkey table, by macOS's ids. A fake in tests: nothing
+/// under test ever changes the Mac's shortcuts.
 protocol SymbolicHotKeys {
     /// Whether this macOS has the calls at all.
     var isAvailable: Bool { get }
-    /// Lets macOS hold the shortcut again (`true`) or makes it let go
+    /// Whether macOS holds hotkey `id` right now: on in Keyboard Shortcuts
+    /// and not let go this session. False when it cannot be read.
+    func doesMacOSHold(_ id: Int32) -> Bool
+    /// Lets macOS hold hotkey `id` again (`true`) or makes it let go
     /// (`false`). False when the call failed or macOS did not do it.
-    func setMacOSHolds(_ shortcut: SystemShortcut, _ holds: Bool) -> Bool
+    func setMacOSHolds(_ id: Int32, _ holds: Bool) -> Bool
+}
+
+extension SymbolicHotKeys {
+    func setMacOSHolds(_ shortcut: SystemShortcut, _ holds: Bool) -> Bool {
+        setMacOSHolds(shortcut.symbolicHotKey, holds)
+    }
 }
 
 /// The private CoreGraphics calls Raycast uses too, resolved at run time so a
@@ -69,16 +78,20 @@ struct PrivateSymbolicHotKeys: SymbolicHotKeys {
 
     var isAvailable: Bool { setEnabled != nil }
 
-    func setMacOSHolds(_ shortcut: SystemShortcut, _ holds: Bool) -> Bool {
+    func doesMacOSHold(_ id: Int32) -> Bool {
+        isEnabled?(id) ?? false
+    }
+
+    func setMacOSHolds(_ id: Int32, _ holds: Bool) -> Bool {
         guard let setEnabled else { return false }
-        let error = setEnabled(shortcut.symbolicHotKey, holds)
+        let error = setEnabled(id, holds)
         guard error == 0 else {
-            NSLog("[codiclens] CGSSetSymbolicHotKeyEnabled(%d, %d) failed: %d", shortcut.symbolicHotKey, holds ? 1 : 0, error)
+            NSLog("[codiclens] CGSSetSymbolicHotKeyEnabled(%d, %d) failed: %d", id, holds ? 1 : 0, error)
             return false
         }
         // Assert, never assume: read it back where macOS lets us.
         guard let isEnabled else { return true }
-        return isEnabled(shortcut.symbolicHotKey) == holds
+        return isEnabled(id) == holds
     }
 }
 
@@ -143,6 +156,71 @@ final class ShortcutTakeover {
             failed.remove(shortcut)
         } else {
             failed.insert(shortcut)
+        }
+    }
+}
+
+/// ⌃← and ⌃→, lent to Codiclens while the Panel is up.
+///
+/// In the Panel they step between Cards as ⌃H and ⌃L do, but macOS holds
+/// them for "Move left a space" and "Move right a space" (symbolic hotkeys
+/// 79 and 81), and WindowServer eats a held keystroke before the Panel sees
+/// it. So the Panel borrows the ones macOS holds as it shows and hands them
+/// back as it hides; one the user turned off is never touched, so it is
+/// never turned on either.
+///
+/// Unlike `ShortcutTakeover` this is no choice of the user's. The change
+/// lasts the login session, so what is borrowed is written down before it
+/// is taken: after a crash with the Panel up, the next launch hands it back.
+final class SpacesArrowLoan {
+    /// Move left a space (⌃←) and move right a space (⌃→).
+    static let ids: Set<Int32> = [79, 81]
+    static let defaultsKey = "codiclens.spacesArrows.borrowed"
+
+    private let hotKeys: SymbolicHotKeys
+    private let defaults: UserDefaults
+    /// What macOS has let go of for Codiclens and not been given back yet.
+    private(set) var borrowed: Set<Int32>
+
+    /// Starts from what a previous run recorded and never handed back, for
+    /// `handBack` to return at launch.
+    init(hotKeys: SymbolicHotKeys, defaults: UserDefaults) {
+        self.hotKeys = hotKeys
+        self.defaults = defaults
+        let recorded = defaults.object(forKey: Self.defaultsKey) as? [Int] ?? []
+        borrowed = Set(recorded.map { Int32(truncatingIfNeeded: $0) }).intersection(Self.ids)
+    }
+
+    /// As the Panel shows. Borrowing again while borrowed takes nothing new:
+    /// what is borrowed no longer reads as macOS's.
+    func borrow() {
+        let wanted = Self.ids.subtracting(borrowed).filter { hotKeys.doesMacOSHold($0) }
+        guard !wanted.isEmpty else { return }
+        // Written down first, so a crash between the two leaves nothing
+        // unrecorded.
+        record(borrowed.union(wanted))
+        for id in wanted where hotKeys.setMacOSHolds(id, false) {
+            borrowed.insert(id)
+        }
+        record(borrowed)
+    }
+
+    /// As the Panel hides, by any path, at quit and at launch. With nothing
+    /// borrowed it does nothing. One macOS refuses stays borrowed, for the
+    /// next hide or launch to try again.
+    func handBack() {
+        guard !borrowed.isEmpty else { return }
+        for id in borrowed where hotKeys.setMacOSHolds(id, true) {
+            borrowed.remove(id)
+        }
+        record(borrowed)
+    }
+
+    private func record(_ ids: Set<Int32>) {
+        if ids.isEmpty {
+            defaults.removeObject(forKey: Self.defaultsKey)
+        } else {
+            defaults.set(ids.sorted().map(Int.init), forKey: Self.defaultsKey)
         }
     }
 }

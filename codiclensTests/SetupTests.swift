@@ -92,7 +92,7 @@ struct SetupTests {
         setup.done()
 
         #expect(hotKeys.macOSHolds == [.emoji])
-        #expect(hotKeys.calls.map(\.shortcut) == [.spotlight])
+        #expect(hotKeys.calls.map(\.id) == [SystemShortcut.spotlight.symbolicHotKey])
         #expect(takeover.isOn(.spotlight))
         #expect(!takeover.isOn(.emoji))
         #expect(loginItem.requests.isEmpty, "off was already the state in force")
@@ -258,7 +258,7 @@ struct SetupTests {
     // MARK: - When macOS refuses
 
     @Test func aFailedShortcutCallYieldsTheFallback() {
-        hotKeys.refuses = [.spotlight]
+        hotKeys.refuses = [SystemShortcut.spotlight.symbolicHotKey]
         let (setup, takeover, _) = launch()
         setup.begin()
         #expect(!setup.shortcuts.showsSpotlightFallback, "nothing has failed yet")
@@ -441,20 +441,34 @@ struct SetupTests {
 
 // MARK: - Fakes
 
-/// macOS's symbolic hotkey table, in memory. Both shortcuts start held by
-/// macOS, as on a fresh Mac.
+/// macOS's symbolic hotkey table, in memory, by id. Spotlight's and Emoji &
+/// Symbols' start held by macOS, as on a fresh Mac.
 @MainActor
 final class FakeSymbolicHotKeys: SymbolicHotKeys {
     var isAvailable = true
-    /// Shortcuts whose call fails.
-    var refuses: Set<SystemShortcut> = []
-    var macOSHolds: Set<SystemShortcut> = [.spotlight, .emoji]
-    var calls: [(shortcut: SystemShortcut, macOSHolds: Bool)] = []
+    /// Ids whose call fails.
+    var refuses: Set<Int32> = []
+    /// Ids macOS holds.
+    var held: Set<Int32> = Set(SystemShortcut.allCases.map(\.symbolicHotKey))
+    var calls: [(id: Int32, macOSHolds: Bool)] = []
 
-    func setMacOSHolds(_ shortcut: SystemShortcut, _ holds: Bool) -> Bool {
-        calls.append((shortcut, holds))
-        guard isAvailable, !refuses.contains(shortcut) else { return false }
-        if holds { macOSHolds.insert(shortcut) } else { macOSHolds.remove(shortcut) }
+    /// Which of the two system shortcuts macOS holds.
+    var macOSHolds: Set<SystemShortcut> {
+        get { Set(SystemShortcut.allCases.filter { held.contains($0.symbolicHotKey) }) }
+        set {
+            held.subtract(SystemShortcut.allCases.map(\.symbolicHotKey))
+            held.formUnion(newValue.map(\.symbolicHotKey))
+        }
+    }
+
+    func doesMacOSHold(_ id: Int32) -> Bool {
+        isAvailable && held.contains(id)
+    }
+
+    func setMacOSHolds(_ id: Int32, _ holds: Bool) -> Bool {
+        calls.append((id, holds))
+        guard isAvailable, !refuses.contains(id) else { return false }
+        if holds { held.insert(id) } else { held.remove(id) }
         return true
     }
 }

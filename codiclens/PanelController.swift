@@ -36,6 +36,9 @@ class PanelController {
     private let updater: any Updater
     /// Search by meaning's query encoder, held while the Panel is up.
     private let queryEncoder = QueryEncoderHold.fileIndex
+    /// ⌃← and ⌃→, borrowed from macOS while the Panel is up so they reach
+    /// the Card row.
+    private let spacesArrows: SpacesArrowLoan
     private var isTornDown = false
 
     /// Whether the Panel is up as far as this controller is concerned.
@@ -49,10 +52,11 @@ class PanelController {
     /// whether it is still the current one before it orders the window out.
     private var showGeneration = 0
 
-    init(lastActiveApp: LastActiveApp, setupController: SetupController, updater: any Updater) {
+    init(lastActiveApp: LastActiveApp, setupController: SetupController, updater: any Updater, spacesArrows: SpacesArrowLoan) {
         self.lastActiveApp = lastActiveApp
         self.setupController = setupController
         self.updater = updater
+        self.spacesArrows = spacesArrows
         let runner = SystemEffectRunner(pasteboard: .general)
         effectRunner = runner
         coordinator = CommandCoordinator(
@@ -283,6 +287,7 @@ class PanelController {
         coordinator.reset()
         stand(coordinator)
         queryEncoder.panelShown()
+        spacesArrows.borrow()
         updatePanelAppearance()
         focus.capture(frontmost: previousApp)
         centerOnScreen()
@@ -363,6 +368,7 @@ class PanelController {
         coordinator.cancelTranscription()
         coordinator.closePassagePreview()
         queryEncoder.panelHidden()
+        spacesArrows.handBack()
 
         dismissQuickLook()
         removeObservers()
@@ -387,6 +393,7 @@ class PanelController {
         coordinator.cancelTranscription()
         coordinator.closePassagePreview()
         queryEncoder.panelHidden()
+        spacesArrows.handBack()
         presentation.visible = false
         panel.orderOut(nil)
     }
@@ -555,6 +562,7 @@ class PanelController {
             isShowing = true
             showGeneration += 1
             queryEncoder.panelShown()
+            spacesArrows.borrow()
             presentation.visible = true
             panel.makeKeyAndOrderFront(nil)
             coordinator.focusTrigger.toggle()
