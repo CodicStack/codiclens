@@ -4,6 +4,9 @@ What changed in each release of Codiclens. Notes for the next release go under U
 
 ## Unreleased
 
+- The Left and Right arrows move between cards when you haven't typed anything, like Ctrl+H and Ctrl+L, so in the clipboard history Right opens the selected item's actions and Left goes back. Once you've typed, they move the cursor as before. Ctrl+Left and Ctrl+Right always work like Ctrl+H and Ctrl+L, unless macOS uses them to switch Spaces.
+- Clipboard items have a new Save To… action. Pick a folder from the same list Copy To uses, and the image or text is saved there as a new file, which becomes the subject so you can open or share it right away. The item stays in your clipboard history, and nothing already in the folder is replaced.
+
 ## 1.0.2 (2026-11-04)
 
 - After Transcribe, OCR, QR Code, a text change, Move To, Copy To, Rename or Compress, the panel goes back to the first card with the result as the new subject, ready for Enter or Tab. Enter on text pastes it, so a transcript or OCR text goes straight into the app you were in.

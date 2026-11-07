@@ -178,6 +178,11 @@ enum ActionHandler {
     /// follows the file to where it landed. See `FileOperation`.
     case moveTo, copyTo
 
+    /// Save To…: a Clipboard Item written into a folder as a new file. Not
+    /// Final, the Target is a folder, the one Move To… and Copy To… offer; the
+    /// saved file stands as the Subject. See `FileOperation.save`.
+    case saveTo
+
     /// Opens the name for editing on the Subject Card; Enter there renames.
     case rename
 
@@ -286,6 +291,16 @@ struct SubjectAction: Identifiable {
         icon: .sfSymbol("square.and.arrow.up"),
         isFinal: false,
         handler: .share
+    )
+
+    /// A Clipboard Item saved into a folder picked from the list Copy To…
+    /// offers, as a new file. Only a Clipboard Item has it: a file is copied,
+    /// and plain text, an Emoji or an app has no Clipboard Item behind it.
+    private static let saveTo = SubjectAction(
+        name: "Save To…",
+        icon: .sfSymbol("square.and.arrow.down.on.square"),
+        isFinal: false,
+        handler: .saveTo
     )
 
     /// Promoting a Target into the Subject.
@@ -443,6 +458,7 @@ struct SubjectAction: Identifiable {
         if item.isImage {
             actions.append(ocr)
             actions.append(.init(name: "Save Image…", icon: .sfSymbol("square.and.arrow.down"), isFinal: true, handler: .saveAs))
+            actions.append(saveTo)
             actions.append(openInPreview)
             actions.append(rotateLeft)
             actions.append(rotateRight)
@@ -453,6 +469,7 @@ struct SubjectAction: Identifiable {
             actions.append(.init(name: "Run as AppleScript", icon: .sfSymbol("applescript"), isFinal: true, handler: .runScript))
             actions.append(.init(name: "Open Email", icon: .sfSymbol("envelope"), isFinal: true, handler: .openEmail))
             actions.append(.init(name: "Save as File…", icon: .sfSymbol("square.and.arrow.down"), isFinal: true, handler: .saveAs))
+            actions.append(saveTo)
             actions.append(.init(name: "Search Web", icon: .sfSymbol("magnifyingglass"), isFinal: true, handler: .searchWeb))
             if ImageActions.canGenerateQRCode(for: item.content) {
                 actions.append(.init(

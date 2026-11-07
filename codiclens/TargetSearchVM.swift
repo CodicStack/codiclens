@@ -27,7 +27,7 @@ class TargetSearchVM {
 
     private var isFileSearchMode = false
 
-    /// Move To… and Copy To…: the destination folders, then the File Index's
+    /// Move To…, Copy To… and Save To…: the destination folders, then the File Index's
     /// folders as the Query is typed. Bumped per Query, so a late answer for
     /// one already gone is dropped.
     private var isFolderSearchMode = false
@@ -42,7 +42,7 @@ class TargetSearchVM {
     private(set) var fileSearch: FileTargetSearch?
 
     /// - Parameter searchFiles: the File Index, asked before `mdfind`, and for
-    ///   folders by Move To… and Copy To….
+    ///   folders by Move To…, Copy To… and Save To….
     init(
         shareTargetProvider: @escaping @MainActor (Payload) -> [ActionTarget] = {
             ActionTarget.shareTargets(for: $0)
@@ -87,8 +87,8 @@ class TargetSearchVM {
         // Share is deliberately absent: its Targets come from the *Payload*,
         // not the Subject — a Clipboard Image shares as its stored PNG and a
         // Clipboard Item has no URL of its own — and only the coordinator can
-        // resolve one. It calls `loadShareTargets` instead. Move To… and Copy
-        // To… are absent for the same kind of reason: their folders come from
+        // resolve one. It calls `loadShareTargets` instead. Move To…, Copy To…
+        // and Save To… are absent for the same kind of reason: their folders come from
         // the Sources, and the coordinator calls `loadFolderTargets`.
         switch action.handler {
         case .openWith:
@@ -112,7 +112,7 @@ class TargetSearchVM {
         selectedIndex = 0
     }
 
-    /// The destinations Move To… and Copy To… list before anything is typed.
+    /// The destinations Move To…, Copy To… and Save To… list before anything is typed.
     /// Typing filters them and adds the File Index's folders below them.
     func loadFolderTargets(_ folders: [URL]) {
         leaveSearchModes()
@@ -166,7 +166,7 @@ class TargetSearchVM {
         }
     }
 
-    /// Move To… and Copy To… as the Query changes: the destination folders
+    /// Move To…, Copy To… and Save To… as the Query changes: the destination folders
     /// that match, at once, then the File Index's folders below them.
     ///
     /// The File Index is read off the main thread and answers in one go, so

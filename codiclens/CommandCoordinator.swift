@@ -661,6 +661,35 @@ class CommandCoordinator {
         return true
     }
 
+    enum HorizontalDirection { case left, right }
+
+    /// Ctrl+H/L and Ctrl+Left/Right: one cell in the grid, and the Phase
+    /// back or forward wherever that means nothing. Always consumed.
+    func stepHorizontally(_ direction: HorizontalDirection) {
+        switch direction {
+        case .left: if !moveLeft() { retreatPhase() }
+        case .right: if !moveRight() { advancePhase() }
+        }
+    }
+
+    /// Plain Left/Right: one cell in the grid; with nothing typed in this
+    /// Phase, the Phase back or forward as Ctrl+H/L does; with a Query, not
+    /// consumed, so the caret moves in it.
+    ///
+    /// - Returns: whether the key was consumed.
+    @discardableResult
+    func arrowHorizontally(_ direction: HorizontalDirection) -> Bool {
+        switch direction {
+        case .left: if moveLeft() { return true }
+        case .right: if moveRight() { return true }
+        }
+        // An open editor has the keyboard itself; this is for the one case it
+        // does not, so the arrows never move the Phase out from under it.
+        guard currentSearchText.isEmpty, !isEditingTextSubject, !isRenaming else { return false }
+        stepHorizontally(direction)
+        return true
+    }
+
     /// ⌥Enter: the six-tone override for the selected Emoji, where tones apply.
     ///
     /// - Returns: whether the key was consumed. It isn't when the Emoji takes
@@ -805,16 +834,16 @@ class CommandCoordinator {
     /// resolving a Payload is this object's job: a Clipboard Image shares as
     /// its stored PNG, which only the history can name. Going through
     /// `sharePayload(for:)` here is also what keeps the list the user picks
-    /// from and the item the service is handed the same thing. Move To… and
-    /// Copy To… are the other two: their folders come from the Sources and
-    /// the recent destinations, which are this object's too.
+    /// from and the item the service is handed the same thing. Move To…,
+    /// Copy To… and Save To… are the others: their folders come from the
+    /// Sources and the recent destinations, which are this object's too.
     private func loadTargets(for subject: Subject, action: SubjectAction) {
         if case .share = action.handler, let payload = sharePayload(for: subject) {
             targetVM.loadShareTargets(for: payload)
             return
         }
         switch action.handler {
-        case .moveTo, .copyTo:
+        case .moveTo, .copyTo, .saveTo:
             targetVM.loadFolderTargets(destinationFolders())
         default:
             targetVM.loadTargets(for: subject, action: action)
@@ -823,11 +852,11 @@ class CommandCoordinator {
 
     // MARK: - Moving, copying, renaming, compressing
 
-    /// Folders a Move or Copy went to in this run of the app, latest first. In
-    /// memory only, like the Last Subject.
+    /// Folders a Move, Copy or Save went to in this run of the app, latest
+    /// first. In memory only, like the Last Subject.
     private var recentDestinations: [URL] = []
 
-    /// What Move To… and Copy To… offer before anything is typed: where the
+    /// What Move To…, Copy To… and Save To… offer before anything is typed: where the
     /// last ones went, the folder Sources, then Desktop, Documents, Downloads
     /// and Home. Each once, and only if it is still a folder.
     func destinationFolders() -> [URL] {
@@ -849,7 +878,7 @@ class CommandCoordinator {
         }
     }
 
-    /// Whether a Move, Copy, Rename or Compress is on disk being done. Gates a
+    /// Whether a Move, Copy, Save, Rename or Compress is on disk being done. Gates a
     /// second Enter the way `isImageActionInFlight` does.
     private(set) var isFileOperationInFlight = false
 
@@ -888,9 +917,9 @@ class CommandCoordinator {
         return [.fileOperation(operation, generation: fileOperationGeneration)]
     }
 
-    /// Where a Move, Copy, Rename or Compress landed, handed back by the
+    /// Where a Move, Copy, Save, Rename or Compress landed, handed back by the
     /// runner. The Subject follows it there — the moved file, the copy, the
-    /// renamed file, the zip — and stands in Subject search, as the Last
+    /// saved file, the renamed file, the zip — and stands in Subject search, as the Last
     /// Subject stands when the Panel opens (`standResult`).
     ///
     /// A failure leaves everything where it was, Rename's editor included, so
@@ -920,7 +949,7 @@ class CommandCoordinator {
         }
 
         switch operation {
-        case .move(_, let folder), .copy(_, let folder):
+        case .move(_, let folder), .copy(_, let folder), .save(_, let folder, _):
             recentDestinations.removeAll { $0.standardizedFileURL.path == folder.standardizedFileURL.path }
             recentDestinations.insert(folder, at: 0)
             recentDestinations = Array(recentDestinations.prefix(Self.recentDestinationLimit))
@@ -1740,6 +1769,17 @@ class CommandCoordinator {
             guard let url = fileOnDisk(subject), let folder = target?.url else { return [] }
             return beginFileOperation(.copy(url, into: folder), on: subject)
 
+        case .saveTo:
+            // A new file from a Clipboard Item. The stored PNG is copied, never
+            // moved or handed over, and the item stays where it is in history.
+            guard case .clipboard(let item) = subject.kind,
+                  let folder = target?.url,
+                  let saved = savedContent(of: item) else { return [] }
+            return beginFileOperation(
+                .save(saved, into: folder, named: Self.saveToFileName(for: item)),
+                on: subject
+            )
+
         case .rename:
             // Nothing on disk yet: the name editor opens, and its Enter is
             // `commitRename`.
@@ -1908,6 +1948,35 @@ class CommandCoordinator {
         imageActionFailed = false
         pendingImageSubjectID = subject.id
         return [effect(imageActionGeneration)]
+    }
+
+    /// What Save To… writes for a Clipboard Item: its stored image file,
+    /// copied, or its text.
+    private func savedContent(of item: ClipboardItem) -> FileOperation.Saved? {
+        guard item.isImage else { return .text(item.content) }
+        return history.imageURL(for: item).map { .copy(of: $0) }
+    }
+
+    /// What Save To… calls the file. Text is named as its shared `.txt` is,
+    /// from its first line. An image keeps the name of the file it was copied
+    /// from, without the copy time the history adds to it, and otherwise is
+    /// named for when it was copied, as a screenshot is. Its extension is the
+    /// stored file's: a PNG, unless an image file was copied in the Finder,
+    /// which the history keeps in its own format.
+    static func saveToFileName(for item: ClipboardItem) -> String {
+        guard let storedName = item.imageFileName else {
+            return SharePayloadItems.fileName(for: item.content)
+        }
+        let storedExtension = (storedName as NSString).pathExtension
+        let ext = storedExtension.isEmpty ? "png" : storedExtension
+        if let original = item.originalFileURL?.deletingPathExtension().lastPathComponent,
+           !original.isEmpty {
+            return "\(original).\(ext)"
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
+        return "Image \(formatter.string(from: item.timestamp)).\(ext)"
     }
 
     private func saveEffects(for subject: Subject) -> [Effect] {

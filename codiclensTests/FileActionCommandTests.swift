@@ -108,7 +108,7 @@ struct FileActionCommandTests {
         #expect(video == expected)
     }
 
-    @Test func clipboardItemsKeepTheirOrderWithQuickLookMovedUp() {
+    @Test func clipboardItemsKeepTheirOrderWithQuickLookMovedUp() throws {
         let text = SubjectAction.actions(for: Subject(clipboardItem: ClipboardItem(content: "hi"), imageURL: nil))
             .map(\.name)
         let image = SubjectAction.actions(for: Subject(clipboardItem: ClipboardItem(imageFileName: "i.png"), imageURL: nil))
@@ -117,9 +117,26 @@ struct FileActionCommandTests {
         #expect(Array(text.prefix(4)) == ["Paste", "Copy", "Quick Look", "Paste as Plain Text"])
         #expect(text.last == "Delete from History")
         #expect(image == [
-            "Paste", "Copy", "Quick Look", "Paste as Plain Text", "OCR", "Save Image…", "Open in Preview",
-            "Rotate Left", "Rotate Right", "Copy Path", "Share…", "Delete from History",
+            "Paste", "Copy", "Quick Look", "Paste as Plain Text", "OCR", "Save Image…", "Save To…",
+            "Open in Preview", "Rotate Left", "Rotate Right", "Copy Path", "Share…", "Delete from History",
         ])
+        let saveAsFile = try #require(text.firstIndex(of: "Save as File…"))
+        #expect(text[saveAsFile + 1] == "Save To…", "Save To… sits right after the save panel")
+    }
+
+    /// Save To… is a Clipboard Item's alone: a file has Copy To…, and text, an
+    /// Emoji or an app has no Clipboard Item to write out.
+    @Test func onlyAClipboardItemIsSavedTo() {
+        let subjects = [
+            subject("note.txt", kind: .file(contentType: .plainText)),
+            subject("Projects", kind: .folder),
+            subject("Safari.app", kind: .app(bundleIdentifier: "com.apple.Safari", isRunning: false)),
+            Subject(text: "hello"),
+            Subject(emoji: Emoji(string: "🙂", name: "slightly smiling face", keywords: [], groupIndex: 0)),
+        ]
+        for subject in subjects {
+            #expect(!SubjectAction.actions(for: subject).map(\.name).contains("Save To…"), "\(subject.kind)")
+        }
     }
 
     /// A Clipboard Image's stored PNG is not a file of the user's.

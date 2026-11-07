@@ -117,7 +117,7 @@ _Avoid_: pasteboard, buffer
 **Clipboard Item**:
 One thing the user copied, kept as a snapshot: the text or the pixels as they
 were at copy time. A file it was copied from lends its name and nothing else —
-Quick Look, Paste, Share and Open in Preview all see the snapshot, and a later
+Quick Look, Paste, Share, Save To… and Open in Preview all see the snapshot, and a later
 change to that file changes nothing here.
 _Avoid_: entry, record, link, reference
 
@@ -227,6 +227,14 @@ The Action that hands an image Subject to Apple's Preview for anything Rotate
 cannot do — markup, crop, annotate. Codiclens has no image editor of its own and
 Quick Look outside Finder offers none; Preview is the editor.
 _Avoid_: markup, annotate, edit in preview
+
+**Save To…**:
+The Action that writes a Clipboard Item into a folder as a new file: an image as
+a copy of its snapshot, text as a `.txt` named from its first line. The folder is
+the Target, from the list Move To… and Copy To… offer, and a taken name lands as
+`name 2.ext`. The saved file stands as the Subject; the Clipboard Item stays in
+history as it was. Only a Clipboard Item has it: a file is copied with Copy To….
+_Avoid_: export, download, save as (Save Image… and Save as File… are the save panel)
 
 **Path Subject**:
 A file or folder named by typing its path. A Query beginning `/` or `~` is a

@@ -252,6 +252,54 @@ struct FileOperationTests {
         #expect(try names(in: root).isEmpty)
     }
 
+    // MARK: - Save
+
+    @Test func saveWritesTextAsUTF8AndNumbersTheSecond() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let inbox = try folder("Inbox", in: root)
+        let text = "Grød med æbler ✓\nsecond line"
+
+        let first = try FileOperation.save(.text(text), into: inbox, named: "Grød med æbler ✓.txt").perform().get()
+        let second = try FileOperation.save(.text("other"), into: inbox, named: "Grød med æbler ✓.txt").perform().get()
+
+        #expect(first.lastPathComponent == "Grød med æbler ✓.txt")
+        #expect(second.lastPathComponent == "Grød med æbler ✓ 2.txt")
+        #expect(try Data(contentsOf: first) == Data(text.utf8))
+        #expect(try read(second) == "other", "the first is never overwritten")
+        #expect(try read(first) == text)
+    }
+
+    @Test func saveCopiesAStoredImageLeavesItAndKeepsBoth() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let stored = root.appendingPathComponent("History/Holiday 2026-11-07 at 14.03.27.png")
+        try FileManager.default.createDirectory(at: stored.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        try png.write(to: stored)
+        let pictures = try folder("Pictures", in: root)
+        let taken = try write("mine", to: pictures.appendingPathComponent("Holiday.png"))
+
+        let landed = try FileOperation.save(.copy(of: stored), into: pictures, named: "Holiday.png").perform().get()
+
+        #expect(landed.lastPathComponent == "Holiday 2.png")
+        #expect(try Data(contentsOf: landed) == png)
+        #expect(try read(taken) == "mine")
+        #expect(try Data(contentsOf: stored) == png, "the history keeps its own copy")
+    }
+
+    @Test func saveIntoAFolderThatIsGoneFailsAndSaysSo() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gone = root.appendingPathComponent("Gone", isDirectory: true)
+        let operation = FileOperation.save(.text("hello"), into: gone, named: "hello.txt")
+
+        #expect(operation.perform() == .failure(.failed))
+        #expect(operation.progressNote == "Saving…")
+        #expect(operation.failureNote(.failed) == "Couldn't save")
+        #expect(!FileManager.default.fileExists(atPath: gone.path))
+    }
+
     // MARK: - The runner
 
     @Test func theRunnerAnswersWithWhereTheFileLanded() async throws {

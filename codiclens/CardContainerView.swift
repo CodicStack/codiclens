@@ -75,19 +75,19 @@ struct CardContainerView: View {
             if isPreviewing { previewDriver.scroll(by: 1) } else { coordinator.moveDown() }
             return .handled
         }
-        .onKeyPress(.leftArrow) {
+        .onKeyPress(.leftArrow, phases: [.down, .repeat]) { press in
             if isPreviewing {
                 previewDriver.step(by: -1)
                 return .handled
             }
-            return coordinator.moveLeft() ? .handled : .ignored
+            return horizontalArrow(.left, press)
         }
-        .onKeyPress(.rightArrow) {
+        .onKeyPress(.rightArrow, phases: [.down, .repeat]) { press in
             if isPreviewing {
                 previewDriver.step(by: 1)
                 return .handled
             }
-            return coordinator.moveRight() ? .handled : .ignored
+            return horizontalArrow(.right, press)
         }
         .onKeyPress(.escape) {
             coordinator.handleEscape() ? .handled : .ignored
@@ -192,10 +192,10 @@ struct CardContainerView: View {
                 // Ctrl+H and Ctrl+L out of Emoji Mode and advanced the Subject
                 // sitting behind it from Subject to Action.
                 case "h":
-                    if !coordinator.moveLeft() { coordinator.retreatPhase() }
+                    coordinator.stepHorizontally(.left)
                     return .handled
                 case "l":
-                    if !coordinator.moveRight() { coordinator.advancePhase() }
+                    coordinator.stepHorizontally(.right)
                     return .handled
                 default:
                     break
@@ -203,6 +203,27 @@ struct CardContainerView: View {
             }
             return .ignored
         }
+    }
+
+    /// Left/Right with Control alone are Ctrl+H/L; bare, they move the Phase
+    /// only with nothing typed (`arrowHorizontally`). With Shift, Option or
+    /// Command they never move the Phase: the grid still takes them, and
+    /// anywhere else they are the field's selection and word or line jumps.
+    /// Only these four count, so Caps Lock, or the numeric-pad and function
+    /// flags an arrow key may carry, change nothing.
+    private func horizontalArrow(
+        _ direction: CommandCoordinator.HorizontalDirection, _ press: KeyPress
+    ) -> KeyPress.Result {
+        let modifiers = press.modifiers.intersection([.command, .option, .control, .shift])
+        if modifiers == .control {
+            coordinator.stepHorizontally(direction)
+            return .handled
+        }
+        if modifiers.isEmpty {
+            return coordinator.arrowHorizontally(direction) ? .handled : .ignored
+        }
+        let moved = direction == .left ? coordinator.moveLeft() : coordinator.moveRight()
+        return moved ? .handled : .ignored
     }
 
     /// The Cards for the Phases reached so far.

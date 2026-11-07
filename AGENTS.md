@@ -178,8 +178,8 @@ runs that one, after its `status` check. Either may start that Codictate hidden.
   keep their order with Quick Look third, after Paste and Copy; Finder's has it second.
   `FileActionCommandTests` pins all of it.
 - **An Action's result stands.** OCR, Transcribe, a transform on a text Subject, QR Code,
-  Move To…, Copy To…, Rename and Compress turn the Subject into a new one: OCR Text, the
-  transcript, the output, the new Clipboard Item, where the file landed. On success the
+  Move To…, Copy To…, Save To…, Rename and Compress turn the Subject into a new one: OCR
+  Text, the transcript, the output, the new Clipboard Item, where the file landed. On success the
   command is done and the Panel goes back to Subject search with that result standing
   exactly as the Last Subject stands when the Panel opens (`CommandCoordinator.standResult`:
   it *is* the Last Subject): one Card, the Query empty, the Slab away; Enter runs its
@@ -204,7 +204,16 @@ runs that one, after its `status` check. Either may start that Codictate hidden.
   and Copy To… list recent destinations (in memory), the folder Sources, then Desktop,
   Documents, Downloads and Home; typing filters those and adds the File Index's folders
   below them. None of these is offered on a Clipboard Item or an app: a Clipboard Image's
-  stored PNG is not the user's file. Copy File is `.copy(.fileURL)`, the file itself on the
+  stored PNG is not the user's file. **Save To…** is the Clipboard Item's version, image
+  and text alike (`.saveTo`, `FileOperation.save`): it writes a *new* file into a folder
+  picked from the same list, and the stored PNG is copied, never moved or handed over.
+  Same `.fileOperation` path, Keep Both naming, "Saving…" and "Couldn't save"; the saved
+  file stands as the Subject, its folder leads the recent destinations, and the Clipboard
+  Item stays where it was in history. An image is named for the file it was copied from
+  (its name without the history's copy time), else `Image <yyyy-MM-dd> at <HH.mm.ss>`,
+  with the stored file's extension; text is a UTF-8 `.txt` named as Share names one
+  (`SharePayloadItems.fileName`). Save Image… and Save as File… stay as the save panel.
+  Copy File is `.copy(.fileURL)`, the file itself on the
   pasteboard, Final and hiding like Copy; Paste File is `.paste(.fileURL)`, the same
   write followed by Cmd+V into the app the Panel was opened over, like Paste.
 - **Rename is the name in an editor on the Subject Card**, prefilled, the name without its
@@ -637,7 +646,7 @@ they never came from.
 OCR returns `[.ocr(url)]` and **no `.hide`** — the OCR Text lands *in* the Panel — and
 `EffectRunner` awaits Vision before answering through `onOCRText`. QR Code and Rotate
 also run behind the Effect seam and return no `.hide`; their work uses one serial queue
-so consecutive rotations reach disk in command order. Move To…, Copy To…, Rename and
+so consecutive rotations reach disk in command order. Move To…, Copy To…, Save To…, Rename and
 Compress return `[.fileOperation(...)]`, likewise without `.hide`, on a second serial
 queue. Transcribe returns `[.transcribe(url, generation:)]`, also without `.hide`; the
 runner runs `codictate` on a global queue, posts each progress to the main queue
@@ -660,7 +669,7 @@ Enter or a Final Action on anything but an app or a Built-in makes it `lastSubje
 (`remember(actedOn:)`): a Clipboard Item still in history, an Emoji, a file, a folder,
 text (⌘E, OCR Text, a transform's output, a transcript, a count copied). Acting on an
 app or a Built-in clears it; Move to Trash clears it. In memory only. Where an Action
-turns the Subject into another — Rename, Move To…, Copy To…, Compress, OCR,
+turns the Subject into another — Rename, Move To…, Copy To…, Save To…, Compress, OCR,
 Transcribe, a transform, QR Code — the Last Subject follows it there, and stands at
 once (`standResult`; see **An Action's result stands** under Rules). `reset()`
 stands it with the Query empty (`standingSubject`) after looking it up again: a
@@ -794,7 +803,17 @@ display-only. Routes to coordinator:
   Shift+Tab is the inverse of **Tab**, not of Ctrl+L: it is unconditional, so in
   Emoji Mode it leaves the grid rather than walking a cell left.
 - Up/Down → `moveUp()` / `moveDown()`
-- Left/Right → `moveLeft()` / `moveRight()`, which mean something only in a grid
+- Left/Right → `arrowHorizontally(_:)`: `moveLeft()` / `moveRight()` first (the Emoji
+  grid, one Skin Tone in the ⌥Enter picker); where that means nothing and the Query
+  (`currentSearchText`, this Phase's) is empty, `retreatPhase()` / `advancePhase()` as
+  Ctrl+H/L do; with a Query, `.ignored`, so the caret moves in the field. Ctrl+Left/Right
+  are exactly Ctrl+H/L (`stepHorizontally(_:)`), Query or not. Shift, Option and Command
+  arrows never move the Phase: the grid still takes them, and anywhere else they are the
+  field's selection and word or line jumps. An open editor (⌘E text, Rename) has its own
+  focus, so no arrow reaches the hidden field; `arrowHorizontally` refuses while one is
+  open all the same. **macOS binds Ctrl+←/→ to "Move left/right a space" by default**
+  (Keyboard Shortcuts → Mission Control), and the system takes them before the app does;
+  Ctrl+H/L always arrive
 - Escape → `handleEscape()`, which closes the Panel's own preview first
 - **While the Panel's own preview is open** (`coordinator.passagePreview`), the field
   sends Up/Down and Ctrl+J/K (a few lines), Left/Right (a PDF's page, a recording's 5 s)
@@ -829,10 +848,12 @@ display-only. Routes to coordinator:
   a non-empty Query into a text Subject; with an empty Query it edits only a text
   Subject already there, such as a standing Last Subject
 - Ctrl+J/K → `moveDown()` / `moveUp()`
-- Ctrl+H/L → `moveLeft()` / `moveRight()` **first**, and only `retreatPhase()` /
-  `advancePhase()` when the horizontal move meant nothing. Routing them straight to
-  the Phase took Ctrl+H and Ctrl+L out of Emoji Mode. Both spellings of a
-  Control-modified key are accepted, via `ControlKey.letter`.
+- Ctrl+H/L and Ctrl+Left/Right → `stepHorizontally(_:)`: `moveLeft()` / `moveRight()`
+  **first**, and only `retreatPhase()` / `advancePhase()` when the horizontal move meant
+  nothing. Routing them straight to the Phase took Ctrl+H and Ctrl+L out of Emoji Mode.
+  Both spellings of a Control-modified key are accepted, via `ControlKey.letter`. The
+  plain arrows are the same pair with nothing typed (see Left/Right above).
+  `HorizontalKeyTests` pins both.
 
 ### View Cards
 - **SubjectCardView** — shows app icon/name (a file's picture edge to edge once it lands,
@@ -1612,7 +1633,7 @@ User types query → Enter
 | `OCR.swift` | The whole of the app's Vision use: URL → OCR Text, for the OCR Action and for screenshots in the File Index |
 | `ImageActions.swift` | QR PNG generation and atomic, orientation-normalizing image rotation |
 | `EffectRunner.swift` | Executes system Effects; serializes image and file jobs and returns their answers |
-| `FileOperation.swift` | Move, copy, rename and compress on disk: Finder's `name 2.ext` numbering, never overwriting |
+| `FileOperation.swift` | Move, copy, save (a Clipboard Item as a new file), rename and compress on disk: Finder's `name 2.ext` numbering, never overwriting |
 | `Transcription.swift` | Finding Codictate's `codictate` client and checking its contract (`status --json`), running one cancellable `transcribe --json`, reading its NDJSON events |
 | `SubjectAction.swift` | Action model, text transforms, action handlers |
 | `FuzzyMatch.swift` | Fuzzy scoring (exact/prefix/substring/subsequence/levenshtein) |

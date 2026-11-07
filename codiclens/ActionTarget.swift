@@ -34,7 +34,7 @@ nonisolated struct ActionTarget: Identifiable {
         self.sharingService = sharingService
     }
 
-    /// A folder as a Move To… or Copy To… destination: Finder's name for it
+    /// A folder as a Move To…, Copy To… or Save To… destination: Finder's name for it
     /// ("Desktop", not "Desktop" spelled from the path, in any language) and
     /// where it is. From any thread; the File Index's folders are made off the
     /// main one.

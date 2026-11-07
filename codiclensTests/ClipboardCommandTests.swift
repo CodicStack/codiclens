@@ -304,6 +304,169 @@ struct ClipboardCommandTests {
         #expect(history.items.map(\.content) == ["hello"])
     }
 
+    // MARK: - Save To…
+
+    private struct SaveToFixture {
+        let root: URL
+        let folder: URL
+        let coordinator: CommandCoordinator
+        let history: ClipboardHistory
+    }
+
+    /// A coordinator whose only folder Source is a temporary `Saved` folder,
+    /// over a history `seed` fills.
+    private func makeSaveToFixture(_ seed: (ClipboardHistory) -> Void) throws -> SaveToFixture {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codiclens-save-to-\(UUID().uuidString)", isDirectory: true)
+        let folder = root.appendingPathComponent("Saved", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        let defaults = ThrowawayDefaults()
+        defaults.set([String](), forKey: "codiclens.sources.folders")
+        let sources = SourceStore(defaults: defaults)
+        sources.addFolder(folder)
+
+        let history = ClipboardHistory(store: InMemoryClipboardStore())
+        seed(history)
+        let coordinator = CommandCoordinator.isolated(history: history, sources: sources)
+        return SaveToFixture(root: root, folder: folder.standardizedFileURL, coordinator: coordinator, history: history)
+    }
+
+    /// From the browser's selected row to Save To…'s folder list, `folder`
+    /// selected.
+    private func pickSaveTo(_ folder: URL, in coordinator: CommandCoordinator) throws {
+        coordinator.advancePhase()
+        try selectAction("Save To…", in: coordinator)
+        coordinator.advancePhase()
+        #expect(coordinator.phase == .pickingTarget)
+        coordinator.targetVM.selectedIndex = try #require(
+            coordinator.targetVM.filteredTargets.firstIndex { $0.url?.standardizedFileURL == folder },
+            "no Target at \(folder.path)"
+        )
+    }
+
+    @Test func saveToListsTheFoldersCopyToDoes() throws {
+        let fixture = try makeSaveToFixture { $0.recordText("hello") }
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let coordinator = fixture.coordinator
+        browse(coordinator)
+        coordinator.advancePhase()
+        try selectAction("Save To…", in: coordinator)
+        coordinator.advancePhase()
+
+        let listed = coordinator.targetVM.filteredTargets.compactMap { $0.url?.standardizedFileURL.path }
+        #expect(listed == coordinator.destinationFolders().map(\.standardizedFileURL.path))
+        #expect(listed.contains(fixture.folder.path))
+    }
+
+    @Test func savingTextToAFolderWritesATxtNamedFromItsFirstLine() throws {
+        let text = "\n  Shopping   list\nmilk"
+        let fixture = try makeSaveToFixture { $0.recordText(text) }
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let coordinator = fixture.coordinator
+        browse(coordinator)
+        try pickSaveTo(fixture.folder, in: coordinator)
+
+        let effects = coordinator.submit()
+        guard case .fileOperation(_, let generation) = try #require(effects.first) else {
+            Issue.record("expected a file operation, got \(effects)")
+            return
+        }
+        #expect(effects == [.fileOperation(
+            .save(.text(text), into: fixture.folder, named: "Shopping list.txt"),
+            generation: generation
+        )], "no .hide: the saved file stands in the Panel")
+        #expect(coordinator.isFileOperationInFlight)
+        #expect(coordinator.fileOperationNote == "Saving…")
+    }
+
+    @Test func savingAnImageCopiesItsStoredFileUnderTheOriginalsName() throws {
+        let png = Data([0x89, 0x50, 0x4E, 0x47])
+        let fixture = try makeSaveToFixture {
+            $0.recordImage(png, originalURL: URL(fileURLWithPath: "/Users/someone/Pictures/Holiday.jpeg"))
+        }
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let coordinator = fixture.coordinator
+        let item = try #require(fixture.history.items.first)
+        let stored = try #require(fixture.history.imageURL(for: item))
+        browse(coordinator)
+        try pickSaveTo(fixture.folder, in: coordinator)
+
+        let effects = coordinator.submit()
+        guard case .fileOperation(_, let generation) = try #require(effects.first) else {
+            Issue.record("expected a file operation, got \(effects)")
+            return
+        }
+        #expect(effects == [.fileOperation(
+            .save(.copy(of: stored), into: fixture.folder, named: "Holiday.png"),
+            generation: generation
+        )])
+    }
+
+    @Test func anImageCopiedWithoutAFileIsNamedForWhenItWasCopied() throws {
+        let copied = try #require(Calendar.current.date(from: DateComponents(
+            year: 2026, month: 11, day: 7, hour: 14, minute: 3, second: 27
+        )))
+        let screenshot = ClipboardItem(imageFileName: "Screenshot.png", timestamp: copied)
+        let finderCopy = ClipboardItem(imageFileName: "Scan 2026-11-07 at 14.03.27.tiff", originalFilePath: "/tmp/Scan.tiff")
+
+        #expect(CommandCoordinator.saveToFileName(for: screenshot) == "Image 2026-11-07 at 14.03.27.png")
+        #expect(CommandCoordinator.saveToFileName(for: finderCopy) == "Scan.tiff", "the stored file's own format")
+        #expect(CommandCoordinator.saveToFileName(for: ClipboardItem(content: "  ")) == "Text.txt")
+    }
+
+    /// The saved file stands as Copy To…'s copy does, and the Clipboard Item
+    /// stays where it was in history.
+    @Test func theSavedFileStandsAndTheItemStaysPut() throws {
+        let fixture = try makeSaveToFixture {
+            $0.recordText("older note")
+            $0.recordText("newest")
+        }
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let coordinator = fixture.coordinator
+        let before = fixture.history.items.map(\.id)
+        browse(coordinator)
+        coordinator.clipboardVM.selectedIndex = 1   // "older note"
+        try pickSaveTo(fixture.folder, in: coordinator)
+        let effects = coordinator.submit()
+        guard case .fileOperation(let operation, let generation) = try #require(effects.first) else {
+            Issue.record("expected a file operation, got \(effects)")
+            return
+        }
+
+        let landed = try operation.perform().get()
+        coordinator.receiveFileOperation(.success(landed), generation: generation)
+
+        #expect(try String(contentsOf: landed, encoding: .utf8) == "older note")
+        #expect(!coordinator.isFileOperationInFlight)
+        #expect(coordinator.phase == .searchingSubject)
+        #expect(coordinator.standingSubject?.url?.standardizedFileURL == landed.standardizedFileURL)
+        #expect(coordinator.standingSubject?.clipboardItem == nil, "the file, not the Clipboard Item")
+        #expect(fixture.history.items.map(\.id) == before, "not moved to the top")
+        #expect(coordinator.destinationFolders().first?.standardizedFileURL == fixture.folder)
+
+        coordinator.advancePhase()
+        #expect(coordinator.actionVM.filteredActions.first?.name == "Open", "a file's Actions")
+    }
+
+    @Test func aFailedSaveStaysOnTheFolderListAndSaysSo() throws {
+        let fixture = try makeSaveToFixture { $0.recordText("hello") }
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let coordinator = fixture.coordinator
+        browse(coordinator)
+        try pickSaveTo(fixture.folder, in: coordinator)
+        guard case .fileOperation(_, let generation) = try #require(coordinator.submit().first) else {
+            Issue.record("expected a file operation")
+            return
+        }
+
+        coordinator.receiveFileOperation(.failure(.failed), generation: generation)
+
+        #expect(coordinator.fileOperationNote == "Couldn't save")
+        #expect(coordinator.phase == .pickingTarget)
+        #expect(coordinator.selectedSubject?.clipboardItem?.content == "hello")
+    }
+
     // MARK: - Retreating
 
     @Test func retreatingFromAClipboardActionReturnsToTheBrowser() {

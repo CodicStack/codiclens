@@ -1,7 +1,7 @@
 import Foundation
 
 /// One change to a file or folder on disk, asked for by an Action and performed
-/// by `EffectRunner`: Move To, Copy To, Rename and Compress.
+/// by `EffectRunner`: Move To, Copy To, Save To, Rename and Compress.
 ///
 /// The coordinator builds one of these and returns it inside an Effect; it never
 /// calls `perform()` itself. Moving a file is the same kind of thing as rotating
@@ -10,7 +10,7 @@ import Foundation
 ///
 /// **Nothing here overwrites.** A Move or Copy into a folder that already holds
 /// the name lands beside it as Finder's "Keep Both" does, as `name 2.ext`; so
-/// does a zip. A Rename onto a name that is taken is refused instead, because
+/// do a zip and a saved Clipboard Item. A Rename onto a name that is taken is refused instead, because
 /// the user typed that name and a different one would not be what they asked
 /// for.
 nonisolated enum FileOperation: Equatable, Sendable {
@@ -19,6 +19,18 @@ nonisolated enum FileOperation: Equatable, Sendable {
     case rename(URL, to: String)
     /// Zip beside the original, named `<name>.zip` as Finder's Compress names it.
     case compress(URL)
+    /// Save To…: a Clipboard Item written into a folder as a new file called
+    /// `name`. The history keeps its own copy; nothing of it is moved or
+    /// handed over.
+    case save(Saved, into: URL, named: String)
+
+    /// What Save To… writes.
+    enum Saved: Equatable, Sendable {
+        /// A Clipboard Image: its stored file, copied. The stored one stays.
+        case copy(of: URL)
+        /// A Clipboard text, as UTF-8.
+        case text(String)
+    }
 
     enum Failure: Error, Equatable, Sendable {
         /// Rename only: something else already has that name.
@@ -28,16 +40,9 @@ nonisolated enum FileOperation: Equatable, Sendable {
         case failed
     }
 
-    /// The file or folder the operation is about.
-    var source: URL {
-        switch self {
-        case .move(let url, _), .copy(let url, _), .rename(let url, _), .compress(let url): url
-        }
-    }
-
     /// Does it, and answers with where the result now is: the moved file, the
-    /// copy, the renamed file, the zip. Blocking; the runner calls it off the
-    /// main thread.
+    /// copy, the renamed file, the zip, the saved file. Blocking; the runner
+    /// calls it off the main thread.
     func perform() -> Result<URL, Failure> {
         switch self {
         case .move(let url, let folder):
@@ -54,6 +59,16 @@ nonisolated enum FileOperation: Equatable, Sendable {
             return Self.rename(url, to: name)
         case .compress(let url):
             return Self.compress(url)
+        case .save(.copy(let stored), let folder, let name):
+            return Self.place(named: name, keepsExtension: true, in: folder) {
+                try FileManager.default.copyItem(at: stored, to: $0)
+            }
+        case .save(.text(let text), let folder, let name):
+            // `.withoutOverwriting` is an exclusive create: a taken name fails
+            // with "file exists", as a copy onto one does.
+            return Self.place(named: name, keepsExtension: true, in: folder) {
+                try Data(text.utf8).write(to: $0, options: .withoutOverwriting)
+            }
         }
     }
 
@@ -66,6 +81,7 @@ nonisolated enum FileOperation: Equatable, Sendable {
         case .copy: "Copying…"
         case .rename: "Renaming…"
         case .compress: "Compressing…"
+        case .save: "Saving…"
         }
     }
 
@@ -82,6 +98,7 @@ nonisolated enum FileOperation: Equatable, Sendable {
         case .copy: "Couldn't copy"
         case .rename: "Couldn't rename"
         case .compress: "Couldn't compress"
+        case .save: "Couldn't save"
         }
     }
 
@@ -142,8 +159,18 @@ nonisolated enum FileOperation: Equatable, Sendable {
         named name: String? = nil,
         _ put: (URL) throws -> Void
     ) -> Result<URL, Failure> {
-        let name = name ?? url.lastPathComponent
-        for candidate in candidates(for: name, keepsExtension: !isPlainFolder(url)) {
+        place(named: name ?? url.lastPathComponent, keepsExtension: !isPlainFolder(url), in: folder, put)
+    }
+
+    /// `place` for something that is not yet a file of its own: the name is
+    /// all there is to number.
+    private static func place(
+        named name: String,
+        keepsExtension: Bool,
+        in folder: URL,
+        _ put: (URL) throws -> Void
+    ) -> Result<URL, Failure> {
+        for candidate in candidates(for: name, keepsExtension: keepsExtension) {
             let destination = folder.appendingPathComponent(candidate)
             do {
                 try put(destination)
