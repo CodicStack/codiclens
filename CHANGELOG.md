@@ -4,6 +4,8 @@ What changed in each release of Codiclens. Notes for the next release go under U
 
 ## Unreleased
 
+## 1.0.4 (2026-11-08)
+
 - Left and Right now work exactly like Shift+Tab and Tab (or Ctrl+H and Ctrl+L), even after you've typed something. In the emoji grid they still move one emoji, and in a preview they still turn the page.
 - Ctrl+Left and Ctrl+Right work in the panel even when macOS uses them to switch Spaces. Codiclens borrows them only while the panel is open and gives them straight back when it closes.
 
