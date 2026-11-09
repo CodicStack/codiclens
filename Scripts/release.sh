@@ -550,6 +550,21 @@ do_release_publish() {
   gh release edit "v$VERSION" --repo "$REPO" --draft=false --latest > /dev/null
 }
 
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+
+# Once published, the DMG is the release's copy of the app. The archive's app, the export and the build product each
+# stay registered with Launch Services, so every release left three more Codiclens in Spotlight and Open With. They go,
+# unregistered first; the dSYMs, the DMG, the appcast, the notes and the logs stay.
+do_tidy() {
+  local app
+  for app in "$(archive_path)/Products/Applications/"*.app "$DIR/export/"*.app \
+    "$DERIVED/Build/Intermediates.noindex/ArchiveIntermediates/codiclens/BuildProductsPath/Release/codiclens.app"; do
+    [[ -d $app ]] || continue
+    "$LSREGISTER" -u "$app" 2> /dev/null || true
+    rm -rf "$app"
+  done
+}
+
 # MARK: - Main
 
 usage() { sed -n '2,7p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
@@ -609,6 +624,7 @@ main() {
   step release-draft "Draft the GitHub release" do_release_draft
   step release-upload "Upload the DMG and appcast.xml" do_release_upload
   step release-publish "Publish the release" do_release_publish
+  step tidy "Remove the build's app copies (the DMG stays)" do_tidy
   STARTED=0
   say "Released v$VERSION: https://github.com/$REPO/releases/tag/v$VERSION"
 }

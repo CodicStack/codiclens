@@ -9,6 +9,12 @@ Scripts/build-llama.sh   # once, and again whenever its TAG or the patch changes
 xcodebuild -project codiclens.xcodeproj -scheme codiclens -configuration Debug build
 ```
 
+**Delete your Debug build when you're done with it.** Every `codiclens.app` left on disk
+registers with Launch Services and shows up in Spotlight and Open With beside the installed
+one. Once the change is verified, unregister the app and remove your `-derivedDataPath`
+folder:
+`/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u <dd>/Build/Products/Debug/codiclens.app && rm -rf <dd>`.
+
 **`Scripts/build-llama.sh` has to have run before the first build.** It fetches
 llama.cpp at a pinned release (`TAG` and `COMMIT` in the script; needs `cmake` on
 `PATH`), applies `Scripts/llama.cpp-no-logits.patch`, and installs static arm64

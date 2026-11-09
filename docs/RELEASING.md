@@ -115,6 +115,7 @@ Everything goes into `build/release/vX.Y.Z/`, with logs in `logs/`:
 8. Writes the appcast: the previous release's `appcast.xml` plus the new item, no deltas, notes embedded, signed. The new item's full release notes link is `https://codiclens.codicstack.com/releases#vX.Y.Z`.
 9. Commits "Release vX.Y.Z" (the project's version and the changelog), tags `vX.Y.Z` and pushes both.
 10. Creates the GitHub release as a draft, uploads the DMG and `appcast.xml`, then publishes it. The latest release, and so the site's feed, only moves once both files are there.
+11. Removes the build's app copies (the archive's, the export's and the build product) so they stop showing up in Spotlight and Open With. The DMG, the dSYMs, the appcast, the notes and the logs stay.
 
 A dry run stops after step 8. A failure before step 9 leaves no commit, no tag and nothing public.
 
