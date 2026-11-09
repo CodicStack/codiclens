@@ -4,7 +4,7 @@ What changed in each release of Codiclens. Notes for the next release go under U
 
 ## Unreleased
 
-- You can choose how many items the clipboard history keeps, from 25 to 1,000, in Settings > General. Lowering it removes the oldest items.
+- You can choose how many items the clipboard history keeps, from 25 to 1,000 or Unlimited, in Settings > General. Lowering it removes the oldest items. Unlimited keeps everything until you remove it, and Settings shows how much space the history takes.
 
 ## 1.0.4 (2026-11-08)
 

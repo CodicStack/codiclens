@@ -890,8 +890,11 @@ space the Panel reserved and the Slab did not use has to dismiss on a click.
 
 ### ClipboardHistory / PasteboardWatcher — clipboard capture
 Polls `NSPasteboard.general` every 0.5s. Stores up to `maxItems` (the user's choice in
-Settings → General, 25 to 1,000, 100 by default, `codiclens.clipboard.maxItems`) as JSON in
-Application Support. Lowering it drops the oldest at once, after a confirmation when any go. Images saved as PNG files in `codiclens/images/`. Text previews for Quick Look
+Settings → General, 25 to 1,000 or Unlimited, 100 by default; `nil` in memory, saved as `0`
+under `codiclens.clipboard.maxItems`, and a missing or unusable value is 100) as JSON in
+Application Support. Lowering it drops the oldest at once, after a confirmation when any go.
+Unlimited shows a warning with what the history takes on disk (`ClipboardStore.diskUsage()`:
+the JSON, `images/` and `previews/`), measured when the row appears and when the items change. Images saved as PNG files in `codiclens/images/`. Text previews for Quick Look
 in `codiclens/previews/`, and Quick Look's text copies of files in `previews/files/`.
 The pasteboard is only ever read on the main thread; the PNG re-encode goes through
 `ImageReencoder`, off-main in the app and inline in tests.

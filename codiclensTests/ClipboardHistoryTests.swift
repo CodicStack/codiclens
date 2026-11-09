@@ -8,7 +8,7 @@ import Testing
 /// wrote to the real Application Support directory.
 struct ClipboardHistoryTests {
 
-    private func makeHistory(maxItems: Int = 100) -> (ClipboardHistory, InMemoryClipboardStore) {
+    private func makeHistory(maxItems: Int? = 100) -> (ClipboardHistory, InMemoryClipboardStore) {
         let store = InMemoryClipboardStore()
         return (ClipboardHistory(store: store, maxItems: maxItems), store)
     }
@@ -108,7 +108,7 @@ struct ClipboardHistoryTests {
     }
 
     @Test func aLimitBelowOneIsIgnored() {
-        var saved: [Int] = []
+        var saved: [Int?] = []
         let history = ClipboardHistory(
             store: InMemoryClipboardStore(),
             maxItems: 3,
@@ -137,7 +137,7 @@ struct ClipboardHistoryTests {
     }
 
     @Test func anUnusableSavedLimitFallsBackToTheDefault() {
-        for unusable: Any in [0, -5, "lots"] {
+        for unusable: Any in [-5, "lots"] {
             let defaults = ThrowawayDefaults()
             defaults.set(unusable, forKey: ClipboardHistory.maxItemsKey)
 
@@ -145,6 +145,98 @@ struct ClipboardHistoryTests {
 
             #expect(history.maxItems == 100)
         }
+    }
+
+    // MARK: - Unlimited
+
+    @Test func unlimitedKeepsEverything() {
+        let (history, store) = makeHistory(maxItems: nil)
+
+        for i in 1...1_200 {
+            history.recordText("item \(i)")
+        }
+
+        #expect(history.maxItems == nil)
+        #expect(history.items.count == 1_200)
+        #expect(history.items.first?.content == "item 1200")
+        #expect(history.items.last?.content == "item 1")
+        #expect(store.items.count == 1_200)
+    }
+
+    @Test func unlimitedIsSavedAsZeroAndReadBack() {
+        let defaults = ThrowawayDefaults()
+        let store = InMemoryClipboardStore()
+        let first = ClipboardHistory(store: store, defaults: defaults)
+
+        first.maxItems = nil
+
+        #expect(defaults.object(forKey: ClipboardHistory.maxItemsKey) as? Int == 0)
+        let second = ClipboardHistory(store: store, defaults: defaults)
+        #expect(second.maxItems == nil)
+    }
+
+    @Test func goingFromUnlimitedToANumberTrimsAtOnce() {
+        let (history, store) = makeHistory(maxItems: nil)
+        history.recordImage(Data([0x01]), timestamp: Date(timeIntervalSince1970: 0))
+        for i in 1...30 {
+            history.recordText("item \(i)")
+        }
+        #expect(store.images.count == 1)
+
+        history.maxItems = 25
+
+        #expect(history.maxItems == 25)
+        #expect(history.items.count == 25)
+        #expect(history.items.first?.content == "item 30")
+        #expect(history.items.last?.content == "item 6")
+        #expect(store.images.isEmpty, "the dropped image's file goes too")
+        #expect(store.items.count == 25, "the trimmed history is saved")
+    }
+
+    @Test func diskUsageCountsTheItemsAndTheirImages() {
+        let (history, store) = makeHistory()
+        #expect(history.diskUsage() == store.diskUsage())
+        let empty = history.diskUsage()
+
+        history.recordText("hello")
+        let withText = history.diskUsage()
+        history.recordImage(Data(repeating: 0xAB, count: 4_096))
+
+        #expect(withText > empty)
+        #expect(history.diskUsage() >= withText + 4_096)
+    }
+
+    /// The app's store, in a temp folder: what it reports is what is on disk.
+    @Test func fileStoreDiskUsageCountsTheJSONAndTheImages() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codiclens-diskusage-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FileClipboardStore(root: root)
+        let history = ClipboardHistory(store: store, maxItems: nil)
+        #expect(history.diskUsage() == 0, "nothing written yet")
+
+        history.recordText("hello")
+        let json = root.appendingPathComponent("clipboard_history.json")
+        let jsonSize = try #require(
+            try FileManager.default.attributesOfItem(atPath: json.path)[.size] as? Int64
+        )
+        #expect(jsonSize > 0)
+        let withText = history.diskUsage()
+        #expect(withText >= jsonSize)
+
+        history.recordImage(Data(repeating: 0xAB, count: 50_000))
+        let imageName = try #require(history.items.first?.imageFileName)
+        let imageSize = try #require(
+            try FileManager.default.attributesOfItem(
+                atPath: store.imageURL(named: imageName).path
+            )[.size] as? Int64
+        )
+        #expect(imageSize == 50_000)
+        #expect(history.diskUsage() >= withText + imageSize)
+
+        history.maxItems = 1
+        history.recordText("bye")
+        #expect(history.diskUsage() < withText + imageSize, "a removed image stops counting")
     }
 
     // MARK: - Images

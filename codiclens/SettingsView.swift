@@ -25,6 +25,8 @@ private struct GeneralSettingsView: View {
     @State private var isShowingAcknowledgements = false
     /// A smaller limit waiting for the user to agree to lose the oldest items.
     @State private var pendingMaxItems: Int?
+    /// What the Clipboard History takes on disk, shown beside Unlimited.
+    @State private var clipboardDiskUsage: Int64?
 
     var body: some View {
         Form {
@@ -160,14 +162,15 @@ private struct GeneralSettingsView: View {
     // MARK: - Clipboard History
 
     /// Lowering the limit below what the history holds asks first: the
-    /// oldest Clipboard Items go at once and cannot come back.
+    /// oldest Clipboard Items go at once and cannot come back. Unlimited never
+    /// asks, and warns what it costs instead.
     private var clipboardHistorySection: some View {
         let history = ClipboardHistory.shared
         return Section {
             Picker("Keep", selection: Binding(
                 get: { history.maxItems },
                 set: { newValue in
-                    if newValue < history.items.count {
+                    if let newValue, newValue < history.items.count {
                         pendingMaxItems = newValue
                     } else {
                         history.maxItems = newValue
@@ -175,8 +178,9 @@ private struct GeneralSettingsView: View {
                 }
             )) {
                 ForEach(ClipboardHistory.maxItemsChoices, id: \.self) { choice in
-                    Text("\(choice.formatted()) items").tag(choice)
+                    Text("\(choice.formatted()) items").tag(Int?.some(choice))
                 }
+                Text("Unlimited").tag(Int?.none)
             }
             .confirmationDialog(
                 removalTitle,
@@ -192,6 +196,10 @@ private struct GeneralSettingsView: View {
             } message: {
                 Text("They can't be brought back.")
             }
+
+            if history.maxItems == nil {
+                unlimitedWarning(history)
+            }
         } header: {
             Text("Clipboard History")
         } footer: {
@@ -199,6 +207,33 @@ private struct GeneralSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// Measured when the row appears and again whenever the history changes,
+    /// never on a redraw alone: it reads the disk.
+    private func unlimitedWarning(_ history: ClipboardHistory) -> some View {
+        Label {
+            Text(unlimitedWarningText)
+        } icon: {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+        }
+        .task(id: HistoryVersion(count: history.items.count, newest: history.items.first?.id)) {
+            clipboardDiskUsage = history.diskUsage()
+        }
+    }
+
+    private var unlimitedWarningText: String {
+        let warning = "Everything you copy stays on this Mac until you remove it, images too."
+        guard let clipboardDiskUsage else { return warning }
+        let size = ByteCountFormatter.string(fromByteCount: clipboardDiskUsage, countStyle: .file)
+        return "\(warning) The history now takes \(size)."
+    }
+
+    /// What changes when a Clipboard Item is added or removed.
+    private struct HistoryVersion: Equatable {
+        let count: Int
+        let newest: UUID?
     }
 
     private var removalTitle: String {

@@ -3,10 +3,11 @@ import AppKit
 /// The Clipboard History and the rules that govern it: what counts as a new
 /// Clipboard Item, what gets deduplicated, and how many are kept.
 ///
-/// How many is the user's choice (`maxItemsChoices`, in Settings > General).
-/// Lowering it drops the oldest Clipboard Items at once, their image files
-/// with them; raising it keeps everything. The choice is saved through
-/// `saveMaxItems`, which `shared` points at `UserDefaults.standard`.
+/// How many is the user's choice (`maxItemsChoices`, or no limit at all, in
+/// Settings > General). Lowering it drops the oldest Clipboard Items at once,
+/// their image files with them; raising it keeps everything. The choice is
+/// saved through `saveMaxItems`, which `shared` points at
+/// `UserDefaults.standard`.
 ///
 /// Knows nothing about the pasteboard — `PasteboardWatcher` decodes that and
 /// records what it finds here. Knows nothing about disk either; that's the
@@ -17,20 +18,23 @@ final class ClipboardHistory {
 
     static let maxItemsChoices = [25, 50, 100, 250, 500, 1000]
     static let defaultMaxItems = 100
+    /// Holds the chosen limit as an `Int`; `0` means no limit.
     static let maxItemsKey = "codiclens.clipboard.maxItems"
 
     private(set) var items: [ClipboardItem] = []
 
     private let store: ClipboardStore
-    private let saveMaxItems: (Int) -> Void
-    private var keptCount: Int
+    private let saveMaxItems: (Int?) -> Void
+    private var keptCount: Int?
 
-    /// How many Clipboard Items are kept. Setting a new value saves it, then
-    /// drops whatever no longer fits. Values below 1 are ignored.
-    var maxItems: Int {
+    /// How many Clipboard Items are kept; `nil` keeps every one. Setting a
+    /// new value saves it, then drops whatever no longer fits. Values below 1
+    /// are ignored.
+    var maxItems: Int? {
         get { keptCount }
         set {
-            guard newValue >= 1, newValue != keptCount else { return }
+            if let newValue, newValue < 1 { return }
+            guard newValue != keptCount else { return }
             keptCount = newValue
             saveMaxItems(newValue)
             trimAndSave()
@@ -41,8 +45,8 @@ final class ClipboardHistory {
     ///   default, so a test that only wants a smaller history touches nothing.
     init(
         store: ClipboardStore,
-        maxItems: Int = ClipboardHistory.defaultMaxItems,
-        saveMaxItems: @escaping (Int) -> Void = { _ in }
+        maxItems: Int? = ClipboardHistory.defaultMaxItems,
+        saveMaxItems: @escaping (Int?) -> Void = { _ in }
     ) {
         self.store = store
         self.keptCount = maxItems
@@ -50,16 +54,27 @@ final class ClipboardHistory {
         self.items = store.loadItems()
     }
 
-    /// A history whose `maxItems` is read from and saved to `defaults`. A
-    /// missing or unusable value means `defaultMaxItems`. Tests pass
-    /// `ThrowawayDefaults`.
+    /// A history whose `maxItems` is read from and saved to `defaults`, where
+    /// `0` stands for no limit. A missing or unusable value means
+    /// `defaultMaxItems`. Tests pass `ThrowawayDefaults`.
     convenience init(store: ClipboardStore, defaults: UserDefaults) {
-        let stored = defaults.object(forKey: Self.maxItemsKey) as? Int
+        let maxItems: Int?
+        switch defaults.object(forKey: Self.maxItemsKey) as? Int {
+        case 0?: maxItems = nil
+        case let stored? where stored >= 1: maxItems = stored
+        default: maxItems = Self.defaultMaxItems
+        }
         self.init(
             store: store,
-            maxItems: stored.flatMap { $0 >= 1 ? $0 : nil } ?? Self.defaultMaxItems,
-            saveMaxItems: { defaults.set($0, forKey: Self.maxItemsKey) }
+            maxItems: maxItems,
+            saveMaxItems: { defaults.set($0 ?? 0, forKey: Self.maxItemsKey) }
         )
+    }
+
+    /// How many bytes the history takes on disk, images included. Reads the
+    /// disk, so ask when it may have changed, not on every redraw.
+    func diskUsage() -> Int64 {
+        store.diskUsage()
     }
 
     // MARK: - Recording
@@ -198,7 +213,7 @@ final class ClipboardHistory {
     // MARK: - Persistence
 
     private func trimAndSave() {
-        if items.count > keptCount {
+        if let keptCount, items.count > keptCount {
             for item in items.suffix(from: keptCount) {
                 if let fileName = item.imageFileName {
                     store.removeImage(named: fileName)
