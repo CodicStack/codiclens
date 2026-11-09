@@ -23,6 +23,8 @@ private struct GeneralSettingsView: View {
     @AppStorage("appTheme") private var selectedTheme: String = AppTheme.system.rawValue
     @AppStorage(Motion.animationsEnabledKey) private var animationsEnabled: Bool = true
     @State private var isShowingAcknowledgements = false
+    /// A smaller limit waiting for the user to agree to lose the oldest items.
+    @State private var pendingMaxItems: Int?
 
     var body: some View {
         Form {
@@ -62,6 +64,8 @@ private struct GeneralSettingsView: View {
             } header: {
                 Text("Emoji")
             }
+
+            clipboardHistorySection
 
             Section {
                 LabeledContent("App index") {
@@ -151,6 +155,58 @@ private struct GeneralSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    // MARK: - Clipboard History
+
+    /// Lowering the limit below what the history holds asks first: the
+    /// oldest Clipboard Items go at once and cannot come back.
+    private var clipboardHistorySection: some View {
+        let history = ClipboardHistory.shared
+        return Section {
+            Picker("Keep", selection: Binding(
+                get: { history.maxItems },
+                set: { newValue in
+                    if newValue < history.items.count {
+                        pendingMaxItems = newValue
+                    } else {
+                        history.maxItems = newValue
+                    }
+                }
+            )) {
+                ForEach(ClipboardHistory.maxItemsChoices, id: \.self) { choice in
+                    Text("\(choice.formatted()) items").tag(choice)
+                }
+            }
+            .confirmationDialog(
+                removalTitle,
+                isPresented: Binding(
+                    get: { pendingMaxItems != nil },
+                    set: { if !$0 { pendingMaxItems = nil } }
+                )
+            ) {
+                Button("Remove", role: .destructive) {
+                    if let pendingMaxItems { history.maxItems = pendingMaxItems }
+                    pendingMaxItems = nil
+                }
+            } message: {
+                Text("They can't be brought back.")
+            }
+        } header: {
+            Text("Clipboard History")
+        } footer: {
+            Text("Text and images each count as one item. When the history is full, the oldest item makes room for the newest.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var removalTitle: String {
+        guard let pendingMaxItems else { return "" }
+        let count = ClipboardHistory.shared.items.count - pendingMaxItems
+        return count == 1
+            ? "Remove the oldest clipboard item?"
+            : "Remove the \(count.formatted()) oldest clipboard items?"
     }
 
     // MARK: - Skin tone

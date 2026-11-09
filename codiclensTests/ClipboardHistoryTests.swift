@@ -74,6 +74,79 @@ struct ClipboardHistoryTests {
         #expect(store.images.isEmpty, "the dropped image's file goes too")
     }
 
+    // MARK: - Choosing the limit
+
+    @Test func loweringTheLimitKeepsTheNewestAtOnce() {
+        let (history, store) = makeHistory(maxItems: 5)
+        history.recordImage(Data([0x01]), timestamp: Date(timeIntervalSince1970: 0))
+        history.recordImage(Data([0x02]), timestamp: Date(timeIntervalSince1970: 1))
+        history.recordText("c")
+        history.recordText("d")
+        history.recordText("e")
+        #expect(store.images.count == 2)
+
+        history.maxItems = 3
+
+        #expect(history.maxItems == 3)
+        #expect(history.items.map(\.content) == ["e", "d", "c"])
+        #expect(store.images.isEmpty, "the dropped images' files go too")
+        #expect(store.items.map(\.content) == ["e", "d", "c"], "the trimmed history is saved")
+    }
+
+    @Test func raisingTheLimitKeepsEverything() {
+        let (history, _) = makeHistory(maxItems: 3)
+        for i in 1...3 {
+            history.recordText("item \(i)")
+        }
+
+        history.maxItems = 25
+        for i in 4...6 {
+            history.recordText("item \(i)")
+        }
+
+        #expect(history.items.count == 6)
+    }
+
+    @Test func aLimitBelowOneIsIgnored() {
+        var saved: [Int] = []
+        let history = ClipboardHistory(
+            store: InMemoryClipboardStore(),
+            maxItems: 3,
+            saveMaxItems: { saved.append($0) }
+        )
+        history.recordText("kept")
+
+        history.maxItems = 0
+
+        #expect(history.maxItems == 3)
+        #expect(history.items.map(\.content) == ["kept"])
+        #expect(saved.isEmpty)
+    }
+
+    @Test func theChosenLimitIsSavedAndReadBack() {
+        let defaults = ThrowawayDefaults()
+        let store = InMemoryClipboardStore()
+        let first = ClipboardHistory(store: store, defaults: defaults)
+        #expect(first.maxItems == ClipboardHistory.defaultMaxItems)
+
+        first.maxItems = 250
+
+        #expect(defaults.object(forKey: ClipboardHistory.maxItemsKey) as? Int == 250)
+        let second = ClipboardHistory(store: store, defaults: defaults)
+        #expect(second.maxItems == 250)
+    }
+
+    @Test func anUnusableSavedLimitFallsBackToTheDefault() {
+        for unusable: Any in [0, -5, "lots"] {
+            let defaults = ThrowawayDefaults()
+            defaults.set(unusable, forKey: ClipboardHistory.maxItemsKey)
+
+            let history = ClipboardHistory(store: InMemoryClipboardStore(), defaults: defaults)
+
+            #expect(history.maxItems == 100)
+        }
+    }
+
     // MARK: - Images
 
     @Test func recordingAnImageStoresItsData() {

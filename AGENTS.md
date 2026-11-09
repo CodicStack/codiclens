@@ -889,8 +889,9 @@ shrinking is the same `Motion.resize`, applied to the Results area's own frame w
 space the Panel reserved and the Slab did not use has to dismiss on a click.
 
 ### ClipboardHistory / PasteboardWatcher — clipboard capture
-Polls `NSPasteboard.general` every 0.5s. Stores up to 100 items as JSON in Application
-Support. Images saved as PNG files in `codiclens/images/`. Text previews for Quick Look
+Polls `NSPasteboard.general` every 0.5s. Stores up to `maxItems` (the user's choice in
+Settings → General, 25 to 1,000, 100 by default, `codiclens.clipboard.maxItems`) as JSON in
+Application Support. Lowering it drops the oldest at once, after a confirmation when any go. Images saved as PNG files in `codiclens/images/`. Text previews for Quick Look
 in `codiclens/previews/`, and Quick Look's text copies of files in `previews/files/`.
 The pasteboard is only ever read on the main thread; the PNG re-encode goes through
 `ImageReencoder`, off-main in the app and inline in tests.
@@ -977,7 +978,7 @@ from the start". Open on its Actions is the same. A PDF at a page opens normally
 has no reliable page API.
 
 ### Settings — General and Sources
-`SettingsView` is two tabs. **General** is appearance, Emoji, the App Index refresh, Updates
+`SettingsView` is two tabs. **General** is appearance, Emoji, how many Clipboard Items to keep, the App Index refresh, Updates
 (see Updates below) and the Acknowledgements sheet (`AcknowledgementsView`), which lists
 `Acknowledgements.all` and shows each entry's bundled notice (see Licensing below). **Sources**
 (`SourcesSettingsView`) lists every Source (`GLOSSARY.md`) with one switch and two counts,

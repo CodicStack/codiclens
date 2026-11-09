@@ -4,6 +4,8 @@ What changed in each release of Codiclens. Notes for the next release go under U
 
 ## Unreleased
 
+- You can choose how many items the clipboard history keeps, from 25 to 1,000, in Settings > General. Lowering it removes the oldest items.
+
 ## 1.0.4 (2026-11-08)
 
 - Left and Right now work exactly like Shift+Tab and Tab (or Ctrl+H and Ctrl+L), even after you've typed something. In the emoji grid they still move one emoji, and in a preview they still turn the page.
