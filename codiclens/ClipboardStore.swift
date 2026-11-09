@@ -18,6 +18,11 @@ protocol ClipboardStore: AnyObject {
     /// Quick Look needs a file to preview, so text items get written out on demand.
     func textPreviewURL(for item: ClipboardItem) -> URL?
 
+    /// Deletes every text preview `textPreviewURL` wrote. Quick Look's copies
+    /// of files (`fileTextPreviewsDirectory`) stay: one may be on screen, and
+    /// each goes with the item Quick Look was showing.
+    func removeTextPreviews()
+
     /// Where Quick Look's text copy of a file it cannot draw is written
     /// (`QuickLookPreviewItem`), beside the Clipboard Items' text previews.
     /// `nil` hands Quick Look every file as it is.
@@ -114,6 +119,19 @@ final class FileClipboardStore: ClipboardStore {
         }
     }
 
+    /// The `.txt` files directly in `previews/`, never the `files/` folder
+    /// beside them.
+    func removeTextPreviews() {
+        let folder = root.appendingPathComponent("previews")
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: [.isRegularFileKey]
+        ) else { return }
+        for url in contents where url.pathExtension == "txt" {
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
     /// The JSON file plus every file under `images/` and `previews/`, by the
     /// space each takes on disk. Nothing else in `root` belongs to the history.
     func diskUsage() -> Int64 {
@@ -178,6 +196,8 @@ final class InMemoryClipboardStore: ClipboardStore {
     func removeImage(named fileName: String) { images[fileName] = nil }
 
     func textPreviewURL(for item: ClipboardItem) -> URL? { nil }
+
+    func removeTextPreviews() {}
 
     var fileTextPreviewsDirectory: URL? { nil }
 

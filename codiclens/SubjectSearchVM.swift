@@ -492,6 +492,19 @@ class SubjectSearchVM {
         selection = 0
     }
 
+    /// The Panel opened again on the Query it was left with: a Clipboard Item
+    /// in the list below the apps that has left Clipboard History since goes
+    /// from it, as it goes from the Last Subject. Nothing else is asked again.
+    func dropClipboardItemsGoneFromHistory() {
+        let kept = sourceResults.filter { row in
+            guard case .clipboard(let item) = row.hit else { return true }
+            return history.index(of: item) != nil
+        }
+        guard kept.count != sourceResults.count else { return }
+        sourceResults = kept
+        if !standsAsText { compose() }
+    }
+
     /// The Panel opened again: what was picked by hand in the last session
     /// is not pinned by the next Query. The selection stays where it was on
     /// the list still showing.

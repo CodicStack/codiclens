@@ -167,6 +167,20 @@ struct LastSubjectTests {
         #expect(coordinator.standingSubject == nil)
     }
 
+    /// Clear History in Settings, with the Panel hidden: nothing stands on
+    /// the next open.
+    @Test func aClearedHistoryLeavesNoLastSubject() throws {
+        let (coordinator, history) = try makeCoordinator(seededWith: ["hello", "world"])
+        pasteFirstClipboardItem(coordinator)
+
+        history.removeAll()
+        coordinator.reset()
+
+        #expect(coordinator.lastSubject == nil)
+        #expect(coordinator.standingSubject == nil)
+        #expect(coordinator.submit().isEmpty)
+    }
+
     @Test func actingOnAnAppEndsIt() throws {
         let (coordinator, _) = try makeCoordinator(seededWith: ["hello"])
         pasteFirstClipboardItem(coordinator)

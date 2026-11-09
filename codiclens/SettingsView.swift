@@ -27,6 +27,7 @@ private struct GeneralSettingsView: View {
     @State private var pendingMaxItems: Int?
     /// What the Clipboard History takes on disk, shown beside Unlimited.
     @State private var clipboardDiskUsage: Int64?
+    @State private var isConfirmingClearHistory = false
 
     var body: some View {
         Form {
@@ -200,6 +201,17 @@ private struct GeneralSettingsView: View {
             if history.maxItems == nil {
                 unlimitedWarning(history)
             }
+
+            Button("Clear History…", role: .destructive) { isConfirmingClearHistory = true }
+                .disabled(history.items.isEmpty)
+                .confirmationDialog(
+                    "Clear the clipboard history?",
+                    isPresented: $isConfirmingClearHistory
+                ) {
+                    Button("Clear", role: .destructive) { history.removeAll() }
+                } message: {
+                    Text(clearHistoryMessage(count: history.items.count))
+                }
         } header: {
             Text("Clipboard History")
         } footer: {
@@ -242,6 +254,12 @@ private struct GeneralSettingsView: View {
         return count == 1
             ? "Remove the oldest clipboard item?"
             : "Remove the \(count.formatted()) oldest clipboard items?"
+    }
+
+    private func clearHistoryMessage(count: Int) -> String {
+        count == 1
+            ? "The 1 item is removed from this Mac. It can't be brought back."
+            : "All \(count.formatted()) items are removed from this Mac. They can't be brought back."
     }
 
     // MARK: - Skin tone

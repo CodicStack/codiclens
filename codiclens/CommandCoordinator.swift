@@ -205,10 +205,12 @@ class CommandCoordinator {
     /// Result is when it is chosen, may be gone or another thing now. Gone
     /// means no Last Subject and an empty Panel, with nothing to shake about.
     /// Without a Last Subject at all the previous Query stays, settled, as it
-    /// always has.
+    /// always has, less any Clipboard Item in its list that has left the
+    /// history since: deleted, trimmed, or cleared in Settings.
     private func standLastSubject() {
         guard let remembered = lastSubject else {
             isLastSubjectStanding = false
+            subjectVM.dropClipboardItemsGoneFromHistory()
             return
         }
         switch remembered.kind {

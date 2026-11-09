@@ -894,7 +894,13 @@ Settings → General, 25 to 1,000 or Unlimited, 100 by default; `nil` in memory,
 under `codiclens.clipboard.maxItems`, and a missing or unusable value is 100) as JSON in
 Application Support. Lowering it drops the oldest at once, after a confirmation when any go.
 Unlimited shows a warning with what the history takes on disk (`ClipboardStore.diskUsage()`:
-the JSON, `images/` and `previews/`), measured when the row appears and when the items change. Images saved as PNG files in `codiclens/images/`. Text previews for Quick Look
+the JSON, `images/` and `previews/`), measured when the row appears and when the items change.
+**Clear History…** (disabled while empty) asks first, then `ClipboardHistory.removeAll()` drops
+every item, its image file and the `previews/*.txt` text previews (never `previews/files/`) and
+saves the empty list; the limit stays. Nothing tells the Panel: it is hidden while Settings is
+used, and `reset()` looks the Last Subject up again and drops Clipboard Items gone from history
+from the Query it kept (`SubjectSearchVM.dropClipboardItemsGoneFromHistory`).
+Images saved as PNG files in `codiclens/images/`. Text previews for Quick Look
 in `codiclens/previews/`, and Quick Look's text copies of files in `previews/files/`.
 The pasteboard is only ever read on the main thread; the PNG re-encode goes through
 `ImageReencoder`, off-main in the app and inline in tests.
@@ -981,7 +987,7 @@ from the start". Open on its Actions is the same. A PDF at a page opens normally
 has no reliable page API.
 
 ### Settings — General and Sources
-`SettingsView` is two tabs. **General** is appearance, Emoji, how many Clipboard Items to keep, the App Index refresh, Updates
+`SettingsView` is two tabs. **General** is appearance, Emoji, how many Clipboard Items to keep and Clear History…, the App Index refresh, Updates
 (see Updates below) and the Acknowledgements sheet (`AcknowledgementsView`), which lists
 `Acknowledgements.all` and shows each entry's bundled notice (see Licensing below). **Sources**
 (`SourcesSettingsView`) lists every Source (`GLOSSARY.md`) with one switch and two counts,

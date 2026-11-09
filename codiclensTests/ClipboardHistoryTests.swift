@@ -306,6 +306,65 @@ struct ClipboardHistoryTests {
         #expect(store.images.isEmpty)
     }
 
+    // MARK: - Clearing
+
+    @Test func clearingEmptiesTheHistoryAndItsImages() {
+        let (history, store) = makeHistory(maxItems: 25)
+        history.recordImage(Data([0x01]), timestamp: Date(timeIntervalSince1970: 0))
+        history.recordText("hello")
+        history.recordImage(Data([0x02]), timestamp: Date(timeIntervalSince1970: 60))
+        #expect(store.images.count == 2)
+
+        history.removeAll()
+
+        #expect(history.items.isEmpty)
+        #expect(store.images.isEmpty, "every image file goes")
+        #expect(store.items.isEmpty, "the empty list is saved")
+        #expect(history.maxItems == 25, "the limit stays")
+        #expect(ClipboardHistory(store: store).items.isEmpty)
+    }
+
+    @Test func clearingKeepsUnlimited() {
+        let (history, _) = makeHistory(maxItems: nil)
+        history.recordText("hello")
+
+        history.removeAll()
+
+        #expect(history.maxItems == nil)
+        history.recordText("again")
+        #expect(history.items.map(\.content) == ["again"])
+    }
+
+    /// The app's store, in a temp folder: the text previews written for Quick
+    /// Look go with the history, Quick Look's copies of files do not.
+    @Test func clearingTheFileStoreRemovesImagesAndTextPreviews() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codiclens-clear-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FileClipboardStore(root: root)
+        let history = ClipboardHistory(store: store, maxItems: nil)
+        history.recordText("hello")
+        let text = try #require(history.items.first)
+        let preview = try #require(history.previewURL(for: text))
+        history.recordImage(Data(repeating: 0xAB, count: 1_000))
+        let picture = try #require(history.items.first)
+        let image = try #require(history.imageURL(for: picture))
+        let fileCopy = root.appendingPathComponent("previews/files/\(UUID().uuidString)/notes.vue.txt")
+        try FileManager.default.createDirectory(
+            at: fileCopy.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try "<template/>".write(to: fileCopy, atomically: true, encoding: .utf8)
+        #expect(FileManager.default.fileExists(atPath: preview.path))
+        #expect(FileManager.default.fileExists(atPath: image.path))
+
+        history.removeAll()
+
+        #expect(!FileManager.default.fileExists(atPath: preview.path))
+        #expect(!FileManager.default.fileExists(atPath: image.path))
+        #expect(FileManager.default.fileExists(atPath: fileCopy.path), "Quick Look's copy of a file stays")
+        #expect(FileClipboardStore(root: root).loadItems().isEmpty, "the empty list is on disk")
+    }
+
     // MARK: - Persistence
 
     @Test func historyIsReloadedFromTheStore() {

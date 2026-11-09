@@ -7,7 +7,8 @@ import AppKit
 /// Settings > General). Lowering it drops the oldest Clipboard Items at once,
 /// their image files with them; raising it keeps everything. The choice is
 /// saved through `saveMaxItems`, which `shared` points at
-/// `UserDefaults.standard`.
+/// `UserDefaults.standard`. Settings > General can also empty it at once
+/// (`removeAll`).
 ///
 /// Knows nothing about the pasteboard — `PasteboardWatcher` decodes that and
 /// records what it finds here. Knows nothing about disk either; that's the
@@ -174,6 +175,20 @@ final class ClipboardHistory {
     func remove(_ item: ClipboardItem) {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
         remove(at: index)
+    }
+
+    /// Empties the Clipboard History: every Clipboard Item goes, with its
+    /// image file and the text previews written for Quick Look, and the empty
+    /// list is saved. `maxItems` stays as it is.
+    func removeAll() {
+        for item in items {
+            if let fileName = item.imageFileName {
+                store.removeImage(named: fileName)
+            }
+        }
+        items = []
+        store.removeTextPreviews()
+        save()
     }
 
     func index(of item: ClipboardItem) -> Int? {

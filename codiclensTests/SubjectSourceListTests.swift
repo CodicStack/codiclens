@@ -880,6 +880,31 @@ struct SubjectSourceListTests {
         #expect(emoji.subtitle == "Emoji")
     }
 
+    // MARK: - Opening again
+
+    /// The Panel opens on the Query it was left with when nothing stands, and
+    /// a Clipboard Item that has left the history since (Clear History in
+    /// Settings, with the Panel hidden) is not listed, nor acted on.
+    @Test func aClearedClipboardItemLeavesTheQueryKeptOnOpening() async throws {
+        let fixture = try makeFixture(
+            files: [hit("/docs/clip notes.txt", score: 50)],
+            clipboard: ["clip one", "clip two"],
+            disabling: [.emoji, .builtIns]
+        )
+        let coordinator = fixture.coordinator
+        coordinator.subjectVM.searchText = "clip"
+        await fixture.schedule.typingPaused()
+        #expect(names(coordinator) == ["clip one", "clip two", "clip notes.txt"])
+        coordinator.moveDown()
+
+        fixture.history.removeAll()
+        coordinator.reset()
+
+        #expect(coordinator.currentSearchText == "clip", "the Query is kept")
+        #expect(names(coordinator) == ["clip notes.txt"])
+        #expect(selectedName(coordinator) == "clip notes.txt")
+    }
+
     // MARK: - Enter and Tab
 
     @Test func enterOnAFileOpensItAndMakesItTheLastSubject() async throws {
